@@ -12,18 +12,19 @@ const agent_name = process.env.NAME || "cardo";
 let myPosition = { x: 0, y: 0};
 
 const beliefs = {
+    target: undefined as Position | undefined,
     crates: new Map<String, Position>(),
     delivering_cells: [] as Position[],
+    pickup_cells: [] as Position[],
     state: 0 as number, // 0: looking for a parcel, 1: delivering a parcel
 };
 
 // List of sensed parcels
-const parcelMap = new Map<String, IOParcel>();
+const parcelMap = new Map<String, {parcel: IOParcel, time: Date}>();
 
 let map: String[][];
 
 // Path finding for reaching the next free parcel
-let next_parcel: Position | undefined = undefined;
 let path_to_next: Position[] | null = null;
 
 
@@ -40,14 +41,14 @@ socket.onConnect(() => {
 * environment.
 */
 socket.onConfig((config: any) => {
-    map = config["GAME"]["map"]["tiles"];
-
-    console.log(map);
+    map = config["GAME"]["map"]["tiles"].map((row: any[]) => row.map((cell: any) => String(cell)));
 
     map.forEach((row: String[]) => {
         row.forEach((cell: String) => {
-            if (cell == "2") {
+            if (cell == '2') {
                 beliefs.delivering_cells.push(new Position(map.indexOf(row), row.indexOf(cell)));
+            } else if (cell == '1') {
+                beliefs.pickup_cells.push(new Position(map.indexOf(row), row.indexOf(cell)));
             }
         });
     });
@@ -72,9 +73,9 @@ socket.onSensing((sensing: any) => {
     sensing["parcels"].forEach((parcel: IOParcel) => {
         parcelMap.set(parcel["id"], parcel);
 
-        if (next_parcel == undefined && parcel["carriedBy"] == null) {
-            next_parcel = new Position(parcel["x"], parcel["y"]);
-            path_to_next = Astar(map, new Position(myPosition["x"], myPosition["y"]), next_parcel, beliefs.crates);
+        if (beliefs.target == undefined && parcel["carriedBy"] == null) {
+            beliefs.target = new Position(parcel["x"], parcel["y"]);
+            path_to_next = Astar(map, new Position(myPosition["x"], myPosition["y"]), beliefs.target, beliefs.crates);
         }
 
         parcelMap.forEach((parcel, key) => {
@@ -96,17 +97,25 @@ socket.onSensing((sensing: any) => {
                 }
             }
         }
+
+        if (path_to_next != null && path_to_next.length > 0) {
+            let obstructed = false;
+
+            path_to_next.forEach((pos: Position) => {
+                if(pos.x == crate["x"] && pos.y == crate["y"]){
+                    obstructed = true;
+                }
+            });
+
+            if (beliefs.target && obstructed) {
+                console.log("Path obstructed by a crate, recalculating...");
+                path_to_next = Astar(map, new Position(myPosition["x"], myPosition["y"]), beliefs.target, beliefs.crates);
+            }
+        }
     });
 
     // console.log(parcelMap);
 });
-
-// socket.onMap((width, height, tiles) => {
-    // console.log("'map' -- event received");
-    // console.log(`Map dimensions: ${width} x ${height}`);
-    // console.log("Tiles:");
-    // console.log(tiles);
-// });
 
 function getDirection(actual_pos: Position, next_pos: Position): String {
     if (actual_pos.x < next_pos.x) {
@@ -124,8 +133,13 @@ function getDirection(actual_pos: Position, next_pos: Position): String {
 
 function getNextParcel(): Position | undefined {
     if (parcelMap.size == 0) {
+        if (beliefs.pickup_cells.length > 0) {
+            const index = Math.floor(Math.random() * beliefs.pickup_cells.length);
+            return beliefs.pickup_cells[index];
+        }
+
         return undefined;
-    } else if (!next_parcel) {
+    } else if (!beliefs.target && beliefs.state == 0) {
         for (const parcel of parcelMap.values()) {
             if(parcel["carriedBy"] == null) {
                 return new Position(parcel["x"], parcel["y"]);
@@ -137,7 +151,7 @@ function getNextParcel(): Position | undefined {
 }
 
 async function makeMove() {
-    if(myPosition.x % 1 === 0 && myPosition.y % 1 === 0 && next_parcel != undefined && path_to_next != null) {
+    if(myPosition.x % 1 === 0 && myPosition.y % 1 === 0 && beliefs.target != undefined && path_to_next != null) {
         if (path_to_next.length > 0) {
             const next_position = path_to_next.shift();
 
@@ -148,7 +162,7 @@ async function makeMove() {
                     const result = await socket.emitMove(direction);
 
                     // In case of little inconveniences, like another agent blocking the path, the easiest solution is to retry a few times
-                    // TODO: If the path is obstructed by a moved crate, it may be better to recalculate the path
+                    // TODO: [Theoretically solved on another point of the program] If the path is obstructed by a moved crate, it may be better to recalculate the path
                     if(!result) {
                         for (let i = 0; i < 3; i++) {
                             const retry_res = await socket.emitMove(direction);
@@ -167,16 +181,16 @@ async function makeMove() {
             await socket.emitPutdown();
 
             beliefs.state = 0;
-            next_parcel = getNextParcel();
+            beliefs.target = getNextParcel();
 
-            if (next_parcel != undefined) {
-                path_to_next = Astar(map, new Position(myPosition["x"], myPosition["y"]), next_parcel, beliefs.crates);
+            if (beliefs.target != undefined) {
+                path_to_next = Astar(map, new Position(myPosition["x"], myPosition["y"]), beliefs.target, beliefs.crates);
             }
         }
     } else {
-        next_parcel = getNextParcel();
-        if (next_parcel) {
-            path_to_next = Astar(map, new Position(myPosition["x"], myPosition["y"]), next_parcel, beliefs.crates);
+        beliefs.target = getNextParcel();
+        if (beliefs.target) {
+            path_to_next = Astar(map, new Position(myPosition["x"], myPosition["y"]), beliefs.target, beliefs.crates);
         }
     }
 }
