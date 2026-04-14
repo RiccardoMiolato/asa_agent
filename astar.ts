@@ -15,6 +15,10 @@ export class Position {
  * {x: number, y: number}
  */
 export function Astar(game_map: String[][], starting_pos: Position, target_pos: Position, crates: Map<String, Position>): Position[] | null {
+    if(starting_pos.x % 1 !== 0 || starting_pos.y % 1 !== 0) {
+        return null;
+    }
+
     const openSet = new Heap<Position>((a: Position, b: Position) => fScore.get(`${a.x}${a.y}`)! - fScore.get(`${b.x}${b.y}`)!);
     const cameFrom = new Map<String, Position>();
 
