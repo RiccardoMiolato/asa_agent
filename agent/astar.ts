@@ -1,5 +1,9 @@
 import { Heap } from 'heap-js'
 
+/**
+ * Class position. Helper used in the project for not dealing anywhere with
+ * a couple of coordinates {x, y}
+ */
 export class Position {
     public x: number
     public y: number
@@ -8,15 +12,21 @@ export class Position {
         this.x = x;
         this.y = y;
     }
+
+    // Shortcut to compare two classes
+    isEqual(other: Position): boolean {
+        return this.x === other.x && this.y === other.y;
+    }
 }
 
-// Starting_pos and target_pos are both tuple of type
 /**
- * {x: number, y: number}
+ * This is the pathfinding algorithm chosen to be implemented. Since the map is a grid, and usually it's not very big,
+ * A* seems the best choice because the heuristic approach should generally decrease the number of nodes explored.
+ * Being the agent a real time agent, it is important to be fast during the decision making approach
  */
-export function Astar(game_map: String[][], starting_pos: Position, target_pos: Position, crates: Map<String, Position>): Position[] | null {
+export function Astar(game_map: String[][], starting_pos: Position, target_pos: Position, crates: Map<String, Position>): Position[] {
     if(starting_pos.x % 1 !== 0 || starting_pos.y % 1 !== 0) {
-        return null;
+        return [];
     }
 
     const openSet = new Heap<Position>((a: Position, b: Position) => fScore.get(`${a.x}${a.y}`)! - fScore.get(`${b.x}${b.y}`)!);
@@ -45,7 +55,7 @@ export function Astar(game_map: String[][], starting_pos: Position, target_pos: 
     while (openSet.size() > 0) {
         let current = openSet.pop();
 
-        if (current && current.x === target_pos.x && current.y === target_pos.y) {
+        if (current && current.isEqual(target_pos)) {
             return reconstruct_path(cameFrom, current);
         }
 
@@ -67,7 +77,7 @@ export function Astar(game_map: String[][], starting_pos: Position, target_pos: 
                         gScore.set(`${neighbor.x}${neighbor.y}`, tentative_gScore);
                         fScore.set(`${neighbor.x}${neighbor.y}`, tentative_gScore + heuristic(neighbor, target_pos));
 
-                        if (!openSet.toArray().some(pos => pos.x === neighbor.x && pos.y === neighbor.y))
+                        if (!openSet.toArray().some(pos => pos.isEqual(neighbor)))
                             openSet.add(neighbor);
                     }
                 }
@@ -75,12 +85,18 @@ export function Astar(game_map: String[][], starting_pos: Position, target_pos: 
         }
     }
 
-    return null; // No path found
+    return []; // No path found
 }
 
+/**
+ * Utils function for A* algorithm. Validates if the agent can go to the next cell or not,
+ * both because it is not part of the map, or because it is obstructed by something, such as a wall or
+ * another agent.
+ */
 function valid_cell(neighbor: Position, game_map: String[][], direction: String, crates: Map<String, Position>): boolean {
     // Out of bound indexes
-    if (neighbor.x < 0 || neighbor.x >= game_map.length || neighbor.y < 0 || neighbor.y >= game_map[0].length) {
+    if (neighbor.x < 0 || neighbor.x >= game_map.length ||
+        neighbor.y < 0 || neighbor.y >= game_map[0].length) {
         return false;
     }
 
@@ -90,14 +106,14 @@ function valid_cell(neighbor: Position, game_map: String[][], direction: String,
     } else if (game_map[neighbor.x][neighbor.y] === '↑' && direction === 'down' ||
                 game_map[neighbor.x][neighbor.y] === '→' && direction === 'left' ||
                 game_map[neighbor.x][neighbor.y] === '↓' && direction === 'up' ||
-                game_map[neighbor.x][neighbor.y] === '←' && direction === 'right'
-    ) {
+                game_map[neighbor.x][neighbor.y] === '←' && direction === 'right') {
         return false;
     } else if (game_map[neighbor.x][neighbor.y].includes("5")) {
+        // If the cell may contain a crate, I check for obstructions
         let path_obstructed = false;
 
         crates.forEach((cratePos, _) => {
-            if (cratePos.x === neighbor.x && cratePos.y === neighbor.y) {
+            if (cratePos.isEqual(neighbor)) {
                 path_obstructed = true;
             }
         });
@@ -110,6 +126,10 @@ function valid_cell(neighbor: Position, game_map: String[][], direction: String,
     return true;
 }
 
+/**
+ * A* path reconstruction algorithm. Once the pathfinding is finished, the complete path
+ * is built following a backtracking approach, starting from the end to the start
+ */
 function reconstruct_path(cameFrom: Map<String, Position>, current: Position): Position[]{
     const total_path = [current];
     while (cameFrom.has(`${current.x}${current.y}`)) {
@@ -121,8 +141,10 @@ function reconstruct_path(cameFrom: Map<String, Position>, current: Position): P
     return total_path;
 }
 
-// Auxiliary function to calculate the heuristic distance betweeen
-// two nodes in the map for A* algorithm
+/**
+ * Auxiliary function to calculate the heuristic distance betweeen
+ * two nodes in the map for A* algorithm
+ */
 function heuristic(pos1: Position, pos2: Position) {
     return Math.abs(pos1.x - pos2.x) + Math.abs(pos1.y - pos2.y);
 }
