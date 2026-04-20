@@ -36,15 +36,19 @@ class Beliefs {
         this.map = config["GAME"]["map"]["tiles"].map((row: any[]) => row.map((cell: any) => cell.toString()));
         this.movement_duration = config["GAME"]["player"]["movement_duration"];
 
-        this.map.forEach((row: string[]) => {
-            row.forEach((cell: string) => {
+        const rows = this.map.length;
+        const cols = this.map[0].length;
+
+        for(let row = 0; row < rows; row++){
+            for(let col = 0; col < cols; col++) {
+                const cell = this.map[row][col];
                 if (cell == '2') {
-                    this.delivering_cells.push(new Position(this.map.indexOf(row), row.indexOf(cell)));
+                    this.delivering_cells.push(new Position(row, col)); // Map is rotated of 90 degree in the game
                 } else if (cell == '1') {
-                    this.pickup_cells.push(new Position(this.map.indexOf(row), row.indexOf(cell)));
+                    this.pickup_cells.push(new Position(row, col)); // Map is rotated of 90 degree in the game
                 }
-            });
-        });
+            }
+        }
     }
 
 
