@@ -1,7 +1,5 @@
 import 'dotenv/config';
-import { IOParcel } from "./types/IOParcel.js";
 import { DjsConnect, DjsClientSocket } from "@unitn-asa/deliveroo-js-sdk/client";
-import { Astar, Position } from "./agent/astar.js";
 import agent from './agent/agent.js';
 import beliefs from './agent/beliefs.js';
 

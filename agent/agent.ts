@@ -3,6 +3,11 @@ import beliefs from "./beliefs.js";
 import { getDirection, getNextParcel } from "./utils.js";
 import socket from "../index.js";
 
+/**
+ * Class that manages the main agent logic
+ * Keeps track of the agent statistics and continues to
+ * check the environment to decide the best move available
+ */
 class Agent {
     id: string;
     position: Position;
@@ -17,6 +22,12 @@ class Agent {
         this.position.y = y;
     }
 
+    /**
+     * Responsible for the decision of the next move:
+     *     - Where to move
+     *     - If to pick a parcel
+     *     - If to drop a parcel
+     */
     async makeMove() {
         for (const parcel of beliefs.parcels.values()) {
             const parcel_pos = new Position(parcel.x, parcel.y);
@@ -78,7 +89,9 @@ class Agent {
         }
     }
 
-
+    /**
+     * Agent loop
+     */
     async agent_loop() {
         while(true) {
             await new Promise(r => setTimeout(r, beliefs.movement_duration));
