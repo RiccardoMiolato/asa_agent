@@ -17,6 +17,11 @@ export class Position {
     isEqual(other: Position): boolean {
         return this.x === other.x && this.y === other.y;
     }
+
+    // Return the distance between two cells in the map
+    distanceTo(other: Position): number {
+        return Math.abs(this.x - other.x) + Math.abs(this.y - other.y);
+    }
 }
 
 /**
@@ -24,7 +29,7 @@ export class Position {
  * A* seems the best choice because the heuristic approach should generally decrease the number of nodes explored.
  * Being the agent a real time agent, it is important to be fast during the decision making approach
  */
-export function Astar(game_map: String[][], starting_pos: Position, target_pos: Position, crates: Map<String, Position>): Position[] {
+export function Astar(game_map: String[][], starting_pos: Position, target_pos: Position, crates: Map<String, Position>, temporary_locked: Position | undefined = undefined): Position[] {
     if(starting_pos.x % 1 !== 0 || starting_pos.y % 1 !== 0) {
         return [];
     }
@@ -66,7 +71,7 @@ export function Astar(game_map: String[][], starting_pos: Position, target_pos: 
             neighbors.forEach(coord => {
                 let neighbor = new Position(current.x + coord[0], current.y + coord[1]);
 
-                if(!valid_cell(neighbor, game_map, directions[neighbors.indexOf(coord)], crates)) {
+                if(!valid_cell(neighbor, game_map, directions[neighbors.indexOf(coord)], crates, temporary_locked)) {
                     return;
                 }
 
@@ -93,7 +98,7 @@ export function Astar(game_map: String[][], starting_pos: Position, target_pos: 
  * both because it is not part of the map, or because it is obstructed by something, such as a wall or
  * another agent.
  */
-function valid_cell(neighbor: Position, game_map: String[][], direction: String, crates: Map<String, Position>): boolean {
+function valid_cell(neighbor: Position, game_map: String[][], direction: String, crates: Map<String, Position>, temporary_locked: Position | undefined): boolean {
     // Out of bound indexes
     if (neighbor.x < 0 || neighbor.x >= game_map.length ||
         neighbor.y < 0 || neighbor.y >= game_map[0].length) {
@@ -121,6 +126,8 @@ function valid_cell(neighbor: Position, game_map: String[][], direction: String,
         if (path_obstructed) {
             return false;
         }
+    } else if (temporary_locked != undefined && neighbor.isEqual(temporary_locked)) {
+        return false;
     }
 
     return true;
@@ -146,5 +153,5 @@ function reconstruct_path(cameFrom: Map<String, Position>, current: Position): P
  * two nodes in the map for A* algorithm
  */
 function heuristic(pos1: Position, pos2: Position) {
-    return Math.abs(pos1.x - pos2.x) + Math.abs(pos1.y - pos2.y);
+    return pos1.distanceTo(pos2);
 }
