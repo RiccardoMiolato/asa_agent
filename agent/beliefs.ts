@@ -1,6 +1,6 @@
-import { Position } from "./astar.js";
 import { IOParcel } from "../types/IOParcel.js";
 import agent from "./agent.js";
+import { Position } from "./astar.js";
 
 export interface Parcel extends IOParcel {
     lastUpdate: Date;
@@ -8,27 +8,25 @@ export interface Parcel extends IOParcel {
 
 class Beliefs {
     map: string[][];
-    target_pos?: Position;
-    target_parcel?: string;
+
+    // OBJECT POSITIONS
     parcels: Map<string, Parcel>;
     crates: Map<string, Position>;
+
+    // MAP LOCATIONS
     delivering_cells: Position[];
     pickup_cells: Position[];
-    followed_path: Position[];
+
+    // TIMER FOR MOVES
     movement_duration: number;
-    state: number; // 0: looking for a parcel, 1: delivering a parcel
 
     constructor() {
         this.map = [];
-        this.target_pos = undefined;
-        this.target_parcel = undefined;
         this.parcels = new Map<string, Parcel>();
         this.crates = new Map<string, Position>();
         this.delivering_cells = [];
         this.pickup_cells = [];
-        this.followed_path = [];
         this.movement_duration = 0;
-        this.state = 0;
     }
 
     configPhase(config: any): void {
@@ -81,8 +79,10 @@ class Beliefs {
         this.clearExpiredParcels();
     }
 
-    // When I deliver parcels, I delete them from the map I am keeping
-    // To do that is necessary to remove only the parcels I am carrying
+    /**
+     * When I deliver parcels, I delete them from the map I am keeping
+     * To do that is necessary to remove only the parcels I am carrying
+     */
     clearDeliveredParcels(): void {
         this.parcels.forEach((parcel: Parcel, parcel_id: string) =>{
             if (parcel.carriedBy === agent.id) {
@@ -132,19 +132,9 @@ class Beliefs {
         return this.crates.has(id);
     }
 
-    // Update the target position
-    updateTargetPosition(position: Position): void {
-        this.target_pos = position;
-    }
-
     // Update the movement duration
     updateMovementDuration(duration: number): void {
         this.movement_duration = duration;
-    }
-
-    // Change the state
-    changeState(newState: number): void {
-        this.state = newState;
     }
 }
 
