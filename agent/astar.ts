@@ -1,6 +1,5 @@
-import { Heap } from 'heap-js'
-import beliefs from './beliefs.js';
-import { Parcel } from "./beliefs.js";
+import { Heap } from 'heap-js';
+import { Action, MoveDown, MoveLeft, MoveRight, MoveUp } from './move.js';
 
 /**
  * Class position. Helper used in the project for not dealing anywhere with
@@ -31,7 +30,13 @@ export class Position {
  * A* seems the best choice because the heuristic approach should generally decrease the number of nodes explored.
  * Being the agent a real time agent, it is important to be fast during the decision making approach
  */
-export function Astar(game_map: String[][], starting_pos: Position, target_pos: Position, crates: Map<String, Position>, temporary_locked: Position | undefined = undefined): Position[] {
+export function Astar(
+    game_map: String[][],
+    starting_pos: Position,
+    target_pos: Position,
+    crates: Map<String, Position>,
+    temporary_locked: Position | undefined = undefined):
+    Action[] {
     if(starting_pos.x % 1 !== 0 || starting_pos.y % 1 !== 0) {
         return [];
     }
@@ -139,14 +144,27 @@ function valid_cell(neighbor: Position, game_map: String[][], direction: String,
  * A* path reconstruction algorithm. Once the pathfinding is finished, the complete path
  * is built following a backtracking approach, starting from the end to the start
  */
-function reconstruct_path(cameFrom: Map<String, Position>, current: Position): Position[]{
-    const total_path = [current];
+function reconstruct_path(cameFrom: Map<String, Position>, current: Position): Action[]{
+    const total_path = [];
     while (cameFrom.has(`${current.x}${current.y}`)) {
-        current = cameFrom.get(`${current.x}${current.y}`)!;
-        total_path.unshift(current);
+        const from: Position = current;
+        const to: Position = cameFrom.get(`${current.x}${current.y}`)!;
+
+        if(from.x == to.x){
+            if(from.y > to.y)
+                total_path.push(new MoveUp());
+            else
+                total_path.push(new MoveDown());
+        } else {
+            if(from.x > to.x)
+                total_path.push(new MoveRight());
+            else
+                total_path.push(new MoveLeft());
+        }
+
+        current = to;
     }
 
-    total_path.shift(); // Remove the starting position, corresponds to the agent position in the map
     return total_path;
 }
 
