@@ -9,7 +9,7 @@ import beliefs, { Parcel } from "./beliefs.js";
 import { DeliverParcelIntention, Intention, PickUpParcelIntention, SearchIntention } from "./intentions.js";
 import { getClosestDeliveringCell } from "./utils.js";
 
-export default function optionGeneration() {
+export default function optionGeneration(): Intention[] {
     let intentions: Intention[] = [];
 
     beliefs.parcels.forEach((parcel: Parcel) => {
@@ -26,4 +26,6 @@ export default function optionGeneration() {
     if(intentions.length == 0) {
         intentions.push(new SearchIntention());
     }
+
+    return intentions;
 }
