@@ -58,11 +58,16 @@ export function getNextParcel(): Position | undefined {
  * Returns the closest delivering cell to the agent, so it can deliver
  * without loosing too much time
  */
-export function getClosestDeliveringCell(agent_pos: Position, delivering_cells: Position[]): Position | undefined {
+export function getClosestDeliveringCell(agent_pos: Position, delivering_cells: Position[], unreachable_cell: Position | undefined = undefined): Position | undefined {
     let closest_cell: Position | undefined = undefined;
     let min_distance = Number.MAX_VALUE;
 
     for (const cell of delivering_cells) {
+        if(unreachable_cell) {
+            if(cell.isEqual(unreachable_cell))
+                continue;
+        }
+
         const distance = agent_pos.distanceTo(cell);
 
         if (distance < min_distance) {

@@ -29,6 +29,7 @@ class Agent {
      *     - If to drop a parcel
      */
     async makeMove() {
+        // Check if the current position contains a parcel
         for (const parcel of beliefs.parcels.values()) {
             const parcel_pos = new Position(parcel.x, parcel.y);
 
@@ -69,6 +70,11 @@ class Agent {
                             // path considering the position blocked by an agent or whatever
                             if(!result) {
                                 beliefs.followed_path = Astar(beliefs.map, new Position(this.position.x, this.position.y), beliefs.target_pos, beliefs.crates, next_position);
+
+                                if (beliefs.followed_path.length == 0 && beliefs.state == 1) {
+                                    beliefs.target_pos = getClosestDeliveringCell(this.position, beliefs.delivering_cells, next_position);
+                                    beliefs.followed_path = Astar(beliefs.map, new Position(this.position.x, this.position.y), beliefs.target_pos!, beliefs.crates, next_position);
+                                }
                             }
                         }
                     }
@@ -91,14 +97,19 @@ class Agent {
                         beliefs.followed_path = Astar(beliefs.map, new Position(this.position.x, this.position.y), beliefs.target_pos, beliefs.crates);
                 }
             } else if (beliefs.state == 1){
-                await socket.emitPutdown();
-                beliefs.clearDeliveredParcels();
+                if(beliefs.map[this.position.x][this.position.y] == '2'){
+                    await socket.emitPutdown();
+                    beliefs.clearDeliveredParcels();
 
-                beliefs.state = 0;
-                beliefs.target_pos = getNextParcel();
+                    beliefs.state = 0;
+                    beliefs.target_pos = getNextParcel();
 
-                if (beliefs.target_pos != undefined) {
-                    beliefs.followed_path = Astar(beliefs.map, new Position(this.position.x, this.position.y), beliefs.target_pos, beliefs.crates);
+                    if (beliefs.target_pos != undefined) {
+                        beliefs.followed_path = Astar(beliefs.map, new Position(this.position.x, this.position.y), beliefs.target_pos, beliefs.crates);
+                    }
+                } else {
+                    beliefs.target_pos = getClosestDeliveringCell(this.position, beliefs.delivering_cells);
+                    beliefs.followed_path = Astar(beliefs.map, new Position(this.position.x, this.position.y), beliefs.target_pos!, beliefs.crates);
                 }
             }
         } else {

@@ -1,4 +1,6 @@
 import { Heap } from 'heap-js'
+import beliefs from './beliefs.js';
+import { Parcel } from "./beliefs.js";
 
 /**
  * Class position. Helper used in the project for not dealing anywhere with
@@ -80,7 +82,7 @@ export function Astar(game_map: String[][], starting_pos: Position, target_pos: 
                     if (tentative_gScore < gScore.get(`${neighbor.x}${neighbor.y}`)!) {
                         cameFrom.set(`${neighbor.x}${neighbor.y}`, current);
                         gScore.set(`${neighbor.x}${neighbor.y}`, tentative_gScore);
-                        fScore.set(`${neighbor.x}${neighbor.y}`, tentative_gScore + heuristic(neighbor, target_pos));
+                        fScore.set(`${neighbor.x}${neighbor.y}`, Math.max(0, tentative_gScore + heuristic(neighbor, target_pos)));
 
                         if (!openSet.toArray().some(pos => pos.isEqual(neighbor)))
                             openSet.add(neighbor);
@@ -153,5 +155,13 @@ function reconstruct_path(cameFrom: Map<String, Position>, current: Position): P
  * two nodes in the map for A* algorithm
  */
 function heuristic(pos1: Position, pos2: Position) {
-    return pos1.distanceTo(pos2);
+    let distance = pos1.distanceTo(pos2);
+
+    // beliefs.parcels.forEach((parcel: Parcel) => {
+    //     if (parcel.carriedBy == null && pos1.isEqual(new Position(parcel.x, parcel.y))) {
+    //         distance -= 8;
+    //     }
+    // });
+
+    return distance;
 }

@@ -1,9 +1,8 @@
 import { Position } from "./astar.js";
 import { IOParcel } from "../types/IOParcel.js";
-import { clear } from "node:console";
 import agent from "./agent.js";
 
-interface Parcel extends IOParcel {
+export interface Parcel extends IOParcel {
     lastUpdate: Date;
 }
 
@@ -38,6 +37,9 @@ class Beliefs {
 
         const rows = this.map.length;
         const cols = this.map[0].length;
+
+        this.delivering_cells = [];
+        this.pickup_cells= [];
 
         for(let row = 0; row < rows; row++){
             for(let col = 0; col < cols; col++) {
