@@ -1,6 +1,9 @@
-import { Position } from "./astar.js";
-import beliefs from "./beliefs.js";
-import { Intention } from "./intentions.js";
+import { Astar, Position } from "./astar.js";
+import beliefs, { Parcel } from "./beliefs.js";
+import optionGeneration from "./desires.js";
+import { DeliverParcelIntention, Intention, IntentionType, PickUpParcelIntention } from "./intentions.js";
+import { Action, Drop, PickUp } from "./move.js";
+import { Plan } from "./plan.js";
 
 /**
  * Class that manages the main agent logic
@@ -11,13 +14,21 @@ class Agent {
     id: string;
     position: Position;
 
-    intentions: Intention[];
+    private carryingParcels: Parcel[];
+    private intentions: Intention[];
+
+    private currentIntention: Intention;
+    private plan: Plan;
 
     constructor() {
         this.id = "";
         this.position = new Position(0,0); // Initialize beliefs with default values
 
         this.intentions = [];
+        this.carryingParcels = [];
+
+        this.currentIntention = new Intention();
+        this.plan = new Plan();
     }
 
     updatePosition(x: number, y: number): void{
@@ -29,8 +40,114 @@ class Agent {
      * Main agent's logic loop
      */
     async agent_loop() {
+        await new Promise(r => setTimeout(r, 2000));
         while(true) {
             await new Promise(r => setTimeout(r, beliefs.movement_duration));
+
+            const options = optionGeneration();
+
+            this.addIntentions(options);
+            this.filterOptions();
+            this.buildPlan();
+
+            this.currentIntention.log();
+            this.plan.log();
+            while(!this.plan.isEmpty()) {
+                await new Promise(r => setTimeout(r, 5 * beliefs.movement_duration));
+                console.log("Current position ", this.position);
+
+                await this.plan.topAction()?.execute();
+                this.plan.popAction();
+            }
+        }
+    }
+
+    getCarryingParcels(){
+        return this.carryingParcels;
+    }
+
+    getIntentions() {
+        return this.intentions;
+    }
+
+    addIntention(intention: Intention) {
+        this.intentions.push(intention);
+    }
+
+    addIntentions(intentions: Intention[]) {
+        this.intentions = intentions;
+    }
+
+    clearIntentions() {
+        this.intentions = [];
+    }
+
+    /**
+     * Takes the best option to pursue
+     */
+    filterOptions() {
+        let bestOption: Intention = new Intention();
+        let score: number = -1;
+
+        this.intentions.forEach(intention => {
+            const _score = intention.score();
+
+            if (_score > score){
+                score = _score;
+                bestOption = intention;
+            }
+        });
+
+        if(bestOption){
+            this.currentIntention = bestOption;
+            console.log(`Agent: picked option ${this.currentIntention.getType()}`);
+        }
+    }
+
+    /**
+     * Plan how to behave
+     */
+    buildPlan() {
+        let actions: Action[];
+        switch(this.currentIntention.getType()) {
+            case IntentionType.PickUpPacket:
+                actions = Astar(
+                    beliefs.map,
+                    this.position,
+                    (this.currentIntention as PickUpParcelIntention).parcelPosition,
+                    beliefs.crates,
+                    undefined,
+                );
+
+                actions.push(new PickUp());
+                this.plan.newPlan(actions);
+                break;
+            case IntentionType.DeliverPacket:
+                actions = Astar(
+                    beliefs.map,
+                    this.position,
+                    (this.currentIntention as DeliverParcelIntention).deliveryCell,
+                    beliefs.crates,
+                    undefined,
+                );
+
+                actions.push(new Drop());
+                this.plan.newPlan(actions);
+                break;
+            case IntentionType.SearchPacket:
+                let index = Math.floor(Math.random() * beliefs.pickup_cells.length);
+                actions = Astar(
+                    beliefs.map,
+                    this.position,
+                    beliefs.pickup_cells[index],
+                    beliefs.crates,
+                    undefined,
+                );
+
+                console.log("Cell: ", beliefs.pickup_cells[index])
+
+                this.plan.newPlan(actions);
+                break;
         }
     }
 }
