@@ -1,5 +1,5 @@
 import { Astar, Position } from "./astar.js";
-import beliefs, { Parcel } from "./beliefs.js";
+import beliefs from "./beliefs.js";
 import optionGeneration from "./desires.js";
 import { DeliverParcelIntention, Intention, IntentionType, PickUpParcelIntention } from "./intentions.js";
 import { Action, Drop, PickUp } from "./move.js";
@@ -14,7 +14,6 @@ class Agent {
     id: string;
     position: Position;
 
-    private carryingParcels: Parcel[];
     private intentions: Intention[];
 
     private currentIntention: Intention;
@@ -25,7 +24,6 @@ class Agent {
         this.position = new Position(0,0); // Initialize beliefs with default values
 
         this.intentions = [];
-        this.carryingParcels = [];
 
         this.currentIntention = new Intention();
         this.plan = new Plan();
@@ -50,20 +48,16 @@ class Agent {
             this.filterOptions();
             this.buildPlan();
 
-            this.currentIntention.log();
-            this.plan.log();
             while(!this.plan.isEmpty()) {
-                await new Promise(r => setTimeout(r, 5 * beliefs.movement_duration));
-                console.log("Current position ", this.position);
+                if (this.currentIntention.getType() == IntentionType.SearchPacket && beliefs.parcels.size > 0)
+                    break;
+
+                await new Promise(r => setTimeout(r, beliefs.movement_duration));
 
                 await this.plan.topAction()?.execute();
                 this.plan.popAction();
             }
         }
-    }
-
-    getCarryingParcels(){
-        return this.carryingParcels;
     }
 
     getIntentions() {
@@ -144,7 +138,8 @@ class Agent {
                     undefined,
                 );
 
-                console.log("Cell: ", beliefs.pickup_cells[index])
+                console.log("Cell: ", beliefs.pickup_cells[index]);
+                console.log("Path: ", actions);
 
                 this.plan.newPlan(actions);
                 break;

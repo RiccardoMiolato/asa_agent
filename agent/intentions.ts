@@ -14,7 +14,7 @@ export enum IntentionType {
  * Default export class for Intentions
  */
 export class Intention {
-    intentionType: IntentionType;
+    private intentionType: IntentionType;
 
     constructor(intentionType: IntentionType = IntentionType.Null) {
         this.intentionType = intentionType;

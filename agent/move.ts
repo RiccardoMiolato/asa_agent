@@ -29,7 +29,6 @@ export class MoveUp extends Action {
     }
 
     async execute() {
-        console.log("Executing emitMove('up')");
         await socket.emitMove("up");
     }
 }
@@ -40,7 +39,6 @@ export class MoveDown extends Action {
     }
 
     async execute() {
-        console.log("Executing emitMove('down')");
         await socket.emitMove("down");
     }
 }
@@ -51,7 +49,6 @@ export class MoveRight extends Action {
     }
 
     async execute() {
-        console.log("Executing emitMove('right')");
         await socket.emitMove("right");
     }
 }
@@ -62,7 +59,6 @@ export class MoveLeft extends Action {
     }
 
     async execute() {
-        console.log("Executing emitMove('left')");
         await socket.emitMove("left");
     }
 }
@@ -73,7 +69,6 @@ export class PickUp extends Action {
     }
 
     async execute() {
-        console.log("Executing emitPickup()");
         await socket.emitPickup();
     }
 }
@@ -84,7 +79,6 @@ export class Drop extends Action {
     }
 
     async execute() {
-        console.log("Executing emitPutdown()");
         await socket.emitPutdown();
         beliefs.clearDeliveredParcels();
     }

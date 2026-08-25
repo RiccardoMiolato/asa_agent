@@ -152,14 +152,14 @@ function reconstruct_path(cameFrom: Map<String, Position>, current: Position): A
 
         if(from.x == to.x){
             if(from.y > to.y)
-                total_path.push(new MoveUp());
+                total_path.unshift(new MoveUp());
             else
-                total_path.push(new MoveDown());
+                total_path.unshift(new MoveDown());
         } else {
             if(from.x > to.x)
-                total_path.push(new MoveRight());
+                total_path.unshift(new MoveRight());
             else
-                total_path.push(new MoveLeft());
+                total_path.unshift(new MoveLeft());
         }
 
         current = to;
