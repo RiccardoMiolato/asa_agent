@@ -79,8 +79,17 @@ export class PickUpParcelIntention extends Intention {
             const deliveryDistance = this.parcelPosition.distanceTo(closestDeliveryFromParcel);
 
             const timeToDeliver = ((parcelDistance + deliveryDistance) * beliefs.movement_duration) / 1000.0;
-            if (this.parcel.reward > timeToDeliver)
-                return this.parcel.reward - timeToDeliver;
+            if (this.parcel.reward > timeToDeliver){
+                let reward = this.parcel.reward - timeToDeliver;
+
+                beliefs.parcels.forEach((parcel: Parcel) => {
+                    if (parcel.carriedBy === agent.id){
+                        reward += Math.max(0, parcel.reward - timeToDeliver);
+                    }
+                });
+
+                return reward;
+            }
         }
 
         return -1;
@@ -112,11 +121,15 @@ export class DeliverParcelIntention extends Intention {
         const closestDeliveryFromParcel = getClosestDeliveringCell(agent.position, beliefs.delivering_cells, beliefs.crates.values().next().value);
 
         if (closestDeliveryFromParcel !== undefined){
-            const timeToDeliver = agent.position.distanceTo(closestDeliveryFromParcel) * beliefs.movement_duration;
+            const timeToDeliver = (agent.position.distanceTo(closestDeliveryFromParcel) * beliefs.movement_duration) / 1000.0;
 
             let reward = 0;
 
-            agent.getCarryingParcels().forEach(parcel => reward += Math.max(0, parcel.reward - timeToDeliver))
+            beliefs.parcels.forEach((parcel: Parcel) => {
+                if (parcel.carriedBy === agent.id){
+                    reward += Math.max(0, parcel.reward - timeToDeliver);
+                }
+            });
 
             return reward;
         }
