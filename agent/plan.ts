@@ -12,7 +12,6 @@ export class Plan {
     }
 
     topAction(): Action | null {
-        console.log("TOP: ", this.actions);
         if(this.actions.length === 0)
             return null;
 
@@ -22,7 +21,6 @@ export class Plan {
     popAction() {
         if (this.actions.length > 0)
             this.actions.shift();
-        console.log("POP: ", this.actions);
     }
 
     isEmpty() {
