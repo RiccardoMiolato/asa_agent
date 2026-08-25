@@ -11,15 +11,18 @@ import { getClosestDeliveringCell } from "./utils.js";
 
 export default function optionGeneration(): Intention[] {
     let intentions: Intention[] = [];
+    let hasCarriedParcels = false;
 
     beliefs.parcels.forEach((parcel: Parcel) => {
         if(!parcel.carriedBy) {
             intentions.push(new PickUpParcelIntention(parcel, new Position(parcel.x, parcel.y)));
-        } else if (parcel.carriedBy === agent.id) {
+        } else if (parcel.carriedBy === agent.id && !hasCarriedParcels) {
             const closestDelivery = getClosestDeliveringCell(agent.position, beliefs.delivering_cells, beliefs.crates.values().next().value);
 
-            if(closestDelivery)
+            if(closestDelivery){
                 intentions.push(new DeliverParcelIntention(closestDelivery));
+                hasCarriedParcels = true;
+            }
         }
     });
 

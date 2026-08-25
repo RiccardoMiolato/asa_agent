@@ -41,14 +41,17 @@ export class Intention {
  * find something usefull for my goals
  */
 export class SearchIntention extends Intention {
+    targetLocation: Position | undefined;
+
     constructor() {
         super(IntentionType.SearchPacket);
+        this.targetLocation = undefined;
     }
 
     score(): number { return 0 };
 
     log() {
-        console.log("SearchPacket")
+        console.log(`\x1b[33mSearchPacket ar ${this.targetLocation ? `(${this.targetLocation.x};${this.targetLocation.y})`: `undefined`}\x1b[0m`);
     }
 }
 
@@ -72,11 +75,11 @@ export class PickUpParcelIntention extends Intention {
      * Idea: I compute how much I gain by picking up and delivering a certain parcel
      */
     score(): number {
-        const parcelDistance = this.parcelPosition.distanceTo(agent.position);
+        const parcelDistance = this.parcelPosition.distance_Astar(agent.position);
 
         const closestDeliveryFromParcel = getClosestDeliveringCell(this.parcelPosition, beliefs.delivering_cells, beliefs.crates.values().next().value);
         if (closestDeliveryFromParcel !== undefined){
-            const deliveryDistance = this.parcelPosition.distanceTo(closestDeliveryFromParcel);
+            const deliveryDistance = this.parcelPosition.distance_Astar(closestDeliveryFromParcel);
 
             const timeToDeliver = ((parcelDistance + deliveryDistance) * beliefs.movement_duration) / 1000.0;
             if (this.parcel.reward > timeToDeliver){
@@ -96,7 +99,7 @@ export class PickUpParcelIntention extends Intention {
     }
 
     log() {
-        console.log(`PickUp packet from (${this.parcelPosition.x};${this.parcelPosition.y})`);
+        console.log(`\x1b[32mPickUp packet from (${this.parcelPosition.x};${this.parcelPosition.y}) - Score: ${this.score()}\x1b[0m`);
     }
 }
 
@@ -121,7 +124,7 @@ export class DeliverParcelIntention extends Intention {
         const closestDeliveryFromParcel = getClosestDeliveringCell(agent.position, beliefs.delivering_cells, beliefs.crates.values().next().value);
 
         if (closestDeliveryFromParcel !== undefined){
-            const timeToDeliver = (agent.position.distanceTo(closestDeliveryFromParcel) * beliefs.movement_duration) / 1000.0;
+            const timeToDeliver = (agent.position.distance_Astar(closestDeliveryFromParcel) * beliefs.movement_duration) / 1000.0;
 
             let reward = 0;
 
@@ -138,6 +141,6 @@ export class DeliverParcelIntention extends Intention {
     }
 
     log() {
-        console.log(`Delivering packet at (${this.deliveryCell.x};${this.deliveryCell.y})`);
+        console.log(`\x1b[36mDelivering packet at (${this.deliveryCell.x};${this.deliveryCell.y}) - Score: ${this.score()}\x1b[0m`);
     }
 }
