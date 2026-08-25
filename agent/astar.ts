@@ -1,4 +1,5 @@
 import { Heap } from 'heap-js';
+import beliefs from './beliefs.js';
 import { Action, MoveDown, MoveLeft, MoveRight, MoveUp } from './move.js';
 
 /**
@@ -23,6 +24,16 @@ export class Position {
     distanceTo(other: Position): number {
         return Math.abs(this.x - other.x) + Math.abs(this.y - other.y);
     }
+
+    distance_Astar(pos2: Position): number {
+        return Astar(
+            beliefs.map,
+            this,
+            pos2,
+            beliefs.crates,
+            undefined,
+        ).length;
+    }
 }
 
 /**
@@ -41,28 +52,25 @@ export function Astar(
         return [];
     }
 
-    const openSet = new Heap<Position>((a: Position, b: Position) => fScore.get(`${a.x}${a.y}`)! - fScore.get(`${b.x}${b.y}`)!);
+    const openSet = new Heap<Position>((a: Position, b: Position) => fScore.get(`${a.x},${a.y}`)! - fScore.get(`${b.x},${b.y}`)!);
     const cameFrom = new Map<String, Position>();
 
     openSet.add(starting_pos);
 
     // Initialize gscore
+    // Initialize gScore and fScore
     const gScore = new Map<String, number>();
-    for (let i = 0; i < game_map.length; i++) {
-        for (let j = 0; j < game_map[0].length; j++) {
-            gScore.set(`${i}${j}`, Infinity);
-        }
-    }
-    gScore.set(`${starting_pos.x}${starting_pos.y}`, 0);
-
-    // Initialize fscore
     const fScore = new Map<String, number>();
+
     for (let i = 0; i < game_map.length; i++) {
         for (let j = 0; j < game_map[0].length; j++) {
-            fScore.set(`${i}${j}`, Infinity);
+            gScore.set(`${i},${j}`, Infinity);
+            fScore.set(`${i},${j}`, Infinity);
         }
     }
-    fScore.set(`${starting_pos.x}${starting_pos.y}`, heuristic(starting_pos, target_pos));
+
+    gScore.set(`${starting_pos.x},${starting_pos.y}`, 0);
+    fScore.set(`${starting_pos.x},${starting_pos.y}`, heuristic(starting_pos, target_pos));
 
     while (openSet.size() > 0) {
         let current = openSet.pop();
@@ -83,11 +91,11 @@ export function Astar(
                 }
 
                 if(neighbor) {
-                    const tentative_gScore = gScore.get(`${current.x}${current.y}`)! + 1;
-                    if (tentative_gScore < gScore.get(`${neighbor.x}${neighbor.y}`)!) {
-                        cameFrom.set(`${neighbor.x}${neighbor.y}`, current);
-                        gScore.set(`${neighbor.x}${neighbor.y}`, tentative_gScore);
-                        fScore.set(`${neighbor.x}${neighbor.y}`, Math.max(0, tentative_gScore + heuristic(neighbor, target_pos)));
+                    const tentative_gScore = gScore.get(`${current.x},${current.y}`)! + 1;
+                    if (tentative_gScore < gScore.get(`${neighbor.x},${neighbor.y}`)!) {
+                        cameFrom.set(`${neighbor.x},${neighbor.y}`, current);
+                        gScore.set(`${neighbor.x},${neighbor.y}`, tentative_gScore);
+                        fScore.set(`${neighbor.x},${neighbor.y}`, Math.max(0, tentative_gScore + heuristic(neighbor, target_pos)));
 
                         if (!openSet.toArray().some(pos => pos.isEqual(neighbor)))
                             openSet.add(neighbor);
@@ -146,9 +154,9 @@ function valid_cell(neighbor: Position, game_map: String[][], direction: String,
  */
 function reconstruct_path(cameFrom: Map<String, Position>, current: Position): Action[]{
     const total_path = [];
-    while (cameFrom.has(`${current.x}${current.y}`)) {
+    while (cameFrom.has(`${current.x},${current.y}`)) {
         const from: Position = current;
-        const to: Position = cameFrom.get(`${current.x}${current.y}`)!;
+        const to: Position = cameFrom.get(`${current.x},${current.y}`)!;
 
         if(from.x == to.x){
             if(from.y > to.y)
