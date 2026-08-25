@@ -1,4 +1,5 @@
 import socket from "../index.js";
+import beliefs from "./beliefs.js";
 
 enum ActionType {
     Null,
@@ -85,5 +86,6 @@ export class Drop extends Action {
     async execute() {
         console.log("Executing emitPutdown()");
         await socket.emitPutdown();
+        beliefs.clearDeliveredParcels();
     }
 }
