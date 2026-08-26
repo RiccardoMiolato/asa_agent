@@ -6,6 +6,7 @@
         "outDir": "dist",
         "rootDir": ".",
         "strict": true,
+        "sourceMap": true,
         "types": [
             "node",
         ]
