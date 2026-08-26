@@ -1,7 +1,7 @@
 import { Astar, Position } from "./astar.js";
 import beliefs from "./beliefs.js";
 import optionGeneration from "./desires.js";
-import { DeliverParcelIntention, Intention, IntentionType, PickUpParcelIntention } from "./intentions.js";
+import { DeliverParcelIntention, Intention, IntentionType, PickUpParcelIntention, SearchIntention } from "./intentions.js";
 import { Action, Drop, PickUp } from "./move.js";
 import { Plan } from "./plan.js";
 
@@ -45,16 +45,38 @@ class Agent {
             const options = optionGeneration();
 
             this.addIntentions(options);
+
+            options.forEach((option) => {
+                option.log();
+            });
+
             this.filterOptions();
             this.buildPlan();
 
+            console.log("Proceding with: ");
+            this.currentIntention.log();
+            console.log();
+
             while(!this.plan.isEmpty()) {
-                if (this.currentIntention.getType() == IntentionType.SearchPacket && beliefs.parcels.size > 0)
+                if (this.currentIntention.getType() == IntentionType.SearchPacket && beliefs.freeParcelsCount() > 0){
                     break;
+                }
 
                 await new Promise(r => setTimeout(r, beliefs.movement_duration));
 
-                await this.plan.topAction()?.execute();
+                // console.log("Executing: ", this.plan.topAction());
+                const nextAction = this.plan.topAction();
+                await nextAction?.execute();
+
+                if(nextAction instanceof PickUp) {
+                    beliefs.parcels.forEach(parcel => {
+                        if(parcel.id === (this.currentIntention as PickUpParcelIntention).parcel.id){
+                            if(!parcel.carriedBy)
+                                parcel.carriedBy = this.id;
+                        }
+                    })
+                }
+
                 this.plan.popAction();
             }
         }
@@ -69,6 +91,7 @@ class Agent {
     }
 
     addIntentions(intentions: Intention[]) {
+        this.intentions = [];
         this.intentions = intentions;
     }
 
@@ -83,6 +106,8 @@ class Agent {
         let bestOption: Intention = new Intention();
         let score: number = -1;
 
+        beliefs.updateParcelRewards();
+
         this.intentions.forEach(intention => {
             const _score = intention.score();
 
@@ -94,7 +119,6 @@ class Agent {
 
         if(bestOption){
             this.currentIntention = bestOption;
-            console.log(`Agent: picked option ${this.currentIntention.getType()}`);
         }
     }
 
@@ -130,16 +154,15 @@ class Agent {
                 break;
             case IntentionType.SearchPacket:
                 let index = Math.floor(Math.random() * beliefs.pickup_cells.length);
+                (this.currentIntention as SearchIntention).targetLocation = beliefs.pickup_cells[index];
+
                 actions = Astar(
                     beliefs.map,
                     this.position,
-                    beliefs.pickup_cells[index],
+                    (this.currentIntention as SearchIntention).targetLocation!,
                     beliefs.crates,
                     undefined,
                 );
-
-                console.log("Cell: ", beliefs.pickup_cells[index]);
-                console.log("Path: ", actions);
 
                 this.plan.newPlan(actions);
                 break;

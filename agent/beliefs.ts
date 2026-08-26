@@ -105,6 +105,24 @@ class Beliefs {
         });
     }
 
+    /**
+     * Update parcel rewards in order to have them aligned
+     * with the real time system the agent is living on
+     */
+    updateParcelRewards(): void {
+        const timeNow = new Date();
+
+        this.parcels.forEach((parcel: Parcel, id: string) => {
+            const elapsedSeconds = (timeNow.getTime() - parcel.lastUpdate.getTime()) / 1000;
+            parcel.reward = Math.max(0, Math.floor(parcel.reward - elapsedSeconds));
+            parcel.lastUpdate = timeNow;
+
+            if (parcel.reward <= 0) {
+                this.parcels.delete(id);
+            }
+        });
+    }
+
     // Sense the crates
     senseCrates(crates: any[]): void {
         crates.forEach((crate: any) => {
@@ -135,6 +153,17 @@ class Beliefs {
     // Update the movement duration
     updateMovementDuration(duration: number): void {
         this.movement_duration = duration;
+    }
+
+    // Count the number of free parcels
+    freeParcelsCount(): number {
+        let count = 0;
+
+        this.parcels.forEach(
+            parcel => count += parcel.carriedBy ? 0 : 1
+        );
+
+        return count;
     }
 }
 
