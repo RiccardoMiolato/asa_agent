@@ -183,11 +183,5 @@ function reconstruct_path(cameFrom: Map<String, Position>, current: Position): A
 function heuristic(pos1: Position, pos2: Position) {
     let distance = pos1.distanceTo(pos2);
 
-    // beliefs.parcels.forEach((parcel: Parcel) => {
-    //     if (parcel.carriedBy == null && pos1.isEqual(new Position(parcel.x, parcel.y))) {
-    //         distance -= 8;
-    //     }
-    // });
-
     return distance;
 }
