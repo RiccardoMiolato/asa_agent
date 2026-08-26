@@ -75,14 +75,14 @@ export class PickUpParcelIntention extends Intention {
      * Idea: I compute how much I gain by picking up and delivering a certain parcel
      */
     score(): number {
-        const parcelDistance = this.parcelPosition.distance_Astar(agent.position);
+        const agentToParcelDistance = this.parcelPosition.distance_Astar(agent.position);
 
-        const closestDeliveryFromParcel = getClosestDeliveringCell(this.parcelPosition, beliefs.delivering_cells, beliefs.crates.values().next().value);
-        if (closestDeliveryFromParcel !== undefined) {
-            const deliveryDistance = this.parcelPosition.distance_Astar(closestDeliveryFromParcel);
+        const closestDeliveryCellFromParcel = getClosestDeliveringCell(this.parcelPosition, beliefs.delivering_cells, beliefs.crates.values().next().value);
+        if (closestDeliveryCellFromParcel !== undefined){
+            const parcelTodeliveryDistance = this.parcelPosition.distance_Astar(closestDeliveryCellFromParcel);
 
-            const timeToDeliver = ((parcelDistance + deliveryDistance) * beliefs.movement_duration) / 1000.0;
-            if (this.parcel.reward > timeToDeliver) {
+            const timeToDeliver = ((agentToParcelDistance + parcelTodeliveryDistance) * beliefs.movement_duration) / 1000.0;
+            if (this.parcel.reward > timeToDeliver){
                 let reward = this.parcel.reward - timeToDeliver;
 
                 beliefs.parcels.forEach((parcel: Parcel) => {
