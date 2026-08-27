@@ -7,6 +7,9 @@ type CoordinateOffset = readonly [x: number, y: number];
 
 /** Contract implemented by pathfinding algorithms. */
 export abstract class BasePathfinder {
+    private readonly pathLengthCache = new Map<string, number | undefined>();
+    private readonly pathLengthSymmetryCache = new Map<string[][], boolean>();
+
     abstract findPath(
         gameMap: string[][],
         startingPosition: Position,
@@ -23,6 +26,16 @@ export abstract class BasePathfinder {
         crates: ReadonlyMap<string, Position>,
         temporarilyLocked?: Position,
     ): number | undefined {
+        const cacheKey = this.pathLengthCacheKey(
+            gameMap,
+            startingPosition,
+            targetPosition,
+            temporarilyLocked,
+        );
+        if (this.pathLengthCache.has(cacheKey)) {
+            return this.pathLengthCache.get(cacheKey);
+        }
+
         const path = this.findPath(
             gameMap,
             startingPosition,
@@ -30,15 +43,65 @@ export abstract class BasePathfinder {
             crates,
             temporarilyLocked,
         );
-        if (path.length === 0 && !startingPosition.isEqual(targetPosition)) {
-            return undefined;
+        const pathLength = path.length === 0 && !startingPosition.isEqual(targetPosition)
+            ? undefined
+            : path.length;
+        this.pathLengthCache.set(cacheKey, pathLength);
+        return pathLength;
+    }
+
+    /** Clears distances cached for the previous world-state deliberation. */
+    clearPathLengthCache(): void {
+        this.pathLengthCache.clear();
+        this.pathLengthSymmetryCache.clear();
+    }
+
+    private pathLengthCacheKey(
+        gameMap: string[][],
+        startingPosition: Position,
+        targetPosition: Position,
+        temporarilyLocked?: Position,
+    ): string {
+        const startingKey = `${startingPosition.x},${startingPosition.y}`;
+        const targetKey = `${targetPosition.x},${targetPosition.y}`;
+        const symmetricPath = temporarilyLocked === undefined
+            && this.pathLengthsAreSymmetric(gameMap);
+        const [firstPosition, secondPosition] = symmetricPath
+            && targetKey < startingKey
+            ? [targetKey, startingKey]
+            : [startingKey, targetKey];
+        const lockedPosition = temporarilyLocked
+            ? `${temporarilyLocked.x},${temporarilyLocked.y}`
+            : "none";
+        return `${firstPosition}:${secondPosition}:${lockedPosition}`;
+    }
+
+    private pathLengthsAreSymmetric(gameMap: string[][]): boolean {
+        const cachedSymmetry = this.pathLengthSymmetryCache.get(gameMap);
+        if (cachedSymmetry !== undefined) {
+            return cachedSymmetry;
         }
-        return path.length;
+
+        const pathLengthsAreSymmetric = this.hasSymmetricPathLengths(gameMap);
+        this.pathLengthSymmetryCache.set(gameMap, pathLengthsAreSymmetric);
+        return pathLengthsAreSymmetric;
+    }
+
+    /** Reports whether forward and reverse path lengths are interchangeable. */
+    protected hasSymmetricPathLengths(_gameMap: string[][]): boolean {
+        return false;
     }
 }
 
 /** A* pathfinder for the grid-based game map. */
 export class AStarPathfinder extends BasePathfinder {
+    private static readonly DIRECTIONAL_TILES = new Set<string>([
+        "↑",
+        "→",
+        "↓",
+        "←",
+    ]);
+
     constructor(private readonly actionFactory: ActionFactory) {
         super();
     }
@@ -126,6 +189,18 @@ export class AStarPathfinder extends BasePathfinder {
         }
 
         return [];
+    }
+
+    /** A grid without directional-entry tiles has symmetric path lengths. */
+    protected override hasSymmetricPathLengths(gameMap: string[][]): boolean {
+        for (const column of gameMap) {
+            for (const tile of column) {
+                if (AStarPathfinder.DIRECTIONAL_TILES.has(tile)) {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     private isValidCell(

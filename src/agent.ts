@@ -47,6 +47,7 @@ export class Agent {
                 position: this.position,
             });
             this.addIntentions(options);
+            this.pathfinder.clearPathLengthCache();
 
             const loggingContext = this.getIntentionContext();
             options.forEach((option: Intention) => option.log(loggingContext));
