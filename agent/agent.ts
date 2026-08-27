@@ -1,8 +1,7 @@
-import { Astar, Position } from "./astar.js";
+import { Position } from "./astar.js";
 import beliefs from "./beliefs.js";
 import optionGeneration from "./desires.js";
-import { DeliverParcelIntention, Intention, IntentionType, PickUpParcelIntention, SearchIntention } from "./intentions.js";
-import { Action, Drop, PickUp } from "./move.js";
+import { Intention, IntentionContext, SearchIntention } from "./intentions.js";
 import { Plan } from "./plan.js";
 
 /**
@@ -37,7 +36,7 @@ class Agent {
     /**
      * Main agent's logic loop
      */
-    async agent_loop() {
+    async agent_loop(): Promise<void> {
         await new Promise(r => setTimeout(r, 2000));
         while (true) {
             await new Promise(r => setTimeout(r, beliefs.movement_duration));
@@ -58,7 +57,7 @@ class Agent {
             console.log();
 
             while (!this.plan.isEmpty()) {
-                if (this.currentIntention.getType() == IntentionType.SearchPacket && beliefs.freeParcelsCount() > 0) {
+                if (this.currentIntention.shouldInterrupt(this.getIntentionContext())) {
                     break;
                 }
 
@@ -66,17 +65,11 @@ class Agent {
 
                 // console.log("Executing: ", this.plan.topAction());
                 const nextAction = this.plan.topAction();
-                await nextAction?.execute();
-
-                if (nextAction instanceof PickUp) {
-                    beliefs.parcels.forEach(parcel => {
-                        if (parcel.id === (this.currentIntention as PickUpParcelIntention).parcel.id) {
-                            if (!parcel.carriedBy)
-                                parcel.carriedBy = this.id;
-                        }
-                    })
+                if (!nextAction) {
+                    break;
                 }
 
+                await nextAction.execute();
                 this.plan.popAction();
             }
         }
@@ -123,48 +116,20 @@ class Agent {
     /**
      * Plan how to behave
      */
-    buildPlan() {
-        let actions: Action[];
-        switch (this.currentIntention.getType()) {
-            case IntentionType.PickUpPacket:
-                actions = Astar(
-                    beliefs.map,
-                    this.position,
-                    (this.currentIntention as PickUpParcelIntention).parcelPosition,
-                    beliefs.crates,
-                    undefined,
-                );
+    buildPlan(): void {
+        const actions = this.currentIntention.buildActions(this.getIntentionContext());
+        this.plan.newPlan(actions);
+    }
 
-                actions.push(new PickUp());
-                this.plan.newPlan(actions);
-                break;
-            case IntentionType.DeliverPacket:
-                actions = Astar(
-                    beliefs.map,
-                    this.position,
-                    (this.currentIntention as DeliverParcelIntention).deliveryCell,
-                    beliefs.crates,
-                    undefined,
-                );
-
-                actions.push(new Drop());
-                this.plan.newPlan(actions);
-                break;
-            case IntentionType.SearchPacket:
-                let index = Math.floor(Math.random() * beliefs.pickup_cells.length);
-                (this.currentIntention as SearchIntention).targetLocation = beliefs.pickup_cells[index];
-
-                actions = Astar(
-                    beliefs.map,
-                    this.position,
-                    (this.currentIntention as SearchIntention).targetLocation!,
-                    beliefs.crates,
-                    undefined,
-                );
-
-                this.plan.newPlan(actions);
-                break;
-        }
+    private getIntentionContext(): IntentionContext {
+        return {
+            gameMap: beliefs.map,
+            agentPosition: this.position,
+            crates: beliefs.crates,
+            pickupCells: beliefs.pickup_cells,
+            freeParcelsCount: beliefs.freeParcelsCount(),
+            agentId: this.id,
+        };
     }
 }
 

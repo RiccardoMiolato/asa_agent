@@ -92,6 +92,13 @@ class Beliefs {
         });
     }
 
+    markParcelCarried(parcelId: string, agentId: string): void {
+        const parcel = this.parcels.get(parcelId);
+        if (parcel && !parcel.carriedBy) {
+            parcel.carriedBy = agentId;
+        }
+    }
+
     /**
      * When a parcel is espired, I know it doesn't exist anymore due to time passing,
      * I delete it since it is useless having the information

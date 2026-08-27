@@ -64,12 +64,16 @@ export class MoveLeft extends Action {
 }
 
 export class PickUp extends Action {
-    constructor() {
+    constructor(
+        private readonly parcelId: string,
+        private readonly agentId: string,
+    ) {
         super(ActionType.PickUp);
     }
 
-    async execute() {
+    async execute(): Promise<void> {
         await socket.emitPickup();
+        beliefs.markParcelCarried(this.parcelId, this.agentId);
     }
 }
 

@@ -1,23 +1,27 @@
 import agent from "./agent.js";
-import { Position } from "./astar.js";
+import { Astar, Position } from "./astar.js";
 import beliefs, { Parcel } from "./beliefs.js";
+import { Action, Drop, PickUp } from "./move.js";
 import { getClosestDeliveringCell } from "./utils.js";
 
-export enum IntentionType {
-    SearchPacket,
-    PickUpPacket,
-    DeliverPacket,
+export interface IntentionContext {
+    // readonly bc we don't want a method to modify context properties
+    readonly gameMap: string[][];
+    readonly agentPosition: Position;
+    readonly crates: Map<string, Position>;
+    readonly pickupCells: Position[];
+    readonly freeParcelsCount: number;
+    readonly agentId: string;
 }
 
 export abstract class Intention {
-    constructor(private readonly intentionType: IntentionType) { }
-
-    getType(): IntentionType {
-        return this.intentionType;
-    }
-
     abstract score(): number;
+    abstract buildActions(context: IntentionContext): Action[];
     abstract log(): void;
+
+    shouldInterrupt(_context: IntentionContext): boolean {
+        return false;
+    }
 }
 
 /**
@@ -28,16 +32,41 @@ export abstract class Intention {
  * find something usefull for my goals
  */
 export class SearchIntention extends Intention {
-    targetLocation: Position | undefined;
+    private targetLocation: Position | undefined;
 
     constructor() {
-        super(IntentionType.SearchPacket);
+        super();
         this.targetLocation = undefined;
     }
 
-    score(): number { return 0 };
+    score(): number {
+        return 0;
+    }
 
-    log() {
+    buildActions(context: IntentionContext): Action[] {
+        const index = Math.floor(Math.random() * context.pickupCells.length);
+        const targetLocation = context.pickupCells[index];
+
+        if (!targetLocation) {
+            this.targetLocation = undefined;
+            return [];
+        }
+
+        this.targetLocation = targetLocation;
+        return Astar(
+            context.gameMap,
+            context.agentPosition,
+            targetLocation,
+            context.crates,
+            undefined,
+        );
+    }
+
+    shouldInterrupt(context: IntentionContext): boolean {
+        return context.freeParcelsCount > 0;
+    }
+
+    log(): void {
         console.log(`\x1b[33mSearchPacket ar ${this.targetLocation ? `(${this.targetLocation.x};${this.targetLocation.y})` : `undefined`}\x1b[0m`);
     }
 }
@@ -49,11 +78,11 @@ export class SearchIntention extends Intention {
  * and pick it up
  */
 export class PickUpParcelIntention extends Intention {
-    parcel: Parcel;
-    parcelPosition: Position;
+    readonly parcel: Parcel;
+    readonly parcelPosition: Position;
 
     constructor(parcel: Parcel, parcelPosition: Position) {
-        super(IntentionType.PickUpPacket);
+        super();
         this.parcelPosition = parcelPosition;
         this.parcel = parcel;
     }
@@ -85,7 +114,20 @@ export class PickUpParcelIntention extends Intention {
         return -1;
     }
 
-    log() {
+    buildActions(context: IntentionContext): Action[] {
+        const actions = Astar(
+            context.gameMap,
+            context.agentPosition,
+            this.parcelPosition,
+            context.crates,
+            undefined,
+        );
+
+        actions.push(new PickUp(this.parcel.id, context.agentId));
+        return actions;
+    }
+
+    log(): void {
         console.log(`\x1b[32mPickUp packet from (${this.parcelPosition.x};${this.parcelPosition.y}) - Score: ${this.score()}\x1b[0m`);
     }
 }
@@ -97,10 +139,10 @@ export class PickUpParcelIntention extends Intention {
  * to the specific delivery points
  */
 export class DeliverParcelIntention extends Intention {
-    deliveryCell: Position;
+    readonly deliveryCell: Position;
 
     constructor(deliveryCell: Position) {
-        super(IntentionType.DeliverPacket);
+        super();
         this.deliveryCell = deliveryCell;
     }
 
@@ -127,7 +169,20 @@ export class DeliverParcelIntention extends Intention {
         return -1;
     }
 
-    log() {
+    buildActions(context: IntentionContext): Action[] {
+        const actions = Astar(
+            context.gameMap,
+            context.agentPosition,
+            this.deliveryCell,
+            context.crates,
+            undefined,
+        );
+
+        actions.push(new Drop());
+        return actions;
+    }
+
+    log(): void {
         console.log(`\x1b[36mDelivering packet at (${this.deliveryCell.x};${this.deliveryCell.y}) - Score: ${this.score()}\x1b[0m`);
     }
 }
