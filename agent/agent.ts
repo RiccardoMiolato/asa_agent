@@ -75,20 +75,19 @@ class Agent {
         }
     }
 
-    getIntentions() {
+    getIntentions(): readonly Intention[] {
         return this.intentions;
     }
 
-    addIntention(intention: Intention) {
+    addIntention(intention: Intention): void {
         this.intentions.push(intention);
     }
 
-    addIntentions(intentions: Intention[]) {
-        this.intentions = [];
+    addIntentions(intentions: Intention[]): void {
         this.intentions = intentions;
     }
 
-    clearIntentions() {
+    clearIntentions(): void {
         this.intentions = [];
     }
 

@@ -5,7 +5,7 @@ import { Position } from "./astar.js";
  * given the previous position and the actual one, it is possible to
  * understand in which axis and direction the agent is moving
  */
-export function getDirection(actual_pos: Position, next_pos: Position): String {
+export function getDirection(actual_pos: Position, next_pos: Position): string {
     if (actual_pos.x < next_pos.x) {
         return 'right';
     } else if (actual_pos.x > next_pos.x) {

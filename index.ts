@@ -1,7 +1,10 @@
 import 'dotenv/config';
-import { DjsConnect, DjsClientSocket } from "@unitn-asa/deliveroo-js-sdk/client";
+import { DjsConnect, type DjsClientSocket } from "@unitn-asa/deliveroo-js-sdk/client";
 import agent from './agent/agent.js';
 import beliefs from './agent/beliefs.js';
+import type { IOAgent } from './types/IOAgent.js';
+import type { IOConfig } from './types/IOConfig.js';
+import type { IOSensing } from './types/IOSensing.js';
 
 // Environment variables and script constants
 const host = process.env.HOST || "http://localhost:8080";
@@ -11,7 +14,7 @@ const agent_name = process.env.NAME || "cardo";
 console.log("Connecting...");
 const socket: DjsClientSocket = DjsConnect(host, token, agent_name);
 
-socket.onConnect(() => {
+socket.onConnect((): void => {
     console.log("Connected to the game server!")
 });
 
@@ -20,7 +23,7 @@ socket.onConnect(() => {
  * initialized before the agent starts to interact with the
  * environment.
  */
-socket.onConfig((config: any) => {
+socket.onConfig((config: IOConfig): void => {
     beliefs.configPhase(config);
 });
 
@@ -29,11 +32,13 @@ socket.onConfig((config: any) => {
  * in the environment, like the position of the agent itself
  * or other events.
  */
-socket.onYou((_agent: any) => {
+socket.onYou((_agent: IOAgent): void => {
     if (!agent.id)
-        agent.id = _agent["id"];
+        agent.id = _agent.id;
 
-    agent.updatePosition(_agent["x"], _agent["y"]);
+    if (_agent.x !== undefined && _agent.y !== undefined) {
+        agent.updatePosition(_agent.x, _agent.y);
+    }
 });
 
 /**
@@ -41,9 +46,9 @@ socket.onYou((_agent: any) => {
  * That include parcels generation, crates position and other
  * players' agent positions.
  */
-socket.onSensing((sensing: any) => {
-    beliefs.senseParcels(sensing["parcels"]);
-    beliefs.senseCrates(sensing["crates"]);
+socket.onSensing((sensing: IOSensing): void => {
+    beliefs.senseParcels(sensing.parcels);
+    beliefs.senseCrates(sensing.crates);
 });
 
 agent.agent_loop();

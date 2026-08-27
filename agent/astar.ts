@@ -2,13 +2,15 @@ import { Heap } from 'heap-js';
 import beliefs from './beliefs.js';
 import { Action, MoveDown, MoveLeft, MoveRight, MoveUp } from './move.js';
 
+type Direction = 'up' | 'down' | 'right' | 'left';
+
 /*
  * Class position. Helper used in the project for not dealing anywhere with
  * a couple of coordinates {x, y}
  */
 export class Position {
-    public x: number
-    public y: number
+    public x: number;
+    public y: number;
 
     public constructor(x: number, y: number) {
         this.x = x;
@@ -42,10 +44,10 @@ export class Position {
  * Being the agent a real time agent, it is important to be fast during the decision making approach
  */
 export function Astar(
-    game_map: String[][],
+    game_map: string[][],
     starting_pos: Position,
     target_pos: Position,
-    crates: Map<String, Position>,
+    crates: Map<string, Position>,
     temporary_locked: Position | undefined = undefined):
     Action[] {
     if (starting_pos.x % 1 !== 0 || starting_pos.y % 1 !== 0) {
@@ -53,14 +55,14 @@ export function Astar(
     }
 
     const openSet = new Heap<Position>((a: Position, b: Position) => fScore.get(`${a.x},${a.y}`)! - fScore.get(`${b.x},${b.y}`)!);
-    const cameFrom = new Map<String, Position>();
+    const cameFrom = new Map<string, Position>();
 
     openSet.add(starting_pos);
 
     // Initialize gscore
     // Initialize gScore and fScore
-    const gScore = new Map<String, number>();
-    const fScore = new Map<String, number>();
+    const gScore = new Map<string, number>();
+    const fScore = new Map<string, number>();
 
     for (let i = 0; i < game_map.length; i++) {
         for (let j = 0; j < game_map[0].length; j++) {
@@ -81,7 +83,7 @@ export function Astar(
 
         if (current) {
             const neighbors = [[0, 1], [0, -1], [1, 0], [-1, 0]];
-            const directions = ['up', 'down', 'right', 'left'];
+            const directions: Direction[] = ['up', 'down', 'right', 'left'];
 
             neighbors.forEach(coord => {
                 let neighbor = new Position(current.x + coord[0], current.y + coord[1]);
@@ -113,7 +115,7 @@ export function Astar(
  * both because it is not part of the map, or because it is obstructed by something, such as a wall or
  * another agent.
  */
-function valid_cell(neighbor: Position, game_map: String[][], direction: String, crates: Map<String, Position>, temporary_locked: Position | undefined): boolean {
+function valid_cell(neighbor: Position, game_map: string[][], direction: Direction, crates: Map<string, Position>, temporary_locked: Position | undefined): boolean {
     // Out of bound indexes
     if (neighbor.x < 0 || neighbor.x >= game_map.length ||
         neighbor.y < 0 || neighbor.y >= game_map[0].length) {
@@ -152,8 +154,8 @@ function valid_cell(neighbor: Position, game_map: String[][], direction: String,
  * A* path reconstruction algorithm. Once the pathfinding is finished, the complete path
  * is built following a backtracking approach, starting from the end to the start
  */
-function reconstruct_path(cameFrom: Map<String, Position>, current: Position): Action[] {
-    const total_path = [];
+function reconstruct_path(cameFrom: Map<string, Position>, current: Position): Action[] {
+    const total_path: Action[] = [];
     while (cameFrom.has(`${current.x},${current.y}`)) {
         const from: Position = current;
         const to: Position = cameFrom.get(`${current.x},${current.y}`)!;
@@ -180,7 +182,7 @@ function reconstruct_path(cameFrom: Map<String, Position>, current: Position): A
  * Auxiliary function to calculate the heuristic distance betweeen
  * two nodes in the map for A* algorithm
  */
-function heuristic(pos1: Position, pos2: Position) {
+function heuristic(pos1: Position, pos2: Position): number {
     let distance = pos1.distanceTo(pos2);
 
     // beliefs.parcels.forEach((parcel: Parcel) => {

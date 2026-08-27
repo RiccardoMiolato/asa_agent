@@ -7,7 +7,7 @@ export class Plan {
         this.actions = [];
     }
 
-    newPlan(actions: Action[]) {
+    newPlan(actions: Action[]): void {
         this.actions = actions;
     }
 
@@ -18,16 +18,16 @@ export class Plan {
         return this.actions[0];
     }
 
-    popAction() {
+    popAction(): void {
         if (this.actions.length > 0)
             this.actions.shift();
     }
 
-    isEmpty() {
+    isEmpty(): boolean {
         return this.actions.length == 0;
     }
 
-    log() {
+    log(): void {
         console.log(this.actions);
     }
 }

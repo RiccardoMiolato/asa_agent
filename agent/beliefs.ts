@@ -1,4 +1,6 @@
-import { IOParcel } from "../types/IOParcel.js";
+import type { IOConfig } from "../types/IOConfig.js";
+import type { IOCrate } from "../types/IOCrate.js";
+import type { IOParcel } from "../types/IOParcel.js";
 import agent from "./agent.js";
 import { Position } from "./astar.js";
 
@@ -30,9 +32,11 @@ class Beliefs {
         this.movement_duration = 0;
     }
 
-    configPhase(config: any): void {
-        this.map = config["GAME"]["map"]["tiles"].map((row: any[]) => row.map((cell: any) => cell.toString()));
-        this.movement_duration = config["GAME"]["player"]["movement_duration"];
+    configPhase(config: IOConfig): void {
+        this.map = config.GAME.map.tiles.map((row: unknown[]) =>
+            row.map((cell: unknown) => String(cell))
+        );
+        this.movement_duration = config.GAME.player.movement_duration;
 
         const rows = this.map.length;
         const cols = this.map[0].length;
@@ -54,13 +58,9 @@ class Beliefs {
 
 
     // Sense the parcels
-    senseParcels(parcels: any[]): void {
-        parcels.forEach((parcel: any) => {
-            const id = parcel["id"];
-            const x = parcel["x"];
-            const y = parcel["y"];
-            const carriedBy = parcel["carriedBy"];
-            const reward = parcel["reward"];
+    senseParcels(parcels: IOParcel[]): void {
+        parcels.forEach((parcel: IOParcel) => {
+            const { id, x, y, carriedBy, reward } = parcel;
             const lastUpdate = new Date();
 
             if (!this.parcels.has(id)) {
@@ -132,10 +132,10 @@ class Beliefs {
     }
 
     // Sense the crates
-    senseCrates(crates: any[]): void {
-        crates.forEach((crate: any) => {
-            const id = crate["id"];
-            const position = new Position(crate["x"], crate["y"]);
+    senseCrates(crates: IOCrate[]): void {
+        crates.forEach((crate: IOCrate) => {
+            const id = crate.id;
+            const position = new Position(crate.x, crate.y);
 
             if (!this.hasCrate(id)) {
                 this.addCrate(id, position);
