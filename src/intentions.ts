@@ -1,6 +1,7 @@
 import type { BasePathfinder } from "./astar.js";
 import type { Parcel } from "./beliefs.js";
 import type { Action, ActionFactory } from "./move.js";
+import { PDDLGoal } from "./pddl/pddlPlanner.js";
 import { Position } from "./position.js";
 
 /** Current world state and services available to an intention. */
@@ -21,6 +22,7 @@ export interface IntentionContext {
 export abstract class Intention {
     abstract score(context: IntentionContext): number;
     abstract buildActions(context: IntentionContext): Action[];
+    abstract toPddlGoal(): void;
     abstract log(context: IntentionContext): void;
 
     shouldInterrupt(_context: IntentionContext): boolean {
@@ -57,6 +59,17 @@ export class SearchIntention extends Intention {
     shouldInterrupt(context: IntentionContext): boolean {
         return context.freeParcelsCount > 0;
     }
+
+    toPddlGoal(): PDDLGoal {
+        const goal: PDDLGoal = {
+            operationType: "search",
+            parcelId: null,
+            finalTargetPosition: this.targetLocation!
+        }
+
+        return goal;
+    }
+
 
     log(_context: IntentionContext): void {
         const target = this.targetLocation
@@ -136,6 +149,17 @@ export class PickUpParcelIntention extends Intention {
         );
         actions.push(context.actionFactory.pickUp(this.parcel.id, context.agentId));
         return actions;
+    }
+
+    toPddlGoal(): PDDLGoal {
+        const goal: PDDLGoal = {
+            operationType: "search",
+            parcelId: this.parcel.id,
+            finalTargetPosition: this.parcelPosition
+
+        }
+
+        return goal;
     }
 
     log(context: IntentionContext): void {
@@ -260,6 +284,17 @@ export class DeliverParcelIntention extends Intention {
             }
         }
         return freeParcelCount !== this.knownFreeParcelIds.size;
+    }
+
+    toPddlGoal(): PDDLGoal {
+        const goal: PDDLGoal = {
+            operationType: "search",
+            parcelId: null,
+            finalTargetPosition: this.deliveryCell
+
+        }
+
+        return goal;
     }
 
     log(context: IntentionContext): void {
