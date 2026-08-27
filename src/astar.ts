@@ -1,9 +1,7 @@
 import { Heap } from "heap-js";
+import { CoordinateOffset, Direction } from "./map.js";
 import type { Action, ActionFactory } from "./move.js";
 import { Position } from "./position.js";
-
-type Direction = "up" | "down" | "right" | "left";
-type CoordinateOffset = readonly [x: number, y: number];
 
 /** Contract implemented by pathfinding algorithms. */
 export abstract class BasePathfinder {
