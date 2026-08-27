@@ -5,6 +5,7 @@ import type { Position } from "./position.js";
 export interface IntentionLogEntry {
     readonly description: IntentionDescription;
     readonly score: number;
+    readonly distance: number | undefined;
     readonly selected: boolean;
 }
 
@@ -51,7 +52,8 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
                 if (scoreDifference !== 0) {
                     return scoreDifference;
                 }
-                return Number(second.selected) - Number(first.selected);
+                return (first.distance ?? Number.POSITIVE_INFINITY)
+                    - (second.distance ?? Number.POSITIVE_INFINITY);
             },
         );
 
@@ -81,6 +83,7 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
             console.log(
                 `${marker} #${index + 1} [${state}]`
                 + ` score=${option.score.toFixed(3)}`
+                + ` distance=${option.distance ?? "unknown"}`
                 + ` | ${this.formatDescription(option.description)}`,
             );
         });

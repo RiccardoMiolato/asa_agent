@@ -44,6 +44,11 @@ export abstract class Intention {
     abstract buildActions(context: IntentionContext): Action[];
     abstract describe(): IntentionDescription;
 
+    /** Manhattan distance used to prefer the closest option when scores are equal. */
+    selectionDistance(_context: IntentionContext): number | undefined {
+        return undefined;
+    }
+
     shouldInterrupt(_context: IntentionContext): boolean {
         return false;
     }
@@ -199,6 +204,10 @@ export class PickUpParcelIntention extends RewardIntention {
         return totalReward;
     }
 
+    selectionDistance(context: IntentionContext): number | undefined {
+        return context.agentPosition.distanceTo(this.parcelPosition);
+    }
+
     buildActions(context: IntentionContext): Action[] {
         const actions = context.pathfinder.findPath(
             context.gameMap,
@@ -330,6 +339,10 @@ export class DeliverParcelIntention extends RewardIntention {
         }
 
         return carriedReward + bestContinuationReward;
+    }
+
+    selectionDistance(context: IntentionContext): number | undefined {
+        return context.agentPosition.distanceTo(this.deliveryCell);
     }
 
     buildActions(context: IntentionContext): Action[] {

@@ -14,6 +14,7 @@ import { Position } from "./position.js";
 interface ScoredIntention {
     readonly intention: Intention;
     readonly score: number;
+    readonly distance: number | undefined;
 }
 
 /** Coordinates intention generation, selection, planning, and execution. */
@@ -135,9 +136,11 @@ export class Agent {
         ) ?? new SearchIntention();
         let bestOption: Intention = fallback;
         let bestScore = fallback.score(context);
+        let bestDistance = fallback.selectionDistance(context);
         const scoredIntentions: ScoredIntention[] = [{
             intention: fallback,
             score: bestScore,
+            distance: bestDistance,
         }];
 
         for (const intention of this.intentions) {
@@ -145,9 +148,14 @@ export class Agent {
                 continue;
             }
             const score = intention.score(context);
-            scoredIntentions.push({ intention, score });
-            if (score >= bestScore) {
+            const distance = intention.selectionDistance(context);
+            scoredIntentions.push({ intention, score, distance });
+            const closerEqualScore = score === bestScore
+                && (distance ?? Number.POSITIVE_INFINITY)
+                    < (bestDistance ?? Number.POSITIVE_INFINITY);
+            if (score > bestScore || closerEqualScore) {
                 bestScore = score;
+                bestDistance = distance;
                 bestOption = intention;
             }
         }
@@ -165,9 +173,10 @@ export class Agent {
         evaluatedOptions: readonly ScoredIntention[],
     ): IntentionLogEntry[] {
         return evaluatedOptions.map(
-            ({ intention, score }: ScoredIntention): IntentionLogEntry => ({
+            ({ intention, score, distance }: ScoredIntention): IntentionLogEntry => ({
                 description: intention.describe(),
                 score,
+                distance,
                 selected: intention === this.currentIntention,
             }),
         );
