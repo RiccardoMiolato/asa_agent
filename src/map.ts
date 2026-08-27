@@ -3,6 +3,11 @@ import { Position } from "./position.js";
 export type Direction = "up" | "down" | "right" | "left";
 export type CoordinateOffset = readonly [x: number, y: number];
 
+export type NeighborCoord = {
+    coord: Position,
+    direction: Direction
+};
+
 export class GameMap {
     private gameMap: string[][];
     private cols: number;
@@ -15,12 +20,20 @@ export class GameMap {
         this.cols = this.gameMap[0].length;
     }
 
+    public getRows() {
+        return this.rows;
+    }
+
+    public getCols() {
+        return this.cols;
+    }
+
     public getCellValue(coord: Position): string {
         return this.gameMap[coord.x][coord.y];
     }
 
-    public getNeighborsOf(cellPosition: Position): Position[] {
-        let neighbors: Position[] = [];
+    public getNeighborsOf(cellPosition: Position): NeighborCoord[] {
+        let neighbors: NeighborCoord[] = [];
 
         const offsets: CoordinateOffset[] = [[0, 1], [0, -1], [1, 0], [-1, 0]];
         const directions: Direction[] = ["up", "down", "right", "left"];
@@ -30,7 +43,10 @@ export class GameMap {
             const neighbor = new Position(cellPosition.x + offset[0], cellPosition.y + offset[1]);
 
             if(this.isValidCell(neighbor)){
-                neighbors.push(neighbor);
+                neighbors.push({
+                    coord: neighbor,
+                    direction: directions[index]
+                });
             }
         }
 
