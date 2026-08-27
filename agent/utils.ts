@@ -30,8 +30,8 @@ export function getClosestDeliveringCell(agent_pos: Position, delivering_cells: 
     let min_distance = Number.MAX_VALUE;
 
     for (const cell of delivering_cells) {
-        if(unreachable_cell) {
-            if(cell.isEqual(unreachable_cell))
+        if (unreachable_cell) {
+            if (cell.isEqual(unreachable_cell))
                 continue;
         }
 

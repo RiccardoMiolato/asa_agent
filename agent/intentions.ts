@@ -51,7 +51,7 @@ export class SearchIntention extends Intention {
     score(): number { return 0 };
 
     log() {
-        console.log(`\x1b[33mSearchPacket ar ${this.targetLocation ? `(${this.targetLocation.x};${this.targetLocation.y})`: `undefined`}\x1b[0m`);
+        console.log(`\x1b[33mSearchPacket ar ${this.targetLocation ? `(${this.targetLocation.x};${this.targetLocation.y})` : `undefined`}\x1b[0m`);
     }
 }
 
@@ -78,15 +78,15 @@ export class PickUpParcelIntention extends Intention {
         const parcelDistance = this.parcelPosition.distance_Astar(agent.position);
 
         const closestDeliveryFromParcel = getClosestDeliveringCell(this.parcelPosition, beliefs.delivering_cells, beliefs.crates.values().next().value);
-        if (closestDeliveryFromParcel !== undefined){
+        if (closestDeliveryFromParcel !== undefined) {
             const deliveryDistance = this.parcelPosition.distance_Astar(closestDeliveryFromParcel);
 
             const timeToDeliver = ((parcelDistance + deliveryDistance) * beliefs.movement_duration) / 1000.0;
-            if (this.parcel.reward > timeToDeliver){
+            if (this.parcel.reward > timeToDeliver) {
                 let reward = this.parcel.reward - timeToDeliver;
 
                 beliefs.parcels.forEach((parcel: Parcel) => {
-                    if (parcel.carriedBy === agent.id){
+                    if (parcel.carriedBy === agent.id) {
                         reward += Math.max(0, parcel.reward - timeToDeliver);
                     }
                 });
@@ -123,13 +123,13 @@ export class DeliverParcelIntention extends Intention {
     score(): number {
         const closestDeliveryFromParcel = getClosestDeliveringCell(agent.position, beliefs.delivering_cells, beliefs.crates.values().next().value);
 
-        if (closestDeliveryFromParcel !== undefined){
+        if (closestDeliveryFromParcel !== undefined) {
             const timeToDeliver = (agent.position.distance_Astar(closestDeliveryFromParcel) * beliefs.movement_duration) / 1000.0;
 
             let reward = 0;
 
             beliefs.parcels.forEach((parcel: Parcel) => {
-                if (parcel.carriedBy === agent.id){
+                if (parcel.carriedBy === agent.id) {
                     reward += Math.max(0, parcel.reward - timeToDeliver);
                 }
             });

@@ -2,7 +2,7 @@ import { Heap } from 'heap-js';
 import beliefs from './beliefs.js';
 import { Action, MoveDown, MoveLeft, MoveRight, MoveUp } from './move.js';
 
-/**
+/*
  * Class position. Helper used in the project for not dealing anywhere with
  * a couple of coordinates {x, y}
  */
@@ -36,7 +36,7 @@ export class Position {
     }
 }
 
-/**
+/*
  * This is the pathfinding algorithm chosen to be implemented. Since the map is a grid, and usually it's not very big,
  * A* seems the best choice because the heuristic approach should generally decrease the number of nodes explored.
  * Being the agent a real time agent, it is important to be fast during the decision making approach
@@ -48,7 +48,7 @@ export function Astar(
     crates: Map<String, Position>,
     temporary_locked: Position | undefined = undefined):
     Action[] {
-    if(starting_pos.x % 1 !== 0 || starting_pos.y % 1 !== 0) {
+    if (starting_pos.x % 1 !== 0 || starting_pos.y % 1 !== 0) {
         return [];
     }
 
@@ -79,18 +79,18 @@ export function Astar(
             return reconstruct_path(cameFrom, current);
         }
 
-        if(current){
+        if (current) {
             const neighbors = [[0, 1], [0, -1], [1, 0], [-1, 0]];
             const directions = ['up', 'down', 'right', 'left'];
 
             neighbors.forEach(coord => {
                 let neighbor = new Position(current.x + coord[0], current.y + coord[1]);
 
-                if(!valid_cell(neighbor, game_map, directions[neighbors.indexOf(coord)], crates, temporary_locked)) {
+                if (!valid_cell(neighbor, game_map, directions[neighbors.indexOf(coord)], crates, temporary_locked)) {
                     return;
                 }
 
-                if(neighbor) {
+                if (neighbor) {
                     const tentative_gScore = gScore.get(`${current.x},${current.y}`)! + 1;
                     if (tentative_gScore < gScore.get(`${neighbor.x},${neighbor.y}`)!) {
                         cameFrom.set(`${neighbor.x},${neighbor.y}`, current);
@@ -124,9 +124,9 @@ function valid_cell(neighbor: Position, game_map: String[][], direction: String,
     if (game_map[neighbor.x][neighbor.y] === '0') {
         return false;
     } else if (game_map[neighbor.x][neighbor.y] === '↑' && direction === 'down' ||
-                game_map[neighbor.x][neighbor.y] === '→' && direction === 'left' ||
-                game_map[neighbor.x][neighbor.y] === '↓' && direction === 'up' ||
-                game_map[neighbor.x][neighbor.y] === '←' && direction === 'right') {
+        game_map[neighbor.x][neighbor.y] === '→' && direction === 'left' ||
+        game_map[neighbor.x][neighbor.y] === '↓' && direction === 'up' ||
+        game_map[neighbor.x][neighbor.y] === '←' && direction === 'right') {
         return false;
     } else if (game_map[neighbor.x][neighbor.y].includes("5")) {
         // If the cell may contain a crate, I check for obstructions
@@ -152,19 +152,19 @@ function valid_cell(neighbor: Position, game_map: String[][], direction: String,
  * A* path reconstruction algorithm. Once the pathfinding is finished, the complete path
  * is built following a backtracking approach, starting from the end to the start
  */
-function reconstruct_path(cameFrom: Map<String, Position>, current: Position): Action[]{
+function reconstruct_path(cameFrom: Map<String, Position>, current: Position): Action[] {
     const total_path = [];
     while (cameFrom.has(`${current.x},${current.y}`)) {
         const from: Position = current;
         const to: Position = cameFrom.get(`${current.x},${current.y}`)!;
 
-        if(from.x == to.x){
-            if(from.y > to.y)
+        if (from.x == to.x) {
+            if (from.y > to.y)
                 total_path.unshift(new MoveUp());
             else
                 total_path.unshift(new MoveDown());
         } else {
-            if(from.x > to.x)
+            if (from.x > to.x)
                 total_path.unshift(new MoveRight());
             else
                 total_path.unshift(new MoveLeft());

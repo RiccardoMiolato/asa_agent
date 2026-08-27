@@ -37,10 +37,10 @@ class Beliefs {
         const cols = this.map[0].length;
 
         this.delivering_cells = [];
-        this.pickup_cells= [];
+        this.pickup_cells = [];
 
-        for(let row = 0; row < rows; row++){
-            for(let col = 0; col < cols; col++) {
+        for (let row = 0; row < rows; row++) {
+            for (let col = 0; col < cols; col++) {
                 const cell = this.map[row][col];
                 if (cell == '2') {
                     this.delivering_cells.push(new Position(row, col)); // Map is rotated of 90 degree in the game
@@ -63,13 +63,13 @@ class Beliefs {
             const lastUpdate = new Date();
 
             if (!this.parcels.has(id)) {
-                this.parcels.set(id, {id, x, y, carriedBy, reward, lastUpdate});
+                this.parcels.set(id, { id, x, y, carriedBy, reward, lastUpdate });
             } else {
                 const existingParcel = this.parcels.get(id);
 
                 // If the parcel is no more available, I remove it from the beliefs
                 if (existingParcel && existingParcel.reward > (existingParcel.lastUpdate.getTime() - lastUpdate.getTime()) / 1000) {
-                    this.parcels.set(id, {id, x, y, carriedBy, reward, lastUpdate});
+                    this.parcels.set(id, { id, x, y, carriedBy, reward, lastUpdate });
                 } else {
                     this.parcels.delete(id);
                 }
@@ -84,7 +84,7 @@ class Beliefs {
      * To do that is necessary to remove only the parcels I am carrying
      */
     clearDeliveredParcels(): void {
-        this.parcels.forEach((parcel: Parcel, parcel_id: string) =>{
+        this.parcels.forEach((parcel: Parcel, parcel_id: string) => {
             if (parcel.carriedBy === agent.id) {
                 this.parcels.delete(parcel_id);
             }
@@ -98,7 +98,7 @@ class Beliefs {
     private clearExpiredParcels(): void {
         const timeNow = new Date();
 
-        this.parcels.forEach((parcel: Parcel, _) =>{
+        this.parcels.forEach((parcel: Parcel, _) => {
             if ((timeNow.getTime() - parcel.lastUpdate.getTime()) / 1000 > parcel.reward) {
                 this.parcels.delete(parcel.id);
             }

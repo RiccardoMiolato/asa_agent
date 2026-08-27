@@ -21,7 +21,7 @@ class Agent {
 
     constructor() {
         this.id = "";
-        this.position = new Position(0,0); // Initialize beliefs with default values
+        this.position = new Position(0, 0); // Initialize beliefs with default values
 
         this.intentions = [];
 
@@ -29,7 +29,7 @@ class Agent {
         this.plan = new Plan();
     }
 
-    updatePosition(x: number, y: number): void{
+    updatePosition(x: number, y: number): void {
         this.position.x = x;
         this.position.y = y;
     }
@@ -39,7 +39,7 @@ class Agent {
      */
     async agent_loop() {
         await new Promise(r => setTimeout(r, 2000));
-        while(true) {
+        while (true) {
             await new Promise(r => setTimeout(r, beliefs.movement_duration));
 
             const options = optionGeneration();
@@ -57,8 +57,8 @@ class Agent {
             this.currentIntention.log();
             console.log();
 
-            while(!this.plan.isEmpty()) {
-                if (this.currentIntention.getType() == IntentionType.SearchPacket && beliefs.freeParcelsCount() > 0){
+            while (!this.plan.isEmpty()) {
+                if (this.currentIntention.getType() == IntentionType.SearchPacket && beliefs.freeParcelsCount() > 0) {
                     break;
                 }
 
@@ -68,10 +68,10 @@ class Agent {
                 const nextAction = this.plan.topAction();
                 await nextAction?.execute();
 
-                if(nextAction instanceof PickUp) {
+                if (nextAction instanceof PickUp) {
                     beliefs.parcels.forEach(parcel => {
-                        if(parcel.id === (this.currentIntention as PickUpParcelIntention).parcel.id){
-                            if(!parcel.carriedBy)
+                        if (parcel.id === (this.currentIntention as PickUpParcelIntention).parcel.id) {
+                            if (!parcel.carriedBy)
                                 parcel.carriedBy = this.id;
                         }
                     })
@@ -111,13 +111,13 @@ class Agent {
         this.intentions.forEach(intention => {
             const _score = intention.score();
 
-            if (_score > score){
+            if (_score > score) {
                 score = _score;
                 bestOption = intention;
             }
         });
 
-        if(bestOption){
+        if (bestOption) {
             this.currentIntention = bestOption;
         }
     }
@@ -127,7 +127,7 @@ class Agent {
      */
     buildPlan() {
         let actions: Action[];
-        switch(this.currentIntention.getType()) {
+        switch (this.currentIntention.getType()) {
             case IntentionType.PickUpPacket:
                 actions = Astar(
                     beliefs.map,

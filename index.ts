@@ -30,7 +30,7 @@ socket.onConfig((config: any) => {
  * or other events.
  */
 socket.onYou((_agent: any) => {
-    if(!agent.id)
+    if (!agent.id)
         agent.id = _agent["id"];
 
     agent.updatePosition(_agent["x"], _agent["y"]);

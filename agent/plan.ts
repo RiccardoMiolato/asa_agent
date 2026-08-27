@@ -7,12 +7,12 @@ export class Plan {
         this.actions = [];
     }
 
-    newPlan(actions: Action[]){
+    newPlan(actions: Action[]) {
         this.actions = actions;
     }
 
     topAction(): Action | null {
-        if(this.actions.length === 0)
+        if (this.actions.length === 0)
             return null;
 
         return this.actions[0];

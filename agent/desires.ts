@@ -14,19 +14,19 @@ export default function optionGeneration(): Intention[] {
     let hasCarriedParcels = false;
 
     beliefs.parcels.forEach((parcel: Parcel) => {
-        if(!parcel.carriedBy) {
+        if (!parcel.carriedBy) {
             intentions.push(new PickUpParcelIntention(parcel, new Position(parcel.x, parcel.y)));
         } else if (parcel.carriedBy === agent.id && !hasCarriedParcels) {
             const closestDelivery = getClosestDeliveringCell(agent.position, beliefs.delivering_cells, beliefs.crates.values().next().value);
 
-            if(closestDelivery){
+            if (closestDelivery) {
                 intentions.push(new DeliverParcelIntention(closestDelivery));
                 hasCarriedParcels = true;
             }
         }
     });
 
-    if(intentions.length == 0) {
+    if (intentions.length == 0) {
         intentions.push(new SearchIntention());
     }
 
