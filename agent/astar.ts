@@ -15,20 +15,25 @@ export abstract class BasePathfinder {
         temporarilyLocked?: Position,
     ): Action[];
 
+    /** Returns the route length, or `undefined` when the target is unreachable. */
     pathLength(
         gameMap: string[][],
         startingPosition: Position,
         targetPosition: Position,
         crates: ReadonlyMap<string, Position>,
         temporarilyLocked?: Position,
-    ): number {
-        return this.findPath(
+    ): number | undefined {
+        const path = this.findPath(
             gameMap,
             startingPosition,
             targetPosition,
             crates,
             temporarilyLocked,
-        ).length;
+        );
+        if (path.length === 0 && !startingPosition.isEqual(targetPosition)) {
+            return undefined;
+        }
+        return path.length;
     }
 }
 

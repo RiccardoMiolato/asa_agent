@@ -6,7 +6,6 @@ import {
     SearchIntention,
 } from "./intentions.js";
 import { Position } from "./position.js";
-import { getClosestDeliveringCell } from "./utils.js";
 
 export interface AgentState {
     readonly id: string;
@@ -19,10 +18,12 @@ export class IntentionGenerator {
 
     generate(agentState: AgentState): Intention[] {
         const intentions: Intention[] = [];
-        let hasDeliveryIntention = false;
+        const freeParcelIds = new Set<string>();
+        let carriesParcel = false;
 
         for (const parcel of this.beliefs.parcels.values()) {
             if (!parcel.carriedBy) {
+                freeParcelIds.add(parcel.id);
                 intentions.push(
                     new PickUpParcelIntention(
                         parcel,
@@ -32,18 +33,16 @@ export class IntentionGenerator {
                 continue;
             }
 
-            if (parcel.carriedBy !== agentState.id || hasDeliveryIntention) {
-                continue;
+            if (parcel.carriedBy === agentState.id) {
+                carriesParcel = true;
             }
+        }
 
-            const closestDelivery = getClosestDeliveringCell(
-                agentState.position,
-                this.beliefs.delivering_cells,
-                this.beliefs.crates.values().next().value,
-            );
-            if (closestDelivery) {
-                intentions.push(new DeliverParcelIntention(closestDelivery));
-                hasDeliveryIntention = true;
+        if (carriesParcel) {
+            for (const deliveryCell of this.beliefs.delivering_cells) {
+                intentions.push(
+                    new DeliverParcelIntention(deliveryCell, freeParcelIds),
+                );
             }
         }
 
