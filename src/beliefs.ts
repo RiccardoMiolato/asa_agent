@@ -8,6 +8,8 @@ export interface Parcel extends IOParcel {
 }
 
 export class Beliefs {
+    private static readonly REWARD_DECAY_INTERVAL = 1_000;
+
     map: string[][];
 
     // OBJECT POSITIONS
@@ -20,6 +22,8 @@ export class Beliefs {
 
     // TIMER FOR MOVES
     movement_duration: number;
+    frame_duration: number;
+    private lastRewardDecayAt: number | undefined;
     // TODO add player position and id to the believes
 
     constructor() {
@@ -29,11 +33,20 @@ export class Beliefs {
         this.delivering_cells = [];
         this.pickup_cells = [];
         this.movement_duration = 0;
+        this.frame_duration = 0;
+        this.lastRewardDecayAt = undefined;
+    }
+
+    /** Revises all dynamic beliefs from one complete sensing snapshot. */
+    revise(parcels: IOParcel[], crates: IOCrate[]): void {
+        this.senseParcels(parcels);
+        this.senseCrates(crates);
     }
 
     configPhase(config: IOConfig): void {
         this.map = config.GAME.map.tiles;
         this.movement_duration = config.GAME.player.movement_duration;
+        this.frame_duration = config.CLOCK;
 
         const rows = this.map.length;
         const cols = this.map[0].length;
@@ -59,22 +72,15 @@ export class Beliefs {
         parcels.forEach((parcel: IOParcel) => {
             const { id, x, y, carriedBy, reward } = parcel;
             const lastUpdate = new Date();
+            const existingParcel = this.parcels.get(id);
 
-            if (!this.parcels.has(id)) {
-                this.parcels.set(id, { id, x, y, carriedBy, reward, lastUpdate });
-            } else {
-                const existingParcel = this.parcels.get(id);
-
-                // If the parcel is no more available, I remove it from the beliefs
-                if (existingParcel && existingParcel.reward > (existingParcel.lastUpdate.getTime() - lastUpdate.getTime()) / 1000) {
-                    this.parcels.set(id, { id, x, y, carriedBy, reward, lastUpdate });
-                } else {
-                    this.parcels.delete(id);
-                }
+            if (existingParcel && reward < existingParcel.reward) {
+                this.lastRewardDecayAt = lastUpdate.getTime();
             }
-        })
+            this.parcels.set(id, { id, x, y, carriedBy, reward, lastUpdate });
+        });
 
-        this.clearExpiredParcels();
+        this.updateParcelRewards();
     }
 
     /**
@@ -96,36 +102,42 @@ export class Beliefs {
         }
     }
 
-    /**
-     * When a parcel is espired, I know it doesn't exist anymore due to time passing,
-     * I delete it since it is useless having the information
-     */
-    private clearExpiredParcels(): void {
-        const timeNow = new Date();
-
-        this.parcels.forEach((parcel: Parcel, _) => {
-            if ((timeNow.getTime() - parcel.lastUpdate.getTime()) / 1000 > parcel.reward) {
-                this.parcels.delete(parcel.id);
-            }
-        });
-    }
-
-    /**
-     * Update parcel rewards in order to have them aligned
-     * with the real time system the agent is living on
-     */
+    /** Applies complete one-second decay ticks to stale parcel beliefs. */
     updateParcelRewards(): void {
         const timeNow = new Date();
 
         this.parcels.forEach((parcel: Parcel, id: string) => {
-            const elapsedSeconds = (timeNow.getTime() - parcel.lastUpdate.getTime()) / 1000;
-            parcel.reward = Math.max(0, Math.floor(parcel.reward - elapsedSeconds));
-            parcel.lastUpdate = timeNow;
+            const elapsedMilliseconds = timeNow.getTime() - parcel.lastUpdate.getTime();
+            const elapsedTicks = Math.floor(
+                elapsedMilliseconds / Beliefs.REWARD_DECAY_INTERVAL,
+            );
+            if (elapsedTicks === 0) {
+                return;
+            }
+
+            parcel.reward = Math.max(0, parcel.reward - elapsedTicks);
+            parcel.lastUpdate = new Date(
+                parcel.lastUpdate.getTime()
+                + elapsedTicks * Beliefs.REWARD_DECAY_INTERVAL,
+            );
 
             if (parcel.reward <= 0) {
                 this.parcels.delete(id);
             }
         });
+    }
+
+    /** Returns a latency-adjusted delay until the next server reward-decay tick. */
+    millisecondsUntilNextRewardDecay(): number | undefined {
+        if (this.lastRewardDecayAt === undefined) {
+            return undefined;
+        }
+
+        const elapsed = Date.now() - this.lastRewardDecayAt;
+        const elapsedInCurrentInterval = elapsed % Beliefs.REWARD_DECAY_INTERVAL;
+        const delayFromObservedSnapshot = Beliefs.REWARD_DECAY_INTERVAL
+            - elapsedInCurrentInterval;
+        return Math.max(0, delayFromObservedSnapshot - this.frame_duration);
     }
 
     // Sense the crates

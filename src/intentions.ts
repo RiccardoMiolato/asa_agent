@@ -12,19 +12,80 @@ export interface IntentionContext {
     readonly deliveringCells: readonly Position[];
     readonly parcels: ReadonlyMap<string, Parcel>;
     readonly movementDuration: number;
+    readonly frameDuration: number;
+    readonly millisecondsUntilNextRewardDecay: number | undefined;
     readonly freeParcelsCount: number;
     readonly agentId: string;
     readonly pathfinder: BasePathfinder;
     readonly actionFactory: ActionFactory;
 }
 
+/** Structured description used to log an intention without recomputing its score. */
+export type IntentionDescription =
+    | {
+        readonly type: "search";
+        readonly target: Position | undefined;
+    }
+    | {
+        readonly type: "pick-up";
+        readonly parcelId: string;
+        readonly target: Position;
+        readonly reward: number;
+    }
+    | {
+        readonly type: "deliver";
+        readonly target: Position;
+        readonly parcelCount: number;
+        readonly estimatedGain: number;
+    };
+
 export abstract class Intention {
     abstract score(context: IntentionContext): number;
     abstract buildActions(context: IntentionContext): Action[];
-    abstract log(context: IntentionContext): void;
+    abstract describe(): IntentionDescription;
 
     shouldInterrupt(_context: IntentionContext): boolean {
         return false;
+    }
+}
+
+/** Base for intentions whose score depends on reward decay during execution. */
+export abstract class RewardIntention extends Intention {
+    /**
+     * Predicts the integer reward remaining after the real action-loop delays.
+     * Each move incurs a client wait, server movement, and frame synchronization.
+     */
+    protected estimateReward(
+        reward: number,
+        movementCount: number,
+        extraWaitCount: number,
+        movementDuration: number,
+        frameDuration: number,
+        millisecondsUntilNextDecay: number | undefined,
+    ): number {
+        const executionMilliseconds = (
+            movementCount * 2 + extraWaitCount
+        ) * movementDuration + movementCount * frameDuration;
+        const decayTicks = this.estimateDecayTicks(
+            executionMilliseconds,
+            millisecondsUntilNextDecay,
+        );
+        return Math.max(0, reward - decayTicks);
+    }
+
+    private estimateDecayTicks(
+        executionMilliseconds: number,
+        millisecondsUntilNextDecay: number | undefined,
+    ): number {
+        if (millisecondsUntilNextDecay === undefined) {
+            return Math.round(executionMilliseconds / 1_000);
+        }
+        if (executionMilliseconds < millisecondsUntilNextDecay) {
+            return 0;
+        }
+        return 1 + Math.floor(
+            (executionMilliseconds - millisecondsUntilNextDecay) / 1_000,
+        );
     }
 }
 
@@ -58,16 +119,16 @@ export class SearchIntention extends Intention {
         return context.freeParcelsCount > 0;
     }
 
-    log(_context: IntentionContext): void {
-        const target = this.targetLocation
-            ? `(${this.targetLocation.x};${this.targetLocation.y})`
-            : "undefined";
-        console.log(`\x1b[33mSearchPacket at ${target}\x1b[0m`);
+    describe(): IntentionDescription {
+        return {
+            type: "search",
+            target: this.targetLocation,
+        };
     }
 }
 
 /** Picks up a known parcel when its expected reward is positive. */
-export class PickUpParcelIntention extends Intention {
+export class PickUpParcelIntention extends RewardIntention {
     constructor(
         readonly parcel: Parcel,
         readonly parcelPosition: Position,
@@ -109,11 +170,15 @@ export class PickUpParcelIntention extends Intention {
             return -1;
         }
 
-        const deliveryTime = (
-            (pickupDistance + shortestDeliveryDistance)
-            * context.movementDuration
-        ) / 1000;
-        const candidateReward = Math.max(0, this.parcel.reward - deliveryTime);
+        const totalMovementCount = pickupDistance + shortestDeliveryDistance;
+        const candidateReward = this.estimateReward(
+            this.parcel.reward,
+            totalMovementCount,
+            3,
+            context.movementDuration,
+            context.frameDuration,
+            context.millisecondsUntilNextRewardDecay,
+        );
         if (candidateReward === 0) {
             return -1;
         }
@@ -121,7 +186,14 @@ export class PickUpParcelIntention extends Intention {
         let totalReward = candidateReward;
         for (const parcel of context.parcels.values()) {
             if (parcel.carriedBy === context.agentId) {
-                totalReward += Math.max(0, parcel.reward - deliveryTime);
+                totalReward += this.estimateReward(
+                    parcel.reward,
+                    totalMovementCount,
+                    3,
+                    context.movementDuration,
+                    context.frameDuration,
+                    context.millisecondsUntilNextRewardDecay,
+                );
             }
         }
         return totalReward;
@@ -138,16 +210,21 @@ export class PickUpParcelIntention extends Intention {
         return actions;
     }
 
-    log(context: IntentionContext): void {
-        console.log(
-            `\x1b[32mPickUp packet from (${this.parcelPosition.x};${this.parcelPosition.y}) - Score: ${this.score(context)}\x1b[0m`,
-        );
+    describe(): IntentionDescription {
+        return {
+            type: "pick-up",
+            parcelId: this.parcel.id,
+            target: this.parcelPosition,
+            reward: this.parcel.reward,
+        };
     }
 }
 
 /** Delivers all parcels currently carried by the agent. */
-export class DeliverParcelIntention extends Intention {
+export class DeliverParcelIntention extends RewardIntention {
     private readonly knownFreeParcelIds: ReadonlySet<string>;
+    private carriedParcelCount: number;
+    private estimatedDeliveryGain: number;
 
     constructor(
         readonly deliveryCell: Position,
@@ -155,9 +232,19 @@ export class DeliverParcelIntention extends Intention {
     ) {
         super();
         this.knownFreeParcelIds = new Set(knownFreeParcelIds);
+        this.carriedParcelCount = 0;
+        this.estimatedDeliveryGain = 0;
     }
 
     score(context: IntentionContext): number {
+        this.carriedParcelCount = 0;
+        this.estimatedDeliveryGain = 0;
+        for (const parcel of context.parcels.values()) {
+            if (parcel.carriedBy === context.agentId) {
+                this.carriedParcelCount += 1;
+            }
+        }
+
         const firstDeliveryDistance = context.pathfinder.pathLength(
             context.gameMap,
             context.agentPosition,
@@ -168,15 +255,20 @@ export class DeliverParcelIntention extends Intention {
             return -1;
         }
 
-        const firstDeliveryTime = (
-            firstDeliveryDistance * context.movementDuration
-        ) / 1000;
         let carriedReward = 0;
         for (const parcel of context.parcels.values()) {
             if (parcel.carriedBy === context.agentId) {
-                carriedReward += Math.max(0, parcel.reward - firstDeliveryTime);
+                carriedReward += this.estimateReward(
+                    parcel.reward,
+                    firstDeliveryDistance,
+                    1,
+                    context.movementDuration,
+                    context.frameDuration,
+                    context.millisecondsUntilNextRewardDecay,
+                );
             }
         }
+        this.estimatedDeliveryGain = carriedReward;
         if (carriedReward === 0) {
             return -1;
         }
@@ -221,16 +313,19 @@ export class DeliverParcelIntention extends Intention {
                 continue;
             }
 
-            const finalDeliveryTime = (
-                (
-                    firstDeliveryDistance
-                    + pickupDistance
-                    + shortestDeliveryDistance
-                ) * context.movementDuration
-            ) / 1000;
+            const totalMovementCount = firstDeliveryDistance
+                + pickupDistance
+                + shortestDeliveryDistance;
             bestContinuationReward = Math.max(
                 bestContinuationReward,
-                Math.max(0, parcel.reward - finalDeliveryTime),
+                this.estimateReward(
+                    parcel.reward,
+                    totalMovementCount,
+                    5,
+                    context.movementDuration,
+                    context.frameDuration,
+                    context.millisecondsUntilNextRewardDecay,
+                ),
             );
         }
 
@@ -262,9 +357,12 @@ export class DeliverParcelIntention extends Intention {
         return freeParcelCount !== this.knownFreeParcelIds.size;
     }
 
-    log(context: IntentionContext): void {
-        console.log(
-            `\x1b[36mDelivering packet at (${this.deliveryCell.x};${this.deliveryCell.y}) - Score: ${this.score(context)}\x1b[0m`,
-        );
+    describe(): IntentionDescription {
+        return {
+            type: "deliver",
+            target: this.deliveryCell,
+            parcelCount: this.carriedParcelCount,
+            estimatedGain: this.estimatedDeliveryGain,
+        };
     }
 }

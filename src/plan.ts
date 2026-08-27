@@ -27,7 +27,8 @@ export class Plan {
         return this.actions.length == 0;
     }
 
-    log(): void {
-        console.log(this.actions);
+    size(): number {
+        return this.actions.length;
     }
+
 }

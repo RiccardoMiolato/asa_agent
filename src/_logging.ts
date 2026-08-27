@@ -1,0 +1,124 @@
+import type { IntentionDescription } from "./intentions.js";
+import type { Position } from "./position.js";
+
+/** One available intention and its score in the current deliberation. */
+export interface IntentionLogEntry {
+    readonly description: IntentionDescription;
+    readonly score: number;
+    readonly selected: boolean;
+}
+
+/** Belief summary used to explain the state behind a decision. */
+export interface BeliefLogSummary {
+    readonly knownParcels: number;
+    readonly freeParcels: number;
+    readonly carriedByAgent: number;
+    readonly carriedByOthers: number;
+    readonly knownCrates: number;
+}
+
+/** Complete, structured record of one deliberation cycle. */
+export interface DeliberationLog {
+    readonly cycle: number;
+    readonly agentId: string;
+    readonly agentScore: number | undefined;
+    readonly position: Position;
+    readonly beliefs: BeliefLogSummary;
+    readonly options: readonly IntentionLogEntry[];
+    readonly plannedActions: number;
+}
+
+/** Authoritative score increase reported by the server after a delivery. */
+export interface DeliveryGainLog {
+    readonly pointsGained: number;
+    readonly totalScore: number;
+}
+
+/** Output contract for agent decisions. */
+export abstract class BaseAgentLogger {
+    abstract logDeliberation(deliberation: DeliberationLog): void;
+    abstract logDeliveryGain(delivery: DeliveryGainLog): void;
+}
+
+/** Human-readable terminal logger for complete agent decisions. */
+export class ConsoleAgentLogger extends BaseAgentLogger {
+    logDeliberation(deliberation: DeliberationLog): void {
+        const { x, y } = deliberation.position;
+        const { beliefs } = deliberation;
+        const rankedOptions = [...deliberation.options].sort(
+            (first: IntentionLogEntry, second: IntentionLogEntry): number => {
+                const scoreDifference = second.score - first.score;
+                if (scoreDifference !== 0) {
+                    return scoreDifference;
+                }
+                return Number(second.selected) - Number(first.selected);
+            },
+        );
+
+        console.log("\n============================================================");
+        console.log(
+            `DELIBERATION ${deliberation.cycle}`
+            + ` | agent=${deliberation.agentId || "unknown"}`
+            + ` | position=(${x}, ${y})`
+            + ` | score=${deliberation.agentScore ?? "unknown"}`,
+        );
+        console.log(
+            `BELIEFS | parcels=${beliefs.knownParcels}`
+            + ` free=${beliefs.freeParcels}`
+            + ` carried-by-me=${beliefs.carriedByAgent}`
+            + ` carried-by-others=${beliefs.carriedByOthers}`
+            + ` crates=${beliefs.knownCrates}`,
+        );
+        console.log(`OPTIONS | ${rankedOptions.length} available (highest score first)`);
+
+        rankedOptions.forEach((option: IntentionLogEntry, index: number): void => {
+            const marker = option.selected ? ">" : " ";
+            const state = option.selected
+                ? "SELECTED"
+                : option.score < 0
+                    ? "NOT VIABLE"
+                    : "CANDIDATE";
+            console.log(
+                `${marker} #${index + 1} [${state}]`
+                + ` score=${option.score.toFixed(3)}`
+                + ` | ${this.formatDescription(option.description)}`,
+            );
+        });
+
+        const selectedOption = rankedOptions.find(
+            (option: IntentionLogEntry): boolean => option.selected,
+        );
+        console.log(
+            `DECISION | ${selectedOption
+                ? this.formatDescription(selectedOption.description)
+                : "none"}`
+            + `${selectedOption ? ` | score=${selectedOption.score.toFixed(3)}` : ""}`
+            + ` | planned actions=${deliberation.plannedActions}`,
+        );
+        console.log("============================================================");
+    }
+
+    logDeliveryGain(delivery: DeliveryGainLog): void {
+        console.log(
+            `\nDELIVERY RESULT | actual-points-gained=+${delivery.pointsGained}`
+            + ` | total-score=${delivery.totalScore}`,
+        );
+    }
+
+    private formatDescription(description: IntentionDescription): string {
+        switch (description.type) {
+            case "search":
+                return description.target
+                    ? `SEARCH target=(${description.target.x}, ${description.target.y})`
+                    : "SEARCH target=chosen only if selected";
+            case "pick-up":
+                return `PICK-UP parcel=${description.parcelId}`
+                    + ` target=(${description.target.x}, ${description.target.y})`
+                    + ` current-reward=${description.reward}`;
+            case "deliver":
+                return `DELIVER target=(${description.target.x}, ${description.target.y})`
+                    + ` parcels=${description.parcelCount}`
+                    + ` estimated-delivery-gain=${description.estimatedGain.toFixed(3)}`;
+        }
+    }
+}

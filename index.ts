@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { DjsConnect, type DjsClientSocket } from "@unitn-asa/deliveroo-js-sdk/client";
 import { Agent } from './src/agent.js';
+import { ConsoleAgentLogger } from './src/_logging.js';
 import { AStarPathfinder } from './src/astar.js';
 import { Beliefs } from './src/beliefs.js';
 import { IntentionGenerator } from './src/desires.js';
@@ -25,6 +26,7 @@ const agent = new Agent(
     intentionGenerator,
     pathfinder,
     actionFactory,
+    new ConsoleAgentLogger(),
 );
 
 socket.onConnect((): void => {
@@ -49,6 +51,8 @@ socket.onYou((_agent: IOAgent): void => {
     if (!agent.id)
         agent.id = _agent.id;
 
+    agent.updateScore(_agent.score);
+
     if (_agent.x !== undefined && _agent.y !== undefined) {
         agent.updatePosition(_agent.x, _agent.y);
     }
@@ -60,8 +64,7 @@ socket.onYou((_agent: IOAgent): void => {
  * players' agent positions.
  */
 socket.onSensing((sensing: IOSensing): void => {
-    beliefs.senseParcels(sensing.parcels);
-    beliefs.senseCrates(sensing.crates);
+    beliefs.revise(sensing.parcels, sensing.crates);
 });
 
 void agent.agent_loop();

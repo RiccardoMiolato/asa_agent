@@ -1,4 +1,9 @@
 import type { BasePathfinder } from "./astar.js";
+import {
+    type BaseAgentLogger,
+    type BeliefLogSummary,
+    type IntentionLogEntry,
+} from "./_logging.js";
 import type { Beliefs } from "./beliefs.js";
 import type { IntentionGenerator } from "./desires.js";
 import { SearchIntention, type Intention, type IntentionContext } from "./intentions.js";
@@ -6,31 +11,54 @@ import type { ActionFactory } from "./move.js";
 import { Plan } from "./plan.js";
 import { Position } from "./position.js";
 
+interface ScoredIntention {
+    readonly intention: Intention;
+    readonly score: number;
+}
+
 /** Coordinates intention generation, selection, planning, and execution. */
 export class Agent {
     id: string;
     readonly position: Position;
 
+    private score: number | undefined;
     private intentions: Intention[];
     private currentIntention: Intention;
     private readonly plan: Plan;
+    private deliberationCycle: number;
 
     constructor(
         private readonly beliefs: Beliefs,
         private readonly intentionGenerator: IntentionGenerator,
         private readonly pathfinder: BasePathfinder,
         private readonly actionFactory: ActionFactory,
+        private readonly logger: BaseAgentLogger,
     ) {
         this.id = "";
         this.position = new Position(0, 0);
+        this.score = undefined;
         this.intentions = [];
         this.currentIntention = new SearchIntention();
         this.plan = new Plan();
+        this.deliberationCycle = 0;
     }
 
     updatePosition(x: number, y: number): void {
         this.position.x = x;
         this.position.y = y;
+    }
+
+    /** Applies an authoritative score update and reports newly awarded points. */
+    updateScore(score: number): void {
+        const previousScore = this.score;
+        this.score = score;
+        if (previousScore === undefined || score <= previousScore) {
+            return;
+        }
+        this.logger.logDeliveryGain({
+            pointsGained: score - previousScore,
+            totalScore: score,
+        });
     }
 
     /** Continuously selects and executes the most valuable available intention. */
@@ -42,6 +70,8 @@ export class Agent {
                 setTimeout(resolve, this.beliefs.movement_duration)
             );
 
+            this.deliberationCycle += 1;
+            this.beliefs.updateParcelRewards();
             const options = this.intentionGenerator.generate({
                 id: this.id,
                 position: this.position,
@@ -49,15 +79,18 @@ export class Agent {
             this.addIntentions(options);
             this.pathfinder.clearPathLengthCache();
 
-            const loggingContext = this.getIntentionContext();
-            options.forEach((option: Intention) => option.log(loggingContext));
-
-            this.filterOptions();
-            this.buildPlan();
-
-            console.log("Proceeding with:");
-            this.currentIntention.log(this.getIntentionContext());
-            console.log();
+            const context = this.getIntentionContext();
+            const evaluatedOptions = this.filterOptions(context);
+            this.buildPlan(context);
+            this.logger.logDeliberation({
+                cycle: this.deliberationCycle,
+                agentId: this.id,
+                agentScore: this.score,
+                position: this.position,
+                beliefs: this.makeBeliefLogSummary(),
+                options: this.makeOptionLogEntries(evaluatedOptions),
+                plannedActions: this.plan.size(),
+            });
 
             while (!this.plan.isEmpty()) {
                 if (this.currentIntention.shouldInterrupt(this.getIntentionContext())) {
@@ -95,15 +128,24 @@ export class Agent {
         this.intentions = [];
     }
 
-    /** Selects the highest-scoring intention, falling back to exploration. */
-    filterOptions(): void {
-        this.beliefs.updateParcelRewards();
-        const context = this.getIntentionContext();
-        let bestOption: Intention = new SearchIntention();
-        let bestScore = bestOption.score(context);
+    /** Scores each option once and selects the highest-scoring intention. */
+    filterOptions(context: IntentionContext = this.getIntentionContext()): ScoredIntention[] {
+        const fallback = this.intentions.find(
+            (intention: Intention): boolean => intention instanceof SearchIntention,
+        ) ?? new SearchIntention();
+        let bestOption: Intention = fallback;
+        let bestScore = fallback.score(context);
+        const scoredIntentions: ScoredIntention[] = [{
+            intention: fallback,
+            score: bestScore,
+        }];
 
         for (const intention of this.intentions) {
+            if (intention === fallback) {
+                continue;
+            }
             const score = intention.score(context);
+            scoredIntentions.push({ intention, score });
             if (score >= bestScore) {
                 bestScore = score;
                 bestOption = intention;
@@ -111,11 +153,46 @@ export class Agent {
         }
 
         this.currentIntention = bestOption;
+        return scoredIntentions;
     }
 
-    buildPlan(): void {
-        const actions = this.currentIntention.buildActions(this.getIntentionContext());
+    buildPlan(context: IntentionContext = this.getIntentionContext()): void {
+        const actions = this.currentIntention.buildActions(context);
         this.plan.newPlan(actions);
+    }
+
+    private makeOptionLogEntries(
+        evaluatedOptions: readonly ScoredIntention[],
+    ): IntentionLogEntry[] {
+        return evaluatedOptions.map(
+            ({ intention, score }: ScoredIntention): IntentionLogEntry => ({
+                description: intention.describe(),
+                score,
+                selected: intention === this.currentIntention,
+            }),
+        );
+    }
+
+    private makeBeliefLogSummary(): BeliefLogSummary {
+        let freeParcels = 0;
+        let carriedByAgent = 0;
+        let carriedByOthers = 0;
+        for (const parcel of this.beliefs.parcels.values()) {
+            if (!parcel.carriedBy) {
+                freeParcels += 1;
+            } else if (parcel.carriedBy === this.id) {
+                carriedByAgent += 1;
+            } else {
+                carriedByOthers += 1;
+            }
+        }
+        return {
+            knownParcels: this.beliefs.parcels.size,
+            freeParcels,
+            carriedByAgent,
+            carriedByOthers,
+            knownCrates: this.beliefs.crates.size,
+        };
     }
 
     private getIntentionContext(): IntentionContext {
@@ -127,6 +204,9 @@ export class Agent {
             deliveringCells: this.beliefs.delivering_cells,
             parcels: this.beliefs.parcels,
             movementDuration: this.beliefs.movement_duration,
+            frameDuration: this.beliefs.frame_duration,
+            millisecondsUntilNextRewardDecay:
+                this.beliefs.millisecondsUntilNextRewardDecay(),
             freeParcelsCount: this.beliefs.freeParcelsCount(),
             agentId: this.id,
             pathfinder: this.pathfinder,
