@@ -18,3 +18,14 @@ declare module '@unitn-asa/deliveroo-js-sdk/client' {
         autoconnect?: boolean,
     ): DjsClientSocket;
 }
+
+declare module '@unitn-asa/pddl-client' {
+    interface SolverResult {
+      // tipizza il risultato
+    }
+
+    export function onlineSolver(
+      domain: string,
+      problem: string
+    ): Promise<SolverResult>;
+}
