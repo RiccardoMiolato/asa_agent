@@ -1,7 +1,10 @@
 import 'dotenv/config';
 import { DjsConnect, type DjsClientSocket } from "@unitn-asa/deliveroo-js-sdk/client";
-import agent from './agent/agent.js';
-import beliefs from './agent/beliefs.js';
+import { Agent } from './agent/agent.js';
+import { AStarPathfinder } from './agent/astar.js';
+import { Beliefs } from './agent/beliefs.js';
+import { IntentionGenerator } from './agent/desires.js';
+import { ActionFactory } from './agent/move.js';
 import type { IOAgent } from './types/IOAgent.js';
 import type { IOConfig } from './types/IOConfig.js';
 import type { IOSensing } from './types/IOSensing.js';
@@ -13,6 +16,16 @@ const agent_name = process.env.NAME || "cardo";
 
 console.log("Connecting...");
 const socket: DjsClientSocket = DjsConnect(host, token, agent_name);
+const beliefs = new Beliefs();
+const actionFactory = new ActionFactory(socket, beliefs);
+const pathfinder = new AStarPathfinder(actionFactory);
+const intentionGenerator = new IntentionGenerator(beliefs);
+const agent = new Agent(
+    beliefs,
+    intentionGenerator,
+    pathfinder,
+    actionFactory,
+);
 
 socket.onConnect((): void => {
     console.log("Connected to the game server!")
@@ -51,5 +64,4 @@ socket.onSensing((sensing: IOSensing): void => {
     beliefs.senseCrates(sensing.crates);
 });
 
-agent.agent_loop();
-export default socket;
+void agent.agent_loop();

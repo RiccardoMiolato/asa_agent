@@ -1,4 +1,4 @@
-import { Position } from "./astar.js";
+import type { Position } from "./position.js";
 
 /**
  * Returns the string of the direction the agent is moving to,
@@ -25,7 +25,7 @@ export function getDirection(actual_pos: Position, next_pos: Position): string {
  * Returns the closest delivering cell to the agent, so it can deliver
  * without loosing too much time
  */
-export function getClosestDeliveringCell(agent_pos: Position, delivering_cells: Position[], unreachable_cell: Position | undefined = undefined): Position | undefined {
+export function getClosestDeliveringCell(agent_pos: Position, delivering_cells: readonly Position[], unreachable_cell: Position | undefined = undefined): Position | undefined {
     let closest_cell: Position | undefined = undefined;
     let min_distance = Number.MAX_VALUE;
 

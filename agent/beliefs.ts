@@ -1,14 +1,13 @@
 import type { IOConfig } from "../types/IOConfig.js";
 import type { IOCrate } from "../types/IOCrate.js";
 import type { IOParcel } from "../types/IOParcel.js";
-import agent from "./agent.js";
-import { Position } from "./astar.js";
+import { Position } from "./position.js";
 
 export interface Parcel extends IOParcel {
     lastUpdate: Date;
 }
 
-class Beliefs {
+export class Beliefs {
     map: string[][];
 
     // OBJECT POSITIONS
@@ -33,9 +32,7 @@ class Beliefs {
     }
 
     configPhase(config: IOConfig): void {
-        this.map = config.GAME.map.tiles.map((row: unknown[]) =>
-            row.map((cell: unknown) => String(cell))
-        );
+        this.map = config.GAME.map.tiles;
         this.movement_duration = config.GAME.player.movement_duration;
 
         const rows = this.map.length;
@@ -84,9 +81,9 @@ class Beliefs {
      * When I deliver parcels, I delete them from the map I am keeping
      * To do that is necessary to remove only the parcels I am carrying
      */
-    clearDeliveredParcels(): void {
+    clearDeliveredParcels(agentId: string): void {
         this.parcels.forEach((parcel: Parcel, parcel_id: string) => {
-            if (parcel.carriedBy === agent.id) {
+            if (parcel.carriedBy === agentId) {
                 this.parcels.delete(parcel_id);
             }
         });
@@ -174,5 +171,3 @@ class Beliefs {
         return count;
     }
 }
-
-export default new Beliefs();

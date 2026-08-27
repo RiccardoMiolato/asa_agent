@@ -1,4 +1,4 @@
-import { Action } from "./move.js";
+import type { Action } from "./move.js";
 
 export class Plan {
     private actions: Action[];

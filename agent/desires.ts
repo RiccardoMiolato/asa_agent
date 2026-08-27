@@ -1,34 +1,56 @@
-/**
- * This files contains the functions intended to take knowledge
- * relative to the world and convert it into Desires
- */
-
-import agent from "./agent.js";
-import { Position } from "./astar.js";
-import beliefs, { Parcel } from "./beliefs.js";
-import { DeliverParcelIntention, Intention, PickUpParcelIntention, SearchIntention } from "./intentions.js";
+import type { Beliefs } from "./beliefs.js";
+import {
+    DeliverParcelIntention,
+    type Intention,
+    PickUpParcelIntention,
+    SearchIntention,
+} from "./intentions.js";
+import { Position } from "./position.js";
 import { getClosestDeliveringCell } from "./utils.js";
 
-export default function optionGeneration(): Intention[] {
-    let intentions: Intention[] = [];
-    let hasCarriedParcels = false;
+export interface AgentState {
+    readonly id: string;
+    readonly position: Position;
+}
 
-    beliefs.parcels.forEach((parcel: Parcel) => {
-        if (!parcel.carriedBy) {
-            intentions.push(new PickUpParcelIntention(parcel, new Position(parcel.x, parcel.y)));
-        } else if (parcel.carriedBy === agent.id && !hasCarriedParcels) {
-            const closestDelivery = getClosestDeliveringCell(agent.position, beliefs.delivering_cells, beliefs.crates.values().next().value);
+/** Generates the intentions available from the current agent and world state. */
+export class IntentionGenerator {
+    constructor(private readonly beliefs: Beliefs) { }
 
+    generate(agentState: AgentState): Intention[] {
+        const intentions: Intention[] = [];
+        let hasDeliveryIntention = false;
+
+        for (const parcel of this.beliefs.parcels.values()) {
+            if (!parcel.carriedBy) {
+                intentions.push(
+                    new PickUpParcelIntention(
+                        parcel,
+                        new Position(parcel.x, parcel.y),
+                    ),
+                );
+                continue;
+            }
+
+            if (parcel.carriedBy !== agentState.id || hasDeliveryIntention) {
+                continue;
+            }
+
+            const closestDelivery = getClosestDeliveringCell(
+                agentState.position,
+                this.beliefs.delivering_cells,
+                this.beliefs.crates.values().next().value,
+            );
             if (closestDelivery) {
                 intentions.push(new DeliverParcelIntention(closestDelivery));
-                hasCarriedParcels = true;
+                hasDeliveryIntention = true;
             }
         }
-    });
 
-    if (intentions.length == 0) {
-        intentions.push(new SearchIntention());
+        if (intentions.length === 0) {
+            intentions.push(new SearchIntention());
+        }
+
+        return intentions;
     }
-
-    return intentions;
 }

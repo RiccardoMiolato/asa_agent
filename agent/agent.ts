@@ -1,29 +1,29 @@
-import { Position } from "./astar.js";
-import beliefs from "./beliefs.js";
-import optionGeneration from "./desires.js";
-import { Intention, IntentionContext, SearchIntention } from "./intentions.js";
+import type { BasePathfinder } from "./astar.js";
+import type { Beliefs } from "./beliefs.js";
+import type { IntentionGenerator } from "./desires.js";
+import { SearchIntention, type Intention, type IntentionContext } from "./intentions.js";
+import type { ActionFactory } from "./move.js";
 import { Plan } from "./plan.js";
+import { Position } from "./position.js";
 
-/**
- * Class that manages the main agent logic
- * Keeps track of the agent statistics and continues to
- * check the environment to decide the best move available
- */
-class Agent {
+/** Coordinates intention generation, selection, planning, and execution. */
+export class Agent {
     id: string;
-    position: Position;
+    readonly position: Position;
 
     private intentions: Intention[];
-
     private currentIntention: Intention;
-    private plan: Plan;
+    private readonly plan: Plan;
 
-    constructor() {
+    constructor(
+        private readonly beliefs: Beliefs,
+        private readonly intentionGenerator: IntentionGenerator,
+        private readonly pathfinder: BasePathfinder,
+        private readonly actionFactory: ActionFactory,
+    ) {
         this.id = "";
-        this.position = new Position(0, 0); // Initialize beliefs with default values
-
+        this.position = new Position(0, 0);
         this.intentions = [];
-
         this.currentIntention = new SearchIntention();
         this.plan = new Plan();
     }
@@ -33,27 +33,29 @@ class Agent {
         this.position.y = y;
     }
 
-    /**
-     * Main agent's logic loop
-     */
+    /** Continuously selects and executes the most valuable available intention. */
     async agent_loop(): Promise<void> {
-        await new Promise(r => setTimeout(r, 2000));
+        await new Promise<void>((resolve) => setTimeout(resolve, 2000));
+
         while (true) {
-            await new Promise(r => setTimeout(r, beliefs.movement_duration));
+            await new Promise<void>((resolve) =>
+                setTimeout(resolve, this.beliefs.movement_duration)
+            );
 
-            const options = optionGeneration();
-
+            const options = this.intentionGenerator.generate({
+                id: this.id,
+                position: this.position,
+            });
             this.addIntentions(options);
 
-            options.forEach((option) => {
-                option.log();
-            });
+            const loggingContext = this.getIntentionContext();
+            options.forEach((option: Intention) => option.log(loggingContext));
 
             this.filterOptions();
             this.buildPlan();
 
-            console.log("Proceding with: ");
-            this.currentIntention.log();
+            console.log("Proceeding with:");
+            this.currentIntention.log(this.getIntentionContext());
             console.log();
 
             while (!this.plan.isEmpty()) {
@@ -61,9 +63,10 @@ class Agent {
                     break;
                 }
 
-                await new Promise(r => setTimeout(r, beliefs.movement_duration));
+                await new Promise<void>((resolve) =>
+                    setTimeout(resolve, this.beliefs.movement_duration)
+                );
 
-                // console.log("Executing: ", this.plan.topAction());
                 const nextAction = this.plan.topAction();
                 if (!nextAction) {
                     break;
@@ -91,18 +94,15 @@ class Agent {
         this.intentions = [];
     }
 
-    /**
-     * Takes the best option to pursue
-     */
+    /** Selects the highest-scoring intention, falling back to exploration. */
     filterOptions(): void {
+        this.beliefs.updateParcelRewards();
+        const context = this.getIntentionContext();
         let bestOption: Intention = new SearchIntention();
-        let bestScore = bestOption.score(); // 0
-
-        beliefs.updateParcelRewards();
+        let bestScore = bestOption.score(context);
 
         for (const intention of this.intentions) {
-            const score = intention.score();
-
+            const score = intention.score(context);
             if (score >= bestScore) {
                 bestScore = score;
                 bestOption = intention;
@@ -112,9 +112,6 @@ class Agent {
         this.currentIntention = bestOption;
     }
 
-    /**
-     * Plan how to behave
-     */
     buildPlan(): void {
         const actions = this.currentIntention.buildActions(this.getIntentionContext());
         this.plan.newPlan(actions);
@@ -122,14 +119,17 @@ class Agent {
 
     private getIntentionContext(): IntentionContext {
         return {
-            gameMap: beliefs.map,
+            gameMap: this.beliefs.map,
             agentPosition: this.position,
-            crates: beliefs.crates,
-            pickupCells: beliefs.pickup_cells,
-            freeParcelsCount: beliefs.freeParcelsCount(),
+            crates: this.beliefs.crates,
+            pickupCells: this.beliefs.pickup_cells,
+            deliveringCells: this.beliefs.delivering_cells,
+            parcels: this.beliefs.parcels,
+            movementDuration: this.beliefs.movement_duration,
+            freeParcelsCount: this.beliefs.freeParcelsCount(),
             agentId: this.id,
+            pathfinder: this.pathfinder,
+            actionFactory: this.actionFactory,
         };
     }
 }
-
-export default new Agent();

@@ -1,45 +1,39 @@
-import agent from "./agent.js";
-import { Astar, Position } from "./astar.js";
-import beliefs, { Parcel } from "./beliefs.js";
-import { Action, Drop, PickUp } from "./move.js";
+import type { BasePathfinder } from "./astar.js";
+import type { Parcel } from "./beliefs.js";
+import type { Action, ActionFactory } from "./move.js";
+import type { Position } from "./position.js";
 import { getClosestDeliveringCell } from "./utils.js";
 
+/** Current world state and services available to an intention. */
 export interface IntentionContext {
-    // readonly bc we don't want a method to modify context properties
     readonly gameMap: string[][];
     readonly agentPosition: Position;
-    readonly crates: Map<string, Position>;
-    readonly pickupCells: Position[];
+    readonly crates: ReadonlyMap<string, Position>;
+    readonly pickupCells: readonly Position[];
+    readonly deliveringCells: readonly Position[];
+    readonly parcels: ReadonlyMap<string, Parcel>;
+    readonly movementDuration: number;
     readonly freeParcelsCount: number;
     readonly agentId: string;
+    readonly pathfinder: BasePathfinder;
+    readonly actionFactory: ActionFactory;
 }
 
 export abstract class Intention {
-    abstract score(): number;
+    abstract score(context: IntentionContext): number;
     abstract buildActions(context: IntentionContext): Action[];
-    abstract log(): void;
+    abstract log(context: IntentionContext): void;
 
     shouldInterrupt(_context: IntentionContext): boolean {
         return false;
     }
 }
 
-/**
- * Search Intention
- * Used when I don't know what to do
- *
- * The idea is to navigate the map until I
- * find something usefull for my goals
- */
+/** Explores parcel pickup cells when no more valuable intention exists. */
 export class SearchIntention extends Intention {
     private targetLocation: Position | undefined;
 
-    constructor() {
-        super();
-        this.targetLocation = undefined;
-    }
-
-    score(): number {
+    score(_context: IntentionContext): number {
         return 0;
     }
 
@@ -53,12 +47,11 @@ export class SearchIntention extends Intention {
         }
 
         this.targetLocation = targetLocation;
-        return Astar(
+        return context.pathfinder.findPath(
             context.gameMap,
             context.agentPosition,
             targetLocation,
             context.crates,
-            undefined,
         );
     }
 
@@ -66,123 +59,129 @@ export class SearchIntention extends Intention {
         return context.freeParcelsCount > 0;
     }
 
-    log(): void {
-        console.log(`\x1b[33mSearchPacket ar ${this.targetLocation ? `(${this.targetLocation.x};${this.targetLocation.y})` : `undefined`}\x1b[0m`);
+    log(_context: IntentionContext): void {
+        const target = this.targetLocation
+            ? `(${this.targetLocation.x};${this.targetLocation.y})`
+            : "undefined";
+        console.log(`\x1b[33mSearchPacket at ${target}\x1b[0m`);
     }
 }
 
-/**
- * PickUp Parcel
- * If I know where to find a parcel
- * the idea is to go to its position
- * and pick it up
- */
+/** Picks up a known parcel when its expected reward is positive. */
 export class PickUpParcelIntention extends Intention {
-    readonly parcel: Parcel;
-    readonly parcelPosition: Position;
-
-    constructor(parcel: Parcel, parcelPosition: Position) {
+    constructor(
+        readonly parcel: Parcel,
+        readonly parcelPosition: Position,
+    ) {
         super();
-        this.parcelPosition = parcelPosition;
-        this.parcel = parcel;
     }
 
-    /**
-     * Idea: I compute how much I gain by picking up and delivering a certain parcel
-     */
-    score(): number {
-        const parcelDistance = this.parcelPosition.distance_Astar(agent.position);
-
-        const closestDeliveryFromParcel = getClosestDeliveringCell(this.parcelPosition, beliefs.delivering_cells, beliefs.crates.values().next().value);
-        if (closestDeliveryFromParcel !== undefined) {
-            const deliveryDistance = this.parcelPosition.distance_Astar(closestDeliveryFromParcel);
-
-            const timeToDeliver = ((parcelDistance + deliveryDistance) * beliefs.movement_duration) / 1000.0;
-            if (this.parcel.reward > timeToDeliver) {
-                let reward = this.parcel.reward - timeToDeliver;
-
-                beliefs.parcels.forEach((parcel: Parcel) => {
-                    if (parcel.carriedBy === agent.id) {
-                        reward += Math.max(0, parcel.reward - timeToDeliver);
-                    }
-                });
-
-                return reward;
-            }
-        }
-
-        return -1;
-    }
-
-    buildActions(context: IntentionContext): Action[] {
-        const actions = Astar(
+    score(context: IntentionContext): number {
+        const parcelDistance = context.pathfinder.pathLength(
             context.gameMap,
             context.agentPosition,
             this.parcelPosition,
             context.crates,
-            undefined,
         );
 
-        actions.push(new PickUp(this.parcel.id, context.agentId));
-        return actions;
-    }
-
-    log(): void {
-        console.log(`\x1b[32mPickUp packet from (${this.parcelPosition.x};${this.parcelPosition.y}) - Score: ${this.score()}\x1b[0m`);
-    }
-}
-
-/**
- * Deliver Parcel
- * If I carry one or more parcel, then to
- * score points it is important to deliver it
- * to the specific delivery points
- */
-export class DeliverParcelIntention extends Intention {
-    readonly deliveryCell: Position;
-
-    constructor(deliveryCell: Position) {
-        super();
-        this.deliveryCell = deliveryCell;
-    }
-
-    /**
-     * Idea: calculate how much points I get by delivering current parcels
-     */
-    score(): number {
-        const closestDeliveryFromParcel = getClosestDeliveringCell(agent.position, beliefs.delivering_cells, beliefs.crates.values().next().value);
-
-        if (closestDeliveryFromParcel !== undefined) {
-            const timeToDeliver = (agent.position.distance_Astar(closestDeliveryFromParcel) * beliefs.movement_duration) / 1000.0;
-
-            let reward = 0;
-
-            beliefs.parcels.forEach((parcel: Parcel) => {
-                if (parcel.carriedBy === agent.id) {
-                    reward += Math.max(0, parcel.reward - timeToDeliver);
-                }
-            });
-
-            return reward;
+        const closestDelivery = getClosestDeliveringCell(
+            this.parcelPosition,
+            context.deliveringCells,
+            context.crates.values().next().value,
+        );
+        if (!closestDelivery) {
+            return -1;
         }
 
-        return -1;
+        const deliveryDistance = context.pathfinder.pathLength(
+            context.gameMap,
+            this.parcelPosition,
+            closestDelivery,
+            context.crates,
+        );
+        const timeToDeliver =
+            ((parcelDistance + deliveryDistance) * context.movementDuration) / 1000;
+
+        if (this.parcel.reward <= timeToDeliver) {
+            return -1;
+        }
+
+        let reward = this.parcel.reward - timeToDeliver;
+        for (const parcel of context.parcels.values()) {
+            if (parcel.carriedBy === context.agentId) {
+                reward += Math.max(0, parcel.reward - timeToDeliver);
+            }
+        }
+
+        return reward;
     }
 
     buildActions(context: IntentionContext): Action[] {
-        const actions = Astar(
+        const actions = context.pathfinder.findPath(
+            context.gameMap,
+            context.agentPosition,
+            this.parcelPosition,
+            context.crates,
+        );
+        actions.push(context.actionFactory.pickUp(this.parcel.id, context.agentId));
+        return actions;
+    }
+
+    log(context: IntentionContext): void {
+        console.log(
+            `\x1b[32mPickUp packet from (${this.parcelPosition.x};${this.parcelPosition.y}) - Score: ${this.score(context)}\x1b[0m`,
+        );
+    }
+}
+
+/** Delivers all parcels currently carried by the agent. */
+export class DeliverParcelIntention extends Intention {
+    constructor(readonly deliveryCell: Position) {
+        super();
+    }
+
+    score(context: IntentionContext): number {
+        const closestDelivery = getClosestDeliveringCell(
+            context.agentPosition,
+            context.deliveringCells,
+            context.crates.values().next().value,
+        );
+        if (!closestDelivery) {
+            return -1;
+        }
+
+        const deliveryDistance = context.pathfinder.pathLength(
+            context.gameMap,
+            context.agentPosition,
+            closestDelivery,
+            context.crates,
+        );
+        const timeToDeliver = (deliveryDistance * context.movementDuration) / 1000;
+
+        let reward = 0;
+        for (const parcel of context.parcels.values()) {
+            if (parcel.carriedBy === context.agentId) {
+                reward += Math.max(0, parcel.reward - timeToDeliver);
+            }
+        }
+
+        return reward;
+    }
+
+    buildActions(context: IntentionContext): Action[] {
+        const actions = context.pathfinder.findPath(
             context.gameMap,
             context.agentPosition,
             this.deliveryCell,
             context.crates,
-            undefined,
         );
-
-        actions.push(new Drop());
+        actions.push(context.actionFactory.drop(context.agentId));
         return actions;
     }
 
-    log(): void {
-        console.log(`\x1b[36mDelivering packet at (${this.deliveryCell.x};${this.deliveryCell.y}) - Score: ${this.score()}\x1b[0m`);
+    log(context: IntentionContext): void {
+        console.log(
+            `\x1b[36mDelivering packet at (${this.deliveryCell.x};${this.deliveryCell.y}) - Score: ${this.score(context)}\x1b[0m`,
+        );
     }
 }

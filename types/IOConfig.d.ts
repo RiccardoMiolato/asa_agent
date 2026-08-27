@@ -1,7 +1,7 @@
 export interface IOConfig {
     GAME: {
         map: {
-            tiles: unknown[][];
+            tiles: string[][];
         };
         player: {
             movement_duration: number;

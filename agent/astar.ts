@@ -1,195 +1,206 @@
-import { Heap } from 'heap-js';
-import beliefs from './beliefs.js';
-import { Action, MoveDown, MoveLeft, MoveRight, MoveUp } from './move.js';
+import { Heap } from "heap-js";
+import type { Action, ActionFactory } from "./move.js";
+import { Position } from "./position.js";
 
-type Direction = 'up' | 'down' | 'right' | 'left';
+type Direction = "up" | "down" | "right" | "left";
+type CoordinateOffset = readonly [x: number, y: number];
 
-/*
- * Class position. Helper used in the project for not dealing anywhere with
- * a couple of coordinates {x, y}
- */
-export class Position {
-    public x: number;
-    public y: number;
+/** Contract implemented by pathfinding algorithms. */
+export abstract class BasePathfinder {
+    abstract findPath(
+        gameMap: string[][],
+        startingPosition: Position,
+        targetPosition: Position,
+        crates: ReadonlyMap<string, Position>,
+        temporarilyLocked?: Position,
+    ): Action[];
 
-    public constructor(x: number, y: number) {
-        this.x = x;
-        this.y = y;
-    }
-
-    // Shortcut to compare two classes
-    isEqual(other: Position): boolean {
-        return this.x === other.x && this.y === other.y;
-    }
-
-    // Return the distance between two cells in the map
-    distanceTo(other: Position): number {
-        return Math.abs(this.x - other.x) + Math.abs(this.y - other.y);
-    }
-
-    distance_Astar(pos2: Position): number {
-        return Astar(
-            beliefs.map,
-            this,
-            pos2,
-            beliefs.crates,
-            undefined,
+    pathLength(
+        gameMap: string[][],
+        startingPosition: Position,
+        targetPosition: Position,
+        crates: ReadonlyMap<string, Position>,
+        temporarilyLocked?: Position,
+    ): number {
+        return this.findPath(
+            gameMap,
+            startingPosition,
+            targetPosition,
+            crates,
+            temporarilyLocked,
         ).length;
     }
 }
 
-/*
- * This is the pathfinding algorithm chosen to be implemented. Since the map is a grid, and usually it's not very big,
- * A* seems the best choice because the heuristic approach should generally decrease the number of nodes explored.
- * Being the agent a real time agent, it is important to be fast during the decision making approach
- */
-export function Astar(
-    game_map: string[][],
-    starting_pos: Position,
-    target_pos: Position,
-    crates: Map<string, Position>,
-    temporary_locked: Position | undefined = undefined):
-    Action[] {
-    if (starting_pos.x % 1 !== 0 || starting_pos.y % 1 !== 0) {
+/** A* pathfinder for the grid-based game map. */
+export class AStarPathfinder extends BasePathfinder {
+    constructor(private readonly actionFactory: ActionFactory) {
+        super();
+    }
+
+    findPath(
+        gameMap: string[][],
+        startingPosition: Position,
+        targetPosition: Position,
+        crates: ReadonlyMap<string, Position>,
+        temporarilyLocked?: Position,
+    ): Action[] {
+        if (startingPosition.x % 1 !== 0 || startingPosition.y % 1 !== 0) {
+            return [];
+        }
+
+        const cameFrom = new Map<string, Position>();
+        const gScore = new Map<string, number>();
+        const fScore = new Map<string, number>();
+        const openSet = new Heap<Position>(
+            (first: Position, second: Position) =>
+                fScore.get(this.positionKey(first))! - fScore.get(this.positionKey(second))!,
+        );
+
+        for (let row = 0; row < gameMap.length; row++) {
+            for (let column = 0; column < gameMap[0].length; column++) {
+                const key = `${row},${column}`;
+                gScore.set(key, Infinity);
+                fScore.set(key, Infinity);
+            }
+        }
+
+        gScore.set(this.positionKey(startingPosition), 0);
+        fScore.set(
+            this.positionKey(startingPosition),
+            this.heuristic(startingPosition, targetPosition),
+        );
+        openSet.add(startingPosition);
+
+        const offsets: CoordinateOffset[] = [[0, 1], [0, -1], [1, 0], [-1, 0]];
+        const directions: Direction[] = ["up", "down", "right", "left"];
+
+        while (openSet.size() > 0) {
+            const current = openSet.pop();
+            if (!current) {
+                continue;
+            }
+
+            if (current.isEqual(targetPosition)) {
+                return this.reconstructPath(cameFrom, current);
+            }
+
+            for (let index = 0; index < offsets.length; index++) {
+                const offset = offsets[index];
+                const neighbor = new Position(current.x + offset[0], current.y + offset[1]);
+
+                if (!this.isValidCell(
+                    neighbor,
+                    gameMap,
+                    directions[index],
+                    crates,
+                    temporarilyLocked,
+                )) {
+                    continue;
+                }
+
+                const currentScore = gScore.get(this.positionKey(current))!;
+                const neighborKey = this.positionKey(neighbor);
+                const tentativeScore = currentScore + 1;
+
+                if (tentativeScore >= gScore.get(neighborKey)!) {
+                    continue;
+                }
+
+                cameFrom.set(neighborKey, current);
+                gScore.set(neighborKey, tentativeScore);
+                fScore.set(
+                    neighborKey,
+                    Math.max(0, tentativeScore + this.heuristic(neighbor, targetPosition)),
+                );
+
+                if (!openSet.toArray().some((position: Position) => position.isEqual(neighbor))) {
+                    openSet.add(neighbor);
+                }
+            }
+        }
+
         return [];
     }
 
-    const openSet = new Heap<Position>((a: Position, b: Position) => fScore.get(`${a.x},${a.y}`)! - fScore.get(`${b.x},${b.y}`)!);
-    const cameFrom = new Map<string, Position>();
-
-    openSet.add(starting_pos);
-
-    // Initialize gscore
-    // Initialize gScore and fScore
-    const gScore = new Map<string, number>();
-    const fScore = new Map<string, number>();
-
-    for (let i = 0; i < game_map.length; i++) {
-        for (let j = 0; j < game_map[0].length; j++) {
-            gScore.set(`${i},${j}`, Infinity);
-            fScore.set(`${i},${j}`, Infinity);
-        }
-    }
-
-    gScore.set(`${starting_pos.x},${starting_pos.y}`, 0);
-    fScore.set(`${starting_pos.x},${starting_pos.y}`, heuristic(starting_pos, target_pos));
-
-    while (openSet.size() > 0) {
-        let current = openSet.pop();
-
-        if (current && current.isEqual(target_pos)) {
-            return reconstruct_path(cameFrom, current);
-        }
-
-        if (current) {
-            const neighbors = [[0, 1], [0, -1], [1, 0], [-1, 0]];
-            const directions: Direction[] = ['up', 'down', 'right', 'left'];
-
-            neighbors.forEach(coord => {
-                let neighbor = new Position(current.x + coord[0], current.y + coord[1]);
-
-                if (!valid_cell(neighbor, game_map, directions[neighbors.indexOf(coord)], crates, temporary_locked)) {
-                    return;
-                }
-
-                if (neighbor) {
-                    const tentative_gScore = gScore.get(`${current.x},${current.y}`)! + 1;
-                    if (tentative_gScore < gScore.get(`${neighbor.x},${neighbor.y}`)!) {
-                        cameFrom.set(`${neighbor.x},${neighbor.y}`, current);
-                        gScore.set(`${neighbor.x},${neighbor.y}`, tentative_gScore);
-                        fScore.set(`${neighbor.x},${neighbor.y}`, Math.max(0, tentative_gScore + heuristic(neighbor, target_pos)));
-
-                        if (!openSet.toArray().some(pos => pos.isEqual(neighbor)))
-                            openSet.add(neighbor);
-                    }
-                }
-            });
-        }
-    }
-
-    return []; // No path found
-}
-
-/**
- * Utils function for A* algorithm. Validates if the agent can go to the next cell or not,
- * both because it is not part of the map, or because it is obstructed by something, such as a wall or
- * another agent.
- */
-function valid_cell(neighbor: Position, game_map: string[][], direction: Direction, crates: Map<string, Position>, temporary_locked: Position | undefined): boolean {
-    // Out of bound indexes
-    if (neighbor.x < 0 || neighbor.x >= game_map.length ||
-        neighbor.y < 0 || neighbor.y >= game_map[0].length) {
-        return false;
-    }
-
-    // Not walkable block
-    if (game_map[neighbor.x][neighbor.y] === '0') {
-        return false;
-    } else if (game_map[neighbor.x][neighbor.y] === '↑' && direction === 'down' ||
-        game_map[neighbor.x][neighbor.y] === '→' && direction === 'left' ||
-        game_map[neighbor.x][neighbor.y] === '↓' && direction === 'up' ||
-        game_map[neighbor.x][neighbor.y] === '←' && direction === 'right') {
-        return false;
-    } else if (game_map[neighbor.x][neighbor.y].includes("5")) {
-        // If the cell may contain a crate, I check for obstructions
-        let path_obstructed = false;
-
-        crates.forEach((cratePos, _) => {
-            if (cratePos.isEqual(neighbor)) {
-                path_obstructed = true;
-            }
-        });
-
-        if (path_obstructed) {
+    private isValidCell(
+        neighbor: Position,
+        gameMap: string[][],
+        direction: Direction,
+        crates: ReadonlyMap<string, Position>,
+        temporarilyLocked?: Position,
+    ): boolean {
+        if (
+            neighbor.x < 0 ||
+            neighbor.x >= gameMap.length ||
+            neighbor.y < 0 ||
+            neighbor.y >= gameMap[0].length
+        ) {
             return false;
         }
-    } else if (temporary_locked != undefined && neighbor.isEqual(temporary_locked)) {
-        return false;
-    }
 
-    return true;
-}
-
-/**
- * A* path reconstruction algorithm. Once the pathfinding is finished, the complete path
- * is built following a backtracking approach, starting from the end to the start
- */
-function reconstruct_path(cameFrom: Map<string, Position>, current: Position): Action[] {
-    const total_path: Action[] = [];
-    while (cameFrom.has(`${current.x},${current.y}`)) {
-        const from: Position = current;
-        const to: Position = cameFrom.get(`${current.x},${current.y}`)!;
-
-        if (from.x == to.x) {
-            if (from.y > to.y)
-                total_path.unshift(new MoveUp());
-            else
-                total_path.unshift(new MoveDown());
-        } else {
-            if (from.x > to.x)
-                total_path.unshift(new MoveRight());
-            else
-                total_path.unshift(new MoveLeft());
+        const cell = gameMap[neighbor.x][neighbor.y];
+        if (cell === "0") {
+            return false;
         }
 
-        current = to;
+        if (
+            cell === "↑" && direction === "down" ||
+            cell === "→" && direction === "left" ||
+            cell === "↓" && direction === "up" ||
+            cell === "←" && direction === "right"
+        ) {
+            return false;
+        }
+
+        if (cell.includes("5")) {
+            for (const cratePosition of crates.values()) {
+                if (cratePosition.isEqual(neighbor)) {
+                    return false;
+                }
+            }
+        } else if (temporarilyLocked && neighbor.isEqual(temporarilyLocked)) {
+            return false;
+        }
+
+        return true;
     }
 
-    return total_path;
-}
+    private reconstructPath(
+        cameFrom: ReadonlyMap<string, Position>,
+        currentPosition: Position,
+    ): Action[] {
+        const actions: Action[] = [];
+        let current = currentPosition;
 
-/**
- * Auxiliary function to calculate the heuristic distance betweeen
- * two nodes in the map for A* algorithm
- */
-function heuristic(pos1: Position, pos2: Position): number {
-    let distance = pos1.distanceTo(pos2);
+        while (cameFrom.has(this.positionKey(current))) {
+            const previous = cameFrom.get(this.positionKey(current))!;
 
-    // beliefs.parcels.forEach((parcel: Parcel) => {
-    //     if (parcel.carriedBy == null && pos1.isEqual(new Position(parcel.x, parcel.y))) {
-    //         distance -= 8;
-    //     }
-    // });
+            if (current.x === previous.x) {
+                actions.unshift(
+                    current.y > previous.y
+                        ? this.actionFactory.moveUp()
+                        : this.actionFactory.moveDown(),
+                );
+            } else {
+                actions.unshift(
+                    current.x > previous.x
+                        ? this.actionFactory.moveRight()
+                        : this.actionFactory.moveLeft(),
+                );
+            }
 
-    return distance;
+            current = previous;
+        }
+
+        return actions;
+    }
+
+    private heuristic(first: Position, second: Position): number {
+        return first.distanceTo(second);
+    }
+
+    private positionKey(position: Position): string {
+        return `${position.x},${position.y}`;
+    }
 }
