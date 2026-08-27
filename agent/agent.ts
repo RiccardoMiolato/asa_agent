@@ -25,7 +25,7 @@ class Agent {
 
         this.intentions = [];
 
-        this.currentIntention = new Intention();
+        this.currentIntention = new SearchIntention();
         this.plan = new Plan();
     }
 
@@ -102,24 +102,22 @@ class Agent {
     /**
      * Takes the best option to pursue
      */
-    filterOptions() {
-        let bestOption: Intention = new Intention();
-        let score: number = -1;
+    filterOptions(): void {
+        let bestOption: Intention = new SearchIntention();
+        let bestScore = bestOption.score(); // 0
 
         beliefs.updateParcelRewards();
 
-        this.intentions.forEach(intention => {
-            const _score = intention.score();
+        for (const intention of this.intentions) {
+            const score = intention.score();
 
-            if (_score > score) {
-                score = _score;
+            if (score >= bestScore) {
+                bestScore = score;
                 bestOption = intention;
             }
-        });
-
-        if (bestOption) {
-            this.currentIntention = bestOption;
         }
+
+        this.currentIntention = bestOption;
     }
 
     /**

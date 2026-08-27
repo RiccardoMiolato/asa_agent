@@ -4,33 +4,20 @@ import beliefs, { Parcel } from "./beliefs.js";
 import { getClosestDeliveringCell } from "./utils.js";
 
 export enum IntentionType {
-    Null,
     SearchPacket,
     PickUpPacket,
     DeliverPacket,
-};
+}
 
-/**
- * Default export class for Intentions
- */
-export class Intention {
-    private intentionType: IntentionType;
-
-    constructor(intentionType: IntentionType = IntentionType.Null) {
-        this.intentionType = intentionType;
-    }
+export abstract class Intention {
+    constructor(private readonly intentionType: IntentionType) { }
 
     getType(): IntentionType {
         return this.intentionType;
     }
 
-    score(): number {
-        throw new Error("Method not implemented.");
-    }
-
-    log() {
-        console.log("Null intention");
-    }
+    abstract score(): number;
+    abstract log(): void;
 }
 
 /**

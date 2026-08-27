@@ -19,6 +19,7 @@ class Beliefs {
 
     // TIMER FOR MOVES
     movement_duration: number;
+    // TODO add player position and id to the believes
 
     constructor() {
         this.map = [];
