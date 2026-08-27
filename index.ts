@@ -1,10 +1,10 @@
-import 'dotenv/config';
 import { DjsConnect, type DjsClientSocket } from "@unitn-asa/deliveroo-js-sdk/client";
-import { Agent } from './agent/agent.js';
-import { AStarPathfinder } from './agent/astar.js';
-import { Beliefs } from './agent/beliefs.js';
-import { IntentionGenerator } from './agent/desires.js';
-import { ActionFactory } from './agent/move.js';
+import 'dotenv/config';
+import { Agent } from './src/agent.js';
+import { AStarPathfinder } from './src/astar.js';
+import { Beliefs } from './src/beliefs.js';
+import { IntentionGenerator } from './src/desires.js';
+import { ActionFactory } from './src/move.js';
 import type { IOAgent } from './types/IOAgent.js';
 import type { IOConfig } from './types/IOConfig.js';
 import type { IOSensing } from './types/IOSensing.js';
