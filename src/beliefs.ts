@@ -1,6 +1,7 @@
 import type { IOConfig } from "../types/IOConfig.js";
 import type { IOCrate } from "../types/IOCrate.js";
 import type { IOParcel } from "../types/IOParcel.js";
+import type { IOSensedPosition } from "../types/IOSensing.js";
 import { Position } from "./position.js";
 
 export interface Parcel extends IOParcel {
@@ -19,10 +20,13 @@ export class Beliefs {
     // MAP LOCATIONS
     delivering_cells: Position[];
     pickup_cells: Position[];
+    private readonly pickupCellKeys: Set<string>;
+    private readonly pickupCellLastObservedAt: Map<string, number>;
 
     // TIMER FOR MOVES
     movement_duration: number;
     frame_duration: number;
+    observation_distance: number;
     private lastRewardDecayAt: number | undefined;
     // TODO add player position and id to the believes
 
@@ -32,27 +36,38 @@ export class Beliefs {
         this.crates = new Map<string, Position>();
         this.delivering_cells = [];
         this.pickup_cells = [];
+        this.pickupCellKeys = new Set<string>();
+        this.pickupCellLastObservedAt = new Map<string, number>();
         this.movement_duration = 0;
         this.frame_duration = 0;
+        this.observation_distance = -1;
         this.lastRewardDecayAt = undefined;
     }
 
     /** Revises all dynamic beliefs from one complete sensing snapshot. */
-    revise(parcels: IOParcel[], crates: IOCrate[]): void {
+    revise(
+        parcels: IOParcel[],
+        crates: IOCrate[],
+        observedPositions: readonly IOSensedPosition[] = [],
+    ): void {
         this.senseParcels(parcels);
         this.senseCrates(crates);
+        this.recordObservedPickupCells(observedPositions);
     }
 
     configPhase(config: IOConfig): void {
         this.map = config.GAME.map.tiles;
         this.movement_duration = config.GAME.player.movement_duration;
         this.frame_duration = config.CLOCK;
+        this.observation_distance = config.GAME.player.observation_distance;
 
         const rows = this.map.length;
         const cols = this.map[0].length;
 
         this.delivering_cells = [];
         this.pickup_cells = [];
+        this.pickupCellKeys.clear();
+        this.pickupCellLastObservedAt.clear();
 
         for (let row = 0; row < rows; row++) {
             for (let col = 0; col < cols; col++) {
@@ -60,12 +75,34 @@ export class Beliefs {
                 if (cell == '2') {
                     this.delivering_cells.push(new Position(row, col)); // Map is rotated of 90 degree in the game
                 } else if (cell == '1') {
-                    this.pickup_cells.push(new Position(row, col)); // Map is rotated of 90 degree in the game
+                    const pickupCell = new Position(row, col);
+                    this.pickup_cells.push(pickupCell); // Map is rotated of 90 degree in the game
+                    this.pickupCellKeys.add(this.positionKey(pickupCell));
                 }
             }
         }
     }
 
+    /** Returns the last authoritative sensing time for each observed pickup cell. */
+    pickupCellObservationTimes(): ReadonlyMap<string, number> {
+        return this.pickupCellLastObservedAt;
+    }
+
+    private recordObservedPickupCells(
+        observedPositions: readonly IOSensedPosition[],
+    ): void {
+        const observedAt = Date.now();
+        for (const observedPosition of observedPositions) {
+            const key = this.positionKey(observedPosition);
+            if (this.pickupCellKeys.has(key)) {
+                this.pickupCellLastObservedAt.set(key, observedAt);
+            }
+        }
+    }
+
+    private positionKey(position: IOSensedPosition): string {
+        return `${position.x},${position.y}`;
+    }
 
     // Sense the parcels
     senseParcels(parcels: IOParcel[]): void {

@@ -5,6 +5,12 @@ import { Position } from "./position.js";
 type Direction = "up" | "down" | "right" | "left";
 type CoordinateOffset = readonly [x: number, y: number];
 
+/** Executable movements together with every grid position visited by them. */
+export interface MovementPath {
+    readonly actions: Action[];
+    readonly positions: readonly Position[];
+}
+
 /** Contract implemented by pathfinding algorithms. */
 export abstract class BasePathfinder {
     private readonly pathLengthCache = new Map<string, number | undefined>();
@@ -17,6 +23,35 @@ export abstract class BasePathfinder {
         crates: ReadonlyMap<string, Position>,
         temporarilyLocked?: Position,
     ): Action[];
+
+    /**
+     * Returns both executable actions and visited positions.
+     *
+     * Implementations can override this to expose intermediate positions. The fallback keeps
+     * third-party pathfinders compatible while still exposing the destination for coverage.
+     */
+    findMovementPath(
+        gameMap: string[][],
+        startingPosition: Position,
+        targetPosition: Position,
+        crates: ReadonlyMap<string, Position>,
+        temporarilyLocked?: Position,
+    ): MovementPath {
+        const actions = this.findPath(
+            gameMap,
+            startingPosition,
+            targetPosition,
+            crates,
+            temporarilyLocked,
+        );
+        if (actions.length === 0 && !startingPosition.isEqual(targetPosition)) {
+            return { actions, positions: [] };
+        }
+        if (startingPosition.isEqual(targetPosition)) {
+            return { actions, positions: [startingPosition] };
+        }
+        return { actions, positions: [startingPosition, targetPosition] };
+    }
 
     /** Returns the route length, or `undefined` when the target is unreachable. */
     pathLength(
@@ -113,8 +148,24 @@ export class AStarPathfinder extends BasePathfinder {
         crates: ReadonlyMap<string, Position>,
         temporarilyLocked?: Position,
     ): Action[] {
+        return this.findMovementPath(
+            gameMap,
+            startingPosition,
+            targetPosition,
+            crates,
+            temporarilyLocked,
+        ).actions;
+    }
+
+    override findMovementPath(
+        gameMap: string[][],
+        startingPosition: Position,
+        targetPosition: Position,
+        crates: ReadonlyMap<string, Position>,
+        temporarilyLocked?: Position,
+    ): MovementPath {
         if (startingPosition.x % 1 !== 0 || startingPosition.y % 1 !== 0) {
-            return [];
+            return { actions: [], positions: [] };
         }
 
         const cameFrom = new Map<string, Position>();
@@ -188,7 +239,7 @@ export class AStarPathfinder extends BasePathfinder {
             }
         }
 
-        return [];
+        return { actions: [], positions: [] };
     }
 
     /** A grid without directional-entry tiles has symmetric path lengths. */
@@ -249,8 +300,9 @@ export class AStarPathfinder extends BasePathfinder {
     private reconstructPath(
         cameFrom: ReadonlyMap<string, Position>,
         currentPosition: Position,
-    ): Action[] {
+    ): MovementPath {
         const actions: Action[] = [];
+        const positions: Position[] = [currentPosition];
         let current = currentPosition;
 
         while (cameFrom.has(this.positionKey(current))) {
@@ -271,9 +323,10 @@ export class AStarPathfinder extends BasePathfinder {
             }
 
             current = previous;
+            positions.unshift(previous);
         }
 
-        return actions;
+        return { actions, positions };
     }
 
     private heuristic(first: Position, second: Position): number {

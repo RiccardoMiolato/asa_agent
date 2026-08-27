@@ -6,6 +6,7 @@ export interface IOConfig {
         };
         player: {
             movement_duration: number;
+            observation_distance: number;
         };
     };
 }

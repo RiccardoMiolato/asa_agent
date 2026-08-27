@@ -14,7 +14,11 @@ export interface AgentState {
 
 /** Generates the intentions available from the current agent and world state. */
 export class IntentionGenerator {
-    constructor(private readonly beliefs: Beliefs) { }
+    private readonly searchIntention: SearchIntention;
+
+    constructor(private readonly beliefs: Beliefs) {
+        this.searchIntention = new SearchIntention();
+    }
 
     generate(agentState: AgentState): Intention[] {
         const intentions: Intention[] = [];
@@ -46,9 +50,7 @@ export class IntentionGenerator {
             }
         }
 
-        if (intentions.length === 0) {
-            intentions.push(new SearchIntention());
-        }
+        intentions.push(this.searchIntention);
 
         return intentions;
     }

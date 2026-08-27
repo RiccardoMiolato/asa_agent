@@ -93,8 +93,10 @@ export class Agent {
                 plannedActions: this.plan.size(),
             });
 
+            let planInterrupted = false;
             while (!this.plan.isEmpty()) {
                 if (this.currentIntention.shouldInterrupt(this.getIntentionContext())) {
+                    planInterrupted = true;
                     break;
                 }
 
@@ -109,6 +111,10 @@ export class Agent {
 
                 await nextAction.execute();
                 this.plan.popAction();
+            }
+
+            if (!planInterrupted && this.plan.isEmpty()) {
+                this.currentIntention.onPlanCompleted(this.getIntentionContext());
             }
         }
     }
@@ -152,7 +158,7 @@ export class Agent {
             scoredIntentions.push({ intention, score, distance });
             const closerEqualScore = score === bestScore
                 && (distance ?? Number.POSITIVE_INFINITY)
-                    < (bestDistance ?? Number.POSITIVE_INFINITY);
+                < (bestDistance ?? Number.POSITIVE_INFINITY);
             if (score > bestScore || closerEqualScore) {
                 bestScore = score;
                 bestDistance = distance;
@@ -210,10 +216,12 @@ export class Agent {
             agentPosition: this.position,
             crates: this.beliefs.crates,
             pickupCells: this.beliefs.pickup_cells,
+            pickupCellLastObservedAt: this.beliefs.pickupCellObservationTimes(),
             deliveringCells: this.beliefs.delivering_cells,
             parcels: this.beliefs.parcels,
             movementDuration: this.beliefs.movement_duration,
             frameDuration: this.beliefs.frame_duration,
+            observationDistance: this.beliefs.observation_distance,
             millisecondsUntilNextRewardDecay:
                 this.beliefs.millisecondsUntilNextRewardDecay(),
             freeParcelsCount: this.beliefs.freeParcelsCount(),
