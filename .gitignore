@@ -13,6 +13,10 @@ dist/
 build/
 out/
 
+planning-as-a-service/
+
+*pddl_server.sh
+
 # Environment variables
 .env
 .env.local
