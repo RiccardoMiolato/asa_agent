@@ -22,7 +22,7 @@ export interface IntentionContext {
 export abstract class Intention {
     abstract score(context: IntentionContext): number;
     abstract buildActions(context: IntentionContext): Action[];
-    abstract toPddlGoal(): void;
+    abstract toPddlGoal(context: IntentionContext): PDDLGoal;
     abstract log(context: IntentionContext): void;
 
     shouldInterrupt(_context: IntentionContext): boolean {
@@ -60,14 +60,16 @@ export class SearchIntention extends Intention {
         return context.freeParcelsCount > 0;
     }
 
-    toPddlGoal(): PDDLGoal {
-        const goal: PDDLGoal = {
+    toPddlGoal(context: IntentionContext): PDDLGoal {
+        const carriedParcels: Parcel[] = Array.from(context.parcels.values()).filter(parcel => parcel.carriedBy === context.agentId);
+
+        return {
             operationType: "search",
+            agentId: context.agentId,
             parcelId: null,
+            carriedParcels,
             finalTargetPosition: this.targetLocation!
         }
-
-        return goal;
     }
 
 
@@ -151,15 +153,16 @@ export class PickUpParcelIntention extends Intention {
         return actions;
     }
 
-    toPddlGoal(): PDDLGoal {
-        const goal: PDDLGoal = {
-            operationType: "search",
+    toPddlGoal(context: IntentionContext): PDDLGoal {
+        const carriedParcels: Parcel[] = Array.from(context.parcels.values()).filter(parcel => parcel.carriedBy === context.agentId);
+
+        return {
+            operationType: "pickup",
+            agentId: context.agentId,
             parcelId: this.parcel.id,
+            carriedParcels,
             finalTargetPosition: this.parcelPosition
-
         }
-
-        return goal;
     }
 
     log(context: IntentionContext): void {
@@ -286,15 +289,16 @@ export class DeliverParcelIntention extends Intention {
         return freeParcelCount !== this.knownFreeParcelIds.size;
     }
 
-    toPddlGoal(): PDDLGoal {
-        const goal: PDDLGoal = {
-            operationType: "search",
+    toPddlGoal(context: IntentionContext): PDDLGoal {
+        const carriedParcels: Parcel[] = Array.from(context.parcels.values()).filter(parcel => parcel.carriedBy === context.agentId);
+
+        return {
+            operationType: "deliver",
+            agentId: context.agentId,
             parcelId: null,
+            carriedParcels,
             finalTargetPosition: this.deliveryCell
-
         }
-
-        return goal;
     }
 
     log(context: IntentionContext): void {

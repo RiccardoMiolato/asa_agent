@@ -21,7 +21,9 @@ declare module '@unitn-asa/deliveroo-js-sdk/client' {
 
 declare module '@unitn-asa/pddl-client' {
     interface SolverResult {
-      // tipizza il risultato
+      parallel: boolean,
+      action: string,
+      args: string []
     }
 
     export function onlineSolver(

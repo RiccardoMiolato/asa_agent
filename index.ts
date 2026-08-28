@@ -13,6 +13,7 @@ import type { IOSensing } from './types/IOSensing.js';
 const host = process.env.HOST || "http://localhost:8080";
 const token = process.env.TOKEN || "";
 const agent_name = process.env.NAME || "cardo";
+const usePDDL: boolean = process.env.PDDL ? process.env.PDDL === "true" : false;
 
 console.log("Connecting...");
 const socket: DjsClientSocket = DjsConnect(host, token, agent_name);
@@ -25,6 +26,7 @@ const agent = new Agent(
     intentionGenerator,
     pathfinder,
     actionFactory,
+    usePDDL,
 );
 
 socket.onConnect((): void => {

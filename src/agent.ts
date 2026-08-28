@@ -2,7 +2,9 @@ import type { BasePathfinder } from "./astar.js";
 import type { Beliefs } from "./beliefs.js";
 import type { IntentionGenerator } from "./desires.js";
 import { SearchIntention, type Intention, type IntentionContext } from "./intentions.js";
+import { GameMap } from "./map.js";
 import type { ActionFactory } from "./move.js";
+import { PDDLGoal, PDDLPlanner } from "./pddl/pddlPlanner.js";
 import { Plan } from "./plan.js";
 import { Position } from "./position.js";
 
@@ -15,11 +17,14 @@ export class Agent {
     private currentIntention: Intention;
     private readonly plan: Plan;
 
+    private pddlPlanner: PDDLPlanner | undefined = undefined;
+
     constructor(
         private readonly beliefs: Beliefs,
         private readonly intentionGenerator: IntentionGenerator,
         private readonly pathfinder: BasePathfinder,
         private readonly actionFactory: ActionFactory,
+        private readonly pddl: boolean,
     ) {
         this.id = "";
         this.position = new Position(0, 0);
@@ -35,9 +40,13 @@ export class Agent {
 
     /** Continuously selects and executes the most valuable available intention. */
     async agent_loop(): Promise<void> {
-        await new Promise<void>((resolve) => setTimeout(resolve, 2000));
+        await new Promise<void>((resolve) => setTimeout(resolve, 1000));
+
+        if (this.pddl)
+            this.pddlPlanner = new PDDLPlanner();
 
         while (true) {
+            await new Promise<void>((resolve) => setTimeout(resolve, 5000));
             await new Promise<void>((resolve) =>
                 setTimeout(resolve, this.beliefs.movement_duration)
             );
@@ -52,7 +61,8 @@ export class Agent {
             options.forEach((option: Intention) => option.log(loggingContext));
 
             this.filterOptions();
-            this.buildPlan();
+
+            this.buildPlan(this.pddl);
 
             console.log("Proceeding with:");
             this.currentIntention.log(this.getIntentionContext());
@@ -112,9 +122,26 @@ export class Agent {
         this.currentIntention = bestOption;
     }
 
-    buildPlan(): void {
-        const actions = this.currentIntention.buildActions(this.getIntentionContext());
-        this.plan.newPlan(actions);
+    buildPlan(usePddl: boolean): void {
+        const context = this.getIntentionContext();
+        if(usePddl) {
+            this.pddlPlanner?.resetPDDL();
+            this.pddlPlanner?.buildPDDLProblem(
+                new GameMap(context.gameMap),
+                [...context.parcels.values()] ,
+                this.id,
+                this.position,
+            );
+
+            if(this.currentIntention) {
+                const pddlGoal: PDDLGoal = this.currentIntention.toPddlGoal(context);
+                this.pddlPlanner?.buildGoal(pddlGoal);
+                this.pddlPlanner?.solveProblem();
+            }
+        } else {
+            const actions = this.currentIntention.buildActions(context);
+            this.plan.newPlan(actions);
+        }
     }
 
     private getIntentionContext(): IntentionContext {
