@@ -660,7 +660,12 @@ export class PickUpParcelIntention extends RewardIntention {
     }
 
     selectionDistance(context: IntentionContext): number | undefined {
-        return context.agentPosition.distanceTo(this.parcelPosition);
+        return context.pathfinder.pathLength(
+            context.gameMap,
+            context.agentPosition,
+            this.parcelPosition,
+            context.crates,
+        );
     }
 
     buildActions(context: IntentionContext): Action[] {
@@ -799,7 +804,12 @@ export class DeliverParcelIntention extends RewardIntention {
     }
 
     selectionDistance(context: IntentionContext): number | undefined {
-        return context.agentPosition.distanceTo(this.deliveryCell);
+        return context.pathfinder.pathLength(
+            context.gameMap,
+            context.agentPosition,
+            this.deliveryCell,
+            context.crates,
+        );
     }
 
     buildActions(context: IntentionContext): Action[] {
