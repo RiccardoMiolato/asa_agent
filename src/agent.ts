@@ -63,7 +63,6 @@ export class Agent {
 
             console.log("Proceeding with:");
             this.currentIntention.log(this.getIntentionContext());
-            this.beliefs.parcels.forEach(parcel => parcel.carriedBy === this.id ? console.log(parcel.id) : {});
             console.log();
 
             while (!this.plan.isEmpty()) {
@@ -81,7 +80,6 @@ export class Agent {
                     break;
                 }
 
-                console.log("Exetuting");
                 const result = await nextAction.execute();
 
                 if(!result) {
@@ -114,20 +112,22 @@ export class Agent {
         this.beliefs.updateParcelRewards();
         const context = this.getIntentionContext();
         let bestOption: Intention | undefined = undefined;
-        let bestScore = Number.MIN_VALUE;
+        let bestScore = -Infinity;
 
         for (const intention of this.intentions) {
             const score = intention.score(context);
-            intention.log(this.getIntentionContext());
-            console.log("Score: ", score);
-            if (score >= bestScore) {
+
+            if (score > bestScore) {  // ← Change to > not >=
                 bestScore = score;
                 bestOption = intention;
             }
         }
 
-        if(bestOption)
+        if(bestOption) {
             this.currentIntention = bestOption;
+        } else {
+            this.currentIntention = new SearchIntention();  // Fallback
+        }
     }
 
     async buildPlan(): Promise<void> {
@@ -136,7 +136,6 @@ export class Agent {
         const actions = this.currentIntention.buildActions(context);
 
         if(actions.length > 0){
-            console.log("here");
             this.plan.newPlan(actions);
             return;
         }

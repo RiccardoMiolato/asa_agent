@@ -38,7 +38,7 @@ export class PDDLProblem {
         return `(define (problem deliveroo_problem)
 ${this.padding}(:domain deliveroo)
 ${this.padding}(:objects
-${this.tiles.length > 0 ? `${this.padding}${this.padding}${this.tiles.join(" ").trim()} - position\n` : ''}${this.agent ? `${this.padding}${this.padding}${this.agent} - agent\n` : ''}${this.parcels.length > 0 ? `${this.padding}${this.padding}${this.parcels.join(" ").trim()} - parcel\n` : ''}${this.padding}${this.crates.length > 0 ? `${this.padding}${this.crates.join(" ").trim()} - crate\n` : ''})
+${this.tiles.length > 0 ? `${this.padding}${this.padding}${this.tiles.join(" ").trim()} - position\n` : ''}${this.agent ? `${this.padding}${this.padding}${this.agent} - agent\n` : ''}${this.parcels.length > 0 ? `${this.padding}${this.padding}${this.parcels.join(" ").trim()} - parcel\n` : ''}${this.crates.length > 0 ? `${this.padding}${this.padding}${this.crates.join(" ").trim()} - crate\n` : ''})
 ${this.padding}(:init ${this.init.join(" ").trim()})
 ${this.padding}(:goal (and ${this.goals.join(" ").trim()}))
 )`;
