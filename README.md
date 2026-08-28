@@ -342,3 +342,27 @@ Recommended state:
 - Serialized action queue so only one action is in flight per physical agent.
 
 Do not invoke an LLM for every `sensing` event. Update local state cheaply and invoke the LLM at meaningful decision points: a mission arrives, the current plan fails, a mission completes, or an important world change invalidates the plan.
+
+## Agent ghost map
+
+The agent serves a read-only visualization of its private world model alongside the normal process. Deliveroo.js remains on port `8080`; the ghost map listens only on the local loopback interface and defaults to `http://localhost:8081`.
+
+```sh
+npm run ghost-map
+```
+
+The view updates while the agent runs and shows:
+
+- the selected intention target as a flag;
+- walkable cells in white and delivery cells in red;
+- agent-created temporary walls as an `X`;
+- connected pickup-cell clusters shaded by completed visit order, from dark green for the oldest visit to bright green for the most recent visit;
+- the agent's current position, score, and deliberation cycle.
+
+Set `GHOST_MAP_PORT` when `8081` is occupied or when running several agents:
+
+```sh
+GHOST_MAP_PORT=8082 npm run ghost-map
+```
+
+Each agent process needs its own ghost-map port. The live JSON snapshot is also available at `/api/state` for debugging.

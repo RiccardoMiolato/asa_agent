@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ASA Agent · Ghost Map</title>
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+    <main class="shell">
+        <header class="topbar">
+            <div class="brand">
+                <span class="brand-mark" aria-hidden="true"></span>
+                <div>
+                    <p class="eyebrow">ASA AGENT</p>
+                    <h1>Ghost map</h1>
+                </div>
+            </div>
+            <div class="connection" id="connection">
+                <span class="connection-dot"></span>
+                <span id="connection-label">Connecting</span>
+            </div>
+        </header>
+
+        <section class="workspace">
+            <aside class="panel">
+                <div class="agent-card">
+                    <div class="agent-avatar" aria-hidden="true">A</div>
+                    <div>
+                        <p class="agent-name" id="agent-name">Waiting for agent</p>
+                        <p class="agent-id" id="agent-id">No identity yet</p>
+                    </div>
+                </div>
+
+                <div class="stats">
+                    <div class="stat">
+                        <span>Position</span>
+                        <strong id="agent-position">—</strong>
+                    </div>
+                    <div class="stat">
+                        <span>Score</span>
+                        <strong id="agent-score">—</strong>
+                    </div>
+                    <div class="stat">
+                        <span>Cycle</span>
+                        <strong id="agent-cycle">0</strong>
+                    </div>
+                </div>
+
+                <div class="decision-card">
+                    <p class="section-label">CURRENT TARGET</p>
+                    <div class="decision-value">
+                        <span class="mini-flag" aria-hidden="true"></span>
+                        <div>
+                            <strong id="target-position">No target</strong>
+                            <span id="target-intention">Waiting for deliberation</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="legend">
+                    <p class="section-label">MAP KEY</p>
+                    <div class="legend-grid">
+                        <span><i class="swatch walkable"></i>Walkable</span>
+                        <span><i class="swatch delivery"></i>Drop cell</span>
+                        <span><i class="swatch pickup"></i>Pickup cluster</span>
+                        <span><i class="swatch wall">×</i>Temporary wall</span>
+                    </div>
+                </div>
+
+                <div class="cluster-scale">
+                    <div class="cluster-scale-labels">
+                        <span>First visited</span>
+                        <span>Most recent</span>
+                    </div>
+                    <div class="cluster-gradient"></div>
+                    <p id="cluster-summary">No pickup clusters yet</p>
+                </div>
+            </aside>
+
+            <section class="map-card">
+                <div class="map-heading">
+                    <div>
+                        <p class="section-label">PRIVATE WORLD MODEL</p>
+                        <h2 id="map-title">Waiting for map</h2>
+                    </div>
+                    <div class="map-size" id="map-size">0 × 0</div>
+                </div>
+                <div class="map-viewport">
+                    <div class="map" id="map" role="img" aria-label="Agent belief map"></div>
+                    <div class="empty-state" id="empty-state">
+                        <div class="empty-pulse"></div>
+                        <p>Listening for the game configuration…</p>
+                    </div>
+                </div>
+                <footer class="map-footer">
+                    <span>Coordinates follow Deliveroo.js: x →, y ↑</span>
+                    <span id="last-update">Not updated yet</span>
+                </footer>
+            </section>
+        </section>
+    </main>
+    <script type="module" src="/app.js"></script>
+</body>
+</html>

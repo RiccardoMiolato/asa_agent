@@ -42,6 +42,8 @@ export type MovementClearance =
  * the destination and the other endpoint gives the source.
  */
 export class ConservativeMovementGuard {
+    private static readonly STATIONARY_WAIT_TICKS = 2;
+
     constructor(
         private readonly beliefs: Beliefs,
         private readonly logger: BaseAgentLogger,
@@ -386,11 +388,7 @@ export class ConservativeMovementGuard {
                 continue;
             }
             const deadline = blocker.stationarySince
-                + Math.max(
-                    1,
-                    this.beliefs.movement_duration,
-                    this.beliefs.frame_duration,
-                );
+                + this.stationaryWaitDuration();
             earliestDeadline = earliestDeadline === undefined
                 ? deadline
                 : Math.min(earliestDeadline, deadline);
@@ -405,11 +403,7 @@ export class ConservativeMovementGuard {
         nextCell: Position,
     ): MovementClearance | undefined {
         const timeNow = Date.now();
-        const waitDuration = Math.max(
-            1,
-            this.beliefs.movement_duration,
-            this.beliefs.frame_duration,
-        );
+        const waitDuration = this.stationaryWaitDuration();
         for (const [agentId, blocker] of blockers) {
             if (
                 blocker.stationarySince === undefined
@@ -435,6 +429,15 @@ export class ConservativeMovementGuard {
             };
         }
         return undefined;
+    }
+
+    private stationaryWaitDuration(): number {
+        return Math.max(
+            1,
+            this.beliefs.frame_duration,
+            ConservativeMovementGuard.STATIONARY_WAIT_TICKS
+                * this.beliefs.movement_duration,
+        );
     }
 
     private stationaryState(

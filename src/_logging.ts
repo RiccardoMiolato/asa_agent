@@ -16,7 +16,7 @@ export interface BeliefLogSummary {
     readonly carriedByAgent: number;
     readonly carriedByOthers: number;
     readonly knownCrates: number;
-    readonly temporaryWall: Position | undefined;
+    readonly temporaryWalls: readonly Position[];
 }
 
 /** Complete, structured record of one deliberation cycle. */
@@ -114,8 +114,10 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
             + ` carried-by-me=${beliefs.carriedByAgent}`
             + ` carried-by-others=${beliefs.carriedByOthers}`
             + ` crates=${beliefs.knownCrates}`
-            + ` temporary-wall=${beliefs.temporaryWall
-                ? `(${beliefs.temporaryWall.x}, ${beliefs.temporaryWall.y})`
+            + ` temporary-walls=${beliefs.temporaryWalls.length > 0
+                ? beliefs.temporaryWalls.map(
+                    (wall: Position): string => `(${wall.x}, ${wall.y})`,
+                ).join(",")
                 : "none"}`,
         );
         console.log(`OPTIONS | ${rankedOptions.length} available (highest score first)`);

@@ -6,7 +6,13 @@ import {
 } from "./_logging.js";
 import type { Beliefs } from "./beliefs.js";
 import type { IntentionGenerator } from "./desires.js";
-import { SearchIntention, type Intention, type IntentionContext } from "./intentions.js";
+import {
+    SearchIntention,
+    type Intention,
+    type IntentionContext,
+    type IntentionDescription,
+    type PickupClusterSnapshot,
+} from "./intentions.js";
 import type { ActionFactory } from "./move.js";
 import { MovementAction } from "./move.js";
 import { ConservativeMovementGuard } from "./movement-safety.js";
@@ -19,6 +25,11 @@ interface ScoredIntention {
     readonly distance: number | undefined;
 }
 
+interface TemporaryBlockedCell {
+    readonly position: Position;
+    readonly protectedThroughCycle: number;
+}
+
 /** Coordinates intention generation, selection, planning, and execution. */
 export class Agent {
     id: string;
@@ -29,7 +40,7 @@ export class Agent {
     private currentIntention: Intention;
     private readonly plan: Plan;
     private readonly movementGuard: ConservativeMovementGuard;
-    private temporarilyBlockedCell: Position | undefined;
+    private readonly temporarilyBlockedCells: Map<string, TemporaryBlockedCell>;
     private deliberationCycle: number;
 
     constructor(
@@ -49,7 +60,7 @@ export class Agent {
             this.beliefs,
             this.logger,
         );
-        this.temporarilyBlockedCell = undefined;
+        this.temporarilyBlockedCells = new Map<string, TemporaryBlockedCell>();
         this.deliberationCycle = 0;
     }
 
@@ -71,6 +82,35 @@ export class Agent {
         });
     }
 
+    /** Exposes the selected decision to read-only observers. */
+    currentDecision(): IntentionDescription {
+        return this.currentIntention.describe();
+    }
+
+    /** Exposes temporary navigation walls without leaking the mutable map. */
+    temporaryBlockedCellSnapshots(): readonly Position[] {
+        return [...this.temporarilyBlockedCells.values()].map(
+            (blockedCell: TemporaryBlockedCell): Position =>
+                new Position(
+                    blockedCell.position.x,
+                    blockedCell.position.y,
+                ),
+        );
+    }
+
+    /** Exposes the search intention's persistent cluster visit history. */
+    pickupClusterSnapshots(): readonly PickupClusterSnapshot[] {
+        return this.intentionGenerator.pickupClusterSnapshots();
+    }
+
+    currentScore(): number | undefined {
+        return this.score;
+    }
+
+    currentDeliberationCycle(): number {
+        return this.deliberationCycle;
+    }
+
     /** Continuously selects and executes the most valuable available intention. */
     async agent_loop(): Promise<void> {
         await new Promise<void>((resolve) => setTimeout(resolve, 2000));
@@ -85,6 +125,7 @@ export class Agent {
             deliberateImmediately = false;
 
             this.deliberationCycle += 1;
+            this.refreshTemporaryBlockedCells();
             this.beliefs.updateParcelRewards();
             const options = this.intentionGenerator.generate({
                 id: this.id,
@@ -105,9 +146,9 @@ export class Agent {
                 options: this.makeOptionLogEntries(evaluatedOptions),
                 plannedActions: this.plan.size(),
             });
-            this.temporarilyBlockedCell = undefined;
 
             let planInterrupted = false;
+            let planMoved = false;
             while (!this.plan.isEmpty()) {
                 if (this.currentIntention.shouldInterrupt(this.getIntentionContext())) {
                     planInterrupted = true;
@@ -131,7 +172,7 @@ export class Agent {
                         movementDestination,
                     );
                     if (clearance.decision === "replan") {
-                        this.temporarilyBlockedCell = clearance.blockedCell;
+                        this.addTemporaryBlockedCell(clearance.blockedCell);
                         deliberateImmediately = true;
                         planInterrupted = true;
                         break;
@@ -149,7 +190,7 @@ export class Agent {
                 const actionSucceeded = await nextAction.execute();
                 if (!actionSucceeded) {
                     if (movementDestination) {
-                        this.temporarilyBlockedCell = movementDestination;
+                        this.addTemporaryBlockedCell(movementDestination);
                         this.logger.logMoveFailure({
                             destination: movementDestination,
                         });
@@ -159,10 +200,16 @@ export class Agent {
                     break;
                 }
                 this.plan.popAction();
+                if (movementDestination) {
+                    planMoved = true;
+                }
             }
 
             if (!planInterrupted && this.plan.isEmpty()) {
                 this.currentIntention.onPlanCompleted(this.getIntentionContext());
+                if (planMoved) {
+                    this.temporarilyBlockedCells.clear();
+                }
             }
         }
     }
@@ -255,13 +302,16 @@ export class Agent {
             carriedByAgent,
             carriedByOthers,
             knownCrates: this.beliefs.crates.size,
-            temporaryWall: this.temporarilyBlockedCell,
+            temporaryWalls: [...this.temporarilyBlockedCells.values()].map(
+                (blockedCell: TemporaryBlockedCell): Position =>
+                    blockedCell.position,
+            ),
         };
     }
 
     private getIntentionContext(): IntentionContext {
         return {
-            gameMap: this.beliefs.map,
+            gameMap: this.gameMapWithTemporaryWalls(),
             agentPosition: this.position,
             crates: this.beliefs.crates,
             pickupCells: this.beliefs.pickup_cells,
@@ -279,7 +329,61 @@ export class Agent {
             agentId: this.id,
             pathfinder: this.pathfinder,
             actionFactory: this.actionFactory,
-            temporarilyBlockedCell: this.temporarilyBlockedCell,
         };
+    }
+
+    private addTemporaryBlockedCell(position: Position): void {
+        const key = this.positionKey(position);
+        const existing = this.temporarilyBlockedCells.get(key);
+        this.temporarilyBlockedCells.set(key, {
+            position: new Position(position.x, position.y),
+            protectedThroughCycle: Math.max(
+                existing?.protectedThroughCycle ?? 0,
+                this.deliberationCycle + 1,
+            ),
+        });
+    }
+
+    private refreshTemporaryBlockedCells(): void {
+        for (const [key, blockedCell] of this.temporarilyBlockedCells) {
+            if (blockedCell.protectedThroughCycle >= this.deliberationCycle) {
+                continue;
+            }
+            if (!this.beliefs.isPositionCurrentlyObserved(blockedCell.position)) {
+                continue;
+            }
+            const occupied = [...this.beliefs.agents.values()].some(
+                (agent): boolean => Math.round(agent.x) === blockedCell.position.x
+                    && Math.round(agent.y) === blockedCell.position.y,
+            );
+            if (!occupied) {
+                this.temporarilyBlockedCells.delete(key);
+            }
+        }
+    }
+
+    private gameMapWithTemporaryWalls(): string[][] {
+        if (this.temporarilyBlockedCells.size === 0) {
+            return this.beliefs.map;
+        }
+        const gameMap = this.beliefs.map.map(
+            (column: string[]): string[] => [...column],
+        );
+        for (const blockedCell of this.temporarilyBlockedCells.values()) {
+            const { position } = blockedCell;
+            if (
+                position.x >= 0
+                && position.x < gameMap.length
+                && position.y >= 0
+                && position.y < gameMap[position.x].length
+            ) {
+                gameMap[position.x][position.y] = "0";
+            }
+        }
+        return gameMap;
+    }
+
+    private positionKey(position: Position): string {
+        return `${position.x},${position.y}`;
     }
 }

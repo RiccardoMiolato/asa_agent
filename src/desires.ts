@@ -3,6 +3,7 @@ import {
     DeliverParcelIntention,
     type Intention,
     PickUpParcelIntention,
+    type PickupClusterSnapshot,
     SearchIntention,
 } from "./intentions.js";
 import { Position } from "./position.js";
@@ -53,5 +54,10 @@ export class IntentionGenerator {
         intentions.push(this.searchIntention);
 
         return intentions;
+    }
+
+    /** Returns the exploration history maintained by the persistent search intention. */
+    pickupClusterSnapshots(): readonly PickupClusterSnapshot[] {
+        return this.searchIntention.clusterSnapshots(this.beliefs.pickup_cells);
     }
 }

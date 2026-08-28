@@ -21,7 +21,6 @@ export interface IntentionContext {
     readonly agentId: string;
     readonly pathfinder: BasePathfinder;
     readonly actionFactory: ActionFactory;
-    readonly temporarilyBlockedCell?: Position;
 }
 
 /** Structured description used to log an intention without recomputing its score. */
@@ -49,6 +48,15 @@ interface PickupCluster {
     lastFullyVisitedAt: number | undefined;
     scanStartedAt: number | undefined;
     remainingCellKeys: Set<string> | undefined;
+}
+
+/** Read-only search history used by observers such as the ghost map. */
+export interface PickupClusterSnapshot {
+    readonly id: string;
+    readonly cells: readonly Position[];
+    readonly lastVisitedAt: number | undefined;
+    readonly visitOrder: number | undefined;
+    readonly active: boolean;
 }
 
 interface ClusterCheckpoint {
@@ -247,6 +255,43 @@ export class SearchIntention extends Intention {
         };
     }
 
+    /** Describes pickup clusters without exposing mutable search-planning state. */
+    clusterSnapshots(
+        pickupCells: readonly Position[],
+    ): readonly PickupClusterSnapshot[] {
+        this.synchronizeClusters(pickupCells);
+        const visitOrderById = new Map<string, number>(
+            this.clusters
+                .filter(
+                    (cluster: PickupCluster): boolean =>
+                        cluster.lastFullyVisitedAt !== undefined,
+                )
+                .sort(
+                    (first: PickupCluster, second: PickupCluster): number =>
+                        (first.lastFullyVisitedAt ?? 0)
+                        - (second.lastFullyVisitedAt ?? 0),
+                )
+                .map(
+                    (cluster: PickupCluster, index: number): [string, number] => [
+                        cluster.id,
+                        index,
+                    ],
+                ),
+        );
+
+        return this.clusters.map(
+            (cluster: PickupCluster): PickupClusterSnapshot => ({
+                id: cluster.id,
+                cells: cluster.cells.map(
+                    (cell: Position): Position => new Position(cell.x, cell.y),
+                ),
+                lastVisitedAt: cluster.lastFullyVisitedAt,
+                visitOrder: visitOrderById.get(cluster.id),
+                active: cluster === this.plannedCluster,
+            }),
+        );
+    }
+
     private synchronizeClusters(pickupCells: readonly Position[]): void {
         const signature = pickupCells
             .map((position: Position): string => this.positionKey(position))
@@ -410,7 +455,6 @@ export class SearchIntention extends Intention {
                     cursor,
                     candidate.destination,
                     context.crates,
-                    context.temporarilyBlockedCell,
                 );
                 if (movementPath.positions.length === 0) {
                     continue;
@@ -599,7 +643,6 @@ export class PickUpParcelIntention extends RewardIntention {
             context.agentPosition,
             this.parcelPosition,
             context.crates,
-            context.temporarilyBlockedCell,
         );
         if (pickupDistance === undefined) {
             return -1;
@@ -612,7 +655,6 @@ export class PickUpParcelIntention extends RewardIntention {
                 this.parcelPosition,
                 deliveryCell,
                 context.crates,
-                context.temporarilyBlockedCell,
             );
             if (deliveryDistance === undefined) {
                 continue;
@@ -666,7 +708,6 @@ export class PickUpParcelIntention extends RewardIntention {
             context.agentPosition,
             this.parcelPosition,
             context.crates,
-            context.temporarilyBlockedCell,
         );
     }
 
@@ -676,7 +717,6 @@ export class PickUpParcelIntention extends RewardIntention {
             context.agentPosition,
             this.parcelPosition,
             context.crates,
-            context.temporarilyBlockedCell,
         );
         actions.push(context.actionFactory.pickUp(this.parcel.id, context.agentId));
         return actions;
@@ -722,7 +762,6 @@ export class DeliverParcelIntention extends RewardIntention {
             context.agentPosition,
             this.deliveryCell,
             context.crates,
-            context.temporarilyBlockedCell,
         );
         if (firstDeliveryDistance === undefined) {
             return -1;
@@ -759,7 +798,6 @@ export class DeliverParcelIntention extends RewardIntention {
                 this.deliveryCell,
                 parcelPosition,
                 context.crates,
-                context.temporarilyBlockedCell,
             );
             if (pickupDistance === undefined) {
                 continue;
@@ -772,7 +810,6 @@ export class DeliverParcelIntention extends RewardIntention {
                     parcelPosition,
                     finalDeliveryCell,
                     context.crates,
-                    context.temporarilyBlockedCell,
                 );
                 if (deliveryDistance === undefined) {
                     continue;
@@ -815,7 +852,6 @@ export class DeliverParcelIntention extends RewardIntention {
             context.agentPosition,
             this.deliveryCell,
             context.crates,
-            context.temporarilyBlockedCell,
         );
     }
 
@@ -825,7 +861,6 @@ export class DeliverParcelIntention extends RewardIntention {
             context.agentPosition,
             this.deliveryCell,
             context.crates,
-            context.temporarilyBlockedCell,
         );
         actions.push(context.actionFactory.drop(context.agentId));
         return actions;

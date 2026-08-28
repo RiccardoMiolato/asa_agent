@@ -2,6 +2,8 @@ import 'dotenv/config';
 import { DjsConnect, type DjsClientSocket } from "@unitn-asa/deliveroo-js-sdk/client";
 import { Agent } from './src/agent.js';
 import { ConsoleAgentLogger } from './src/_logging.js';
+import { AgentGhostMapSnapshotProvider } from './src/_ghost-map-snapshot.js';
+import { GhostMapServer } from './src/_ghost-map-server.js';
 import { AStarPathfinder } from './src/astar.js';
 import { Beliefs } from './src/beliefs.js';
 import { IntentionGenerator } from './src/desires.js';
@@ -14,6 +16,7 @@ import type { IOSensing } from './types/IOSensing.js';
 const host = process.env.HOST || "http://localhost:8080";
 const token = process.env.TOKEN || "";
 const agent_name = process.env.NAME || "cardo";
+const ghostMapPort = Number(process.env.GHOST_MAP_PORT ?? "8081");
 
 console.log("Connecting...");
 const socket: DjsClientSocket = DjsConnect(host, token, agent_name);
@@ -28,6 +31,21 @@ const agent = new Agent(
     actionFactory,
     new ConsoleAgentLogger(),
 );
+const ghostMapServer = new GhostMapServer(
+    new AgentGhostMapSnapshotProvider(agent, beliefs, agent_name),
+    ghostMapPort,
+);
+
+void ghostMapServer.start()
+    .then((): void => {
+        console.log(`Ghost map available at http://localhost:${ghostMapPort}`);
+    })
+    .catch((error: unknown): void => {
+        console.error(
+            `Could not start ghost map on port ${ghostMapPort}:`,
+            error,
+        );
+    });
 
 socket.onConnect((): void => {
     console.log("Connected to the game server!")
