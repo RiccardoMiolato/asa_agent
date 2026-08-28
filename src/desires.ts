@@ -58,6 +58,9 @@ export class IntentionGenerator {
 
     /** Returns the exploration history maintained by the persistent search intention. */
     pickupClusterSnapshots(): readonly PickupClusterSnapshot[] {
-        return this.searchIntention.clusterSnapshots(this.beliefs.pickup_cells);
+        return this.searchIntention.clusterSnapshots(
+            this.beliefs.pickup_cells,
+            this.beliefs.pickupCellObservationTimes(),
+        );
     }
 }

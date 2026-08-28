@@ -16,7 +16,16 @@ export interface GhostMapAgentState {
     readonly deliberationCycle: number;
 }
 
+export interface GhostMapParcel {
+    readonly id: string;
+    readonly position: Position;
+    readonly reward: number;
+    readonly carriedBy: string | null;
+    readonly lastObservedAt: number;
+}
+
 export interface GhostMapSnapshot {
+    readonly schemaVersion: 4;
     readonly updatedAt: number;
     readonly ready: boolean;
     readonly map: {
@@ -28,6 +37,8 @@ export interface GhostMapSnapshot {
     readonly target: GhostMapTarget | undefined;
     readonly temporaryWalls: readonly Position[];
     readonly pickupClusters: readonly PickupClusterSnapshot[];
+    readonly stripedPickupCells: readonly Position[];
+    readonly knownParcels: readonly GhostMapParcel[];
 }
 
 /** Builds an immutable, serializable view of the agent's private world model. */
@@ -40,7 +51,9 @@ export class AgentGhostMapSnapshotProvider {
 
     snapshot(): GhostMapSnapshot {
         const decision = this.agent.currentDecision();
+        const pickupClusters = this.agent.pickupClusterSnapshots();
         return {
+            schemaVersion: 4,
             updatedAt: Date.now(),
             ready: this.beliefs.map.length > 0 && this.agent.id.length > 0,
             map: {
@@ -65,7 +78,19 @@ export class AgentGhostMapSnapshotProvider {
                 }
                 : undefined,
             temporaryWalls: this.agent.temporaryBlockedCellSnapshots(),
-            pickupClusters: this.agent.pickupClusterSnapshots(),
+            pickupClusters,
+            stripedPickupCells: pickupClusters.flatMap(
+                (cluster): readonly Position[] => cluster.stripedCells,
+            ),
+            knownParcels: [...this.beliefs.parcels.values()].map(
+                (parcel): GhostMapParcel => ({
+                    id: parcel.id,
+                    position: new Position(parcel.x, parcel.y),
+                    reward: parcel.reward,
+                    carriedBy: parcel.carriedBy ?? null,
+                    lastObservedAt: parcel.lastUpdate.getTime(),
+                }),
+            ),
         };
     }
 }

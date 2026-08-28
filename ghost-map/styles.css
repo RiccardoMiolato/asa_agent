@@ -286,6 +286,13 @@ h1 {
 .swatch.walkable { background: #f2f4f3; }
 .swatch.delivery { background: var(--red); }
 .swatch.pickup { background: #00df78; }
+.swatch.parcel {
+    color: #231706;
+    background: #ffc65a;
+    font-size: 8px;
+    font-style: normal;
+    font-weight: 900;
+}
 .swatch.wall {
     color: #fff;
     background: #202724;
@@ -411,12 +418,21 @@ h2 {
     border-color: color-mix(in srgb, var(--cluster-color), white 20%);
 }
 
-.cell.cluster-unvisited {
-    background-color: #164431;
-    background-image: repeating-linear-gradient(
+.cell.pickup-seen {
+    background: var(--cluster-color);
+}
+
+.cell.pickup-seen::after {
+    position: absolute;
+    z-index: 1;
+    inset: 0;
+    pointer-events: none;
+    content: "";
+    border-radius: inherit;
+    background: repeating-linear-gradient(
         135deg,
-        transparent 0 5px,
-        rgba(255, 255, 255, 0.055) 5px 7px
+        rgba(235, 255, 244, 0.42) 0 5px,
+        rgba(0, 0, 0, 0.08) 5px 10px
     );
 }
 
@@ -443,6 +459,44 @@ h2 {
     box-shadow: 0 4px 13px rgba(0, 0, 0, 0.45), 0 0 14px rgba(0, 229, 130, 0.5);
     font-size: clamp(7px, 0.8vw, 11px);
     font-weight: 950;
+}
+
+.parcel-layer {
+    right: -16%;
+    bottom: -13%;
+    display: flex;
+    max-width: 130%;
+    flex-wrap: wrap-reverse;
+    justify-content: flex-end;
+    gap: 2px;
+}
+
+.parcel-marker {
+    display: grid;
+    min-width: clamp(13px, 1.2vw, 18px);
+    height: clamp(13px, 1.2vw, 18px);
+    padding: 0 3px;
+    place-items: center;
+    color: #281a05;
+    border: 1px solid #fff0c6;
+    border-radius: 4px;
+    background: #ffc75c;
+    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.48);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: clamp(7px, 0.7vw, 10px);
+    font-weight: 950;
+    line-height: 1;
+}
+
+.parcel-carried {
+    color: #f8ecd4;
+    border-color: #a5864b;
+    background: #5d4a29;
+}
+
+.parcel-carried-by-me {
+    border-color: #baffdc;
+    box-shadow: 0 0 0 1px rgba(0, 229, 130, 0.48), 0 3px 8px rgba(0, 0, 0, 0.48);
 }
 
 .temporary-wall {

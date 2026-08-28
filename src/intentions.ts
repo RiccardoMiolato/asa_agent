@@ -55,8 +55,10 @@ export interface PickupClusterSnapshot {
     readonly id: string;
     readonly cells: readonly Position[];
     readonly lastVisitedAt: number | undefined;
+    readonly lastSeenAt: number | undefined;
     readonly visitOrder: number | undefined;
     readonly active: boolean;
+    readonly stripedCells: readonly Position[];
 }
 
 interface ClusterCheckpoint {
@@ -258,18 +260,27 @@ export class SearchIntention extends Intention {
     /** Describes pickup clusters without exposing mutable search-planning state. */
     clusterSnapshots(
         pickupCells: readonly Position[],
+        pickupCellLastObservedAt: ReadonlyMap<string, number>,
     ): readonly PickupClusterSnapshot[] {
         this.synchronizeClusters(pickupCells);
+        const lastSeenAtById = new Map<string, number | undefined>(
+            this.clusters.map(
+                (cluster: PickupCluster): [string, number | undefined] => [
+                    cluster.id,
+                    this.clusterLastSeenAt(cluster, pickupCellLastObservedAt),
+                ],
+            ),
+        );
         const visitOrderById = new Map<string, number>(
             this.clusters
                 .filter(
                     (cluster: PickupCluster): boolean =>
-                        cluster.lastFullyVisitedAt !== undefined,
+                        lastSeenAtById.get(cluster.id) !== undefined,
                 )
                 .sort(
                     (first: PickupCluster, second: PickupCluster): number =>
-                        (first.lastFullyVisitedAt ?? 0)
-                        - (second.lastFullyVisitedAt ?? 0),
+                        (lastSeenAtById.get(first.id) ?? 0)
+                        - (lastSeenAtById.get(second.id) ?? 0),
                 )
                 .map(
                     (cluster: PickupCluster, index: number): [string, number] => [
@@ -286,10 +297,59 @@ export class SearchIntention extends Intention {
                     (cell: Position): Position => new Position(cell.x, cell.y),
                 ),
                 lastVisitedAt: cluster.lastFullyVisitedAt,
+                lastSeenAt: lastSeenAtById.get(cluster.id),
                 visitOrder: visitOrderById.get(cluster.id),
                 active: cluster === this.plannedCluster,
+                stripedCells: this.clusterCellsSeenDuringCurrentScan(
+                    cluster,
+                    pickupCellLastObservedAt,
+                ),
             }),
         );
+    }
+
+    private clusterCellsSeenDuringCurrentScan(
+        cluster: PickupCluster,
+        pickupCellLastObservedAt: ReadonlyMap<string, number>,
+    ): Position[] {
+        const scanStartedAt = cluster.scanStartedAt;
+        if (scanStartedAt === undefined) {
+            return [];
+        }
+
+        return cluster.cells
+            .filter((cell: Position): boolean => {
+                const key = this.positionKey(cell);
+                const observedAt = pickupCellLastObservedAt.get(key);
+                const coveredAtScanStart = cluster.remainingCellKeys !== undefined
+                    && !cluster.remainingCellKeys.has(key);
+                return coveredAtScanStart
+                    || (observedAt !== undefined
+                        && observedAt >= scanStartedAt);
+            })
+            .map(
+                (cell: Position): Position => new Position(cell.x, cell.y),
+            );
+    }
+
+    private clusterLastSeenAt(
+        cluster: PickupCluster,
+        pickupCellLastObservedAt: ReadonlyMap<string, number>,
+    ): number | undefined {
+        let latestObservation: number | undefined;
+        for (const cell of cluster.cells) {
+            const observedAt = pickupCellLastObservedAt.get(
+                this.positionKey(cell),
+            );
+            if (
+                observedAt !== undefined
+                && (latestObservation === undefined
+                    || observedAt > latestObservation)
+            ) {
+                latestObservation = observedAt;
+            }
+        }
+        return latestObservation;
     }
 
     private synchronizeClusters(pickupCells: readonly Position[]): void {

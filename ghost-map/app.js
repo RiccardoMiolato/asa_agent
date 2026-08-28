@@ -20,16 +20,22 @@ let requestInFlight = false;
 
 class GhostMapRenderer {
     render(snapshot) {
-        this.renderConnection(snapshot.ready);
+        this.renderConnection(snapshot.ready, snapshot.schemaVersion === 4);
         this.renderAgent(snapshot.agent);
         this.renderTarget(snapshot.target);
         this.renderMap(snapshot);
         elements.lastUpdate.textContent = `Updated ${new Date(snapshot.updatedAt).toLocaleTimeString()}`;
     }
 
-    renderConnection(ready) {
-        elements.connection.className = `connection ${ready ? "online" : ""}`;
-        elements.connectionLabel.textContent = ready ? "Live agent state" : "Waiting for agent";
+    renderConnection(ready, compatible) {
+        elements.connection.className = `connection ${
+            !compatible ? "offline" : ready ? "online" : ""
+        }`;
+        elements.connectionLabel.textContent = !compatible
+            ? "Restart agent · old snapshot"
+            : ready
+                ? "Live agent state"
+                : "Waiting for agent";
     }
 
     renderAgent(agent) {
@@ -51,14 +57,23 @@ class GhostMapRenderer {
     }
 
     renderMap(snapshot) {
-        const { map, pickupClusters, temporaryWalls, target, agent } = snapshot;
+        const {
+            map,
+            pickupClusters,
+            stripedPickupCells,
+            knownParcels,
+            temporaryWalls,
+            target,
+            agent,
+        } = snapshot;
         const hasMap = map.width > 0 && map.height > 0;
         elements.map.classList.toggle("ready", hasMap);
         elements.emptyState.classList.toggle("hidden", hasMap);
         elements.mapTitle.textContent = hasMap ? `${agent.name}'s believed map` : "Waiting for map";
-        elements.mapSize.textContent = `${map.width} × ${map.height}`;
+        const parcelCount = Array.isArray(knownParcels) ? knownParcels.length : 0;
+        elements.mapSize.textContent = `${map.width} × ${map.height} · ${parcelCount} parcel${parcelCount === 1 ? "" : "s"}`;
         elements.clusterSummary.textContent = pickupClusters.length
-            ? `${pickupClusters.length} cluster${pickupClusters.length === 1 ? "" : "s"} · striped means unvisited`
+            ? `${pickupClusters.length} cluster${pickupClusters.length === 1 ? "" : "s"} · stripes reset when a scan completes`
             : "No pickup clusters yet";
         if (!hasMap) {
             elements.map.replaceChildren();
@@ -78,6 +93,19 @@ class GhostMapRenderer {
             }
         }
         const temporaryWallKeys = new Set(temporaryWalls.map(positionKey));
+        const stripedPickupCellKeys = new Set(
+            (stripedPickupCells ?? []).map(positionKey),
+        );
+        const parcelsByCell = new Map();
+        for (const parcel of knownParcels ?? []) {
+            const key = positionKey({
+                x: Math.round(parcel.position.x),
+                y: Math.round(parcel.position.y),
+            });
+            const parcels = parcelsByCell.get(key) ?? [];
+            parcels.push(parcel);
+            parcelsByCell.set(key, parcels);
+        }
         const targetKey = target ? positionKey(target.position) : undefined;
         const agentKey = positionKey({
             x: Math.round(agent.position.x),
@@ -98,7 +126,10 @@ class GhostMapRenderer {
                 if (cluster) {
                     cell.classList.add("pickup-cluster");
                     if (cluster.visitOrder === undefined) {
-                        cell.classList.add("cluster-unvisited");
+                        cell.style.setProperty(
+                            "--cluster-color",
+                            clusterColor(undefined, visitedCount),
+                        );
                     } else {
                         cell.style.setProperty(
                             "--cluster-color",
@@ -109,6 +140,15 @@ class GhostMapRenderer {
                     if (cluster.active) {
                         cell.classList.add("cluster-active");
                     }
+                    if (stripedPickupCellKeys.has(key)) {
+                        cell.classList.add("pickup-seen");
+                        cell.title += " · seen during the current cluster scan";
+                    }
+                }
+                const parcels = parcelsByCell.get(key);
+                if (parcels) {
+                    cell.append(makeParcelLayer(parcels, agent.id));
+                    cell.title += ` · ${parcels.length} known parcel${parcels.length === 1 ? "" : "s"}`;
                 }
                 if (key === agentKey && agent.id) {
                     cell.append(makeMarker("agent-marker", "A"));
@@ -137,6 +177,26 @@ function makeMarker(className, text = "") {
     return marker;
 }
 
+function makeParcelLayer(parcels, agentId) {
+    const layer = document.createElement("span");
+    layer.className = "parcel-layer marker";
+    for (const parcel of parcels) {
+        const marker = document.createElement("span");
+        marker.className = "parcel-marker";
+        if (parcel.carriedBy) {
+            marker.classList.add("parcel-carried");
+        }
+        if (parcel.carriedBy === agentId) {
+            marker.classList.add("parcel-carried-by-me");
+        }
+        marker.textContent = parcel.reward;
+        marker.title = `Parcel ${parcel.id} · believed reward ${parcel.reward}`
+            + (parcel.carriedBy ? ` · carried by ${parcel.carriedBy}` : "");
+        layer.append(marker);
+    }
+    return layer;
+}
+
 function positionKey(position) {
     return `${position.x},${position.y}`;
 }
@@ -148,6 +208,9 @@ function formatPosition(position) {
 }
 
 function clusterColor(visitOrder, visitedCount) {
+    if (visitOrder === undefined) {
+        return "hsl(151 48% 16%)";
+    }
     const progress = visitedCount <= 1 ? 1 : visitOrder / (visitedCount - 1);
     const saturation = 52 + progress * 38;
     const lightness = 18 + progress * 29;
