@@ -149,7 +149,10 @@ export class PickUpParcelIntention extends Intention {
             this.parcelPosition,
             context.crates,
         );
-        actions.push(context.actionFactory.pickUp(this.parcel.id, context.agentId));
+
+        if (actions.length > 0 || context.agentPosition.isEqual(this.parcelPosition))
+            actions.push(context.actionFactory.pickUp(this.parcel.id, context.agentId));
+
         return actions;
     }
 
@@ -271,7 +274,9 @@ export class DeliverParcelIntention extends Intention {
             this.deliveryCell,
             context.crates,
         );
-        actions.push(context.actionFactory.drop(context.agentId));
+
+        if (actions.length > 0 || context.agentPosition.isEqual(this.deliveryCell))
+            actions.push(context.actionFactory.drop(context.agentId));
         return actions;
     }
 
