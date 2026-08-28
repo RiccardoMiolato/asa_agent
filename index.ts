@@ -1,17 +1,53 @@
 import 'dotenv/config';
-import { DjsConnect, DjsClientSocket } from "@unitn-asa/deliveroo-js-sdk/client";
-import agent from './agent/agent.js';
-import beliefs from './agent/beliefs.js';
+import { DjsConnect, type DjsClientSocket } from "@unitn-asa/deliveroo-js-sdk/client";
+import { Agent } from './src/agent.js';
+import { ConsoleAgentLogger } from './src/_logging.js';
+import { AgentGhostMapSnapshotProvider } from './src/_ghost-map-snapshot.js';
+import { GhostMapServer } from './src/_ghost-map-server.js';
+import { AStarPathfinder } from './src/astar.js';
+import { Beliefs } from './src/beliefs.js';
+import { IntentionGenerator } from './src/desires.js';
+import { ActionFactory } from './src/move.js';
+import type { IOAgent } from './types/IOAgent.js';
+import type { IOConfig } from './types/IOConfig.js';
+import type { IOSensing } from './types/IOSensing.js';
 
 // Environment variables and script constants
 const host = process.env.HOST || "http://localhost:8080";
 const token = process.env.TOKEN || "";
 const agent_name = process.env.NAME || "cardo";
+const ghostMapPort = Number(process.env.GHOST_MAP_PORT ?? "8081");
 
 console.log("Connecting...");
 const socket: DjsClientSocket = DjsConnect(host, token, agent_name);
+const beliefs = new Beliefs();
+const actionFactory = new ActionFactory(socket, beliefs);
+const pathfinder = new AStarPathfinder(actionFactory);
+const intentionGenerator = new IntentionGenerator(beliefs);
+const agent = new Agent(
+    beliefs,
+    intentionGenerator,
+    pathfinder,
+    actionFactory,
+    new ConsoleAgentLogger(),
+);
+const ghostMapServer = new GhostMapServer(
+    new AgentGhostMapSnapshotProvider(agent, beliefs, agent_name),
+    ghostMapPort,
+);
 
-socket.onConnect(() => {
+void ghostMapServer.start()
+    .then((): void => {
+        console.log(`Ghost map available at http://localhost:${ghostMapPort}`);
+    })
+    .catch((error: unknown): void => {
+        console.error(
+            `Could not start ghost map on port ${ghostMapPort}:`,
+            error,
+        );
+    });
+
+socket.onConnect((): void => {
     console.log("Connected to the game server!")
 });
 
@@ -20,7 +56,7 @@ socket.onConnect(() => {
  * initialized before the agent starts to interact with the
  * environment.
  */
-socket.onConfig((config: any) => {
+socket.onConfig((config: IOConfig): void => {
     beliefs.configPhase(config);
 });
 
@@ -29,11 +65,15 @@ socket.onConfig((config: any) => {
  * in the environment, like the position of the agent itself
  * or other events.
  */
-socket.onYou((_agent: any) => {
+socket.onYou((_agent: IOAgent): void => {
     if (!agent.id)
-        agent.id = _agent["id"];
+        agent.id = _agent.id;
 
-    agent.updatePosition(_agent["x"], _agent["y"]);
+    agent.updateScore(_agent.score);
+
+    if (_agent.x !== undefined && _agent.y !== undefined) {
+        agent.updatePosition(_agent.x, _agent.y);
+    }
 });
 
 /**
@@ -41,10 +81,13 @@ socket.onYou((_agent: any) => {
  * That include parcels generation, crates position and other
  * players' agent positions.
  */
-socket.onSensing((sensing: any) => {
-    beliefs.senseParcels(sensing["parcels"]);
-    beliefs.senseCrates(sensing["crates"]);
+socket.onSensing((sensing: IOSensing): void => {
+    beliefs.revise(
+        sensing.parcels,
+        sensing.crates,
+        sensing.positions,
+        sensing.agents,
+    );
 });
 
-agent.agent_loop();
-export default socket;
+void agent.agent_loop();
