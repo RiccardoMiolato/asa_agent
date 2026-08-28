@@ -1,7 +1,7 @@
 import type { BasePathfinder } from "./astar.js";
 import type { Beliefs } from "./beliefs.js";
 import type { IntentionGenerator } from "./desires.js";
-import { SearchIntention, type Intention, type IntentionContext } from "./intentions.js";
+import { Intention, SearchIntention, type IntentionContext } from "./intentions.js";
 import { GameMap } from "./map.js";
 import type { ActionFactory } from "./move.js";
 import { PDDLGoal, PDDLPlanner } from "./pddl/pddlPlanner.js";
@@ -24,7 +24,6 @@ export class Agent {
         private readonly intentionGenerator: IntentionGenerator,
         private readonly pathfinder: BasePathfinder,
         private readonly actionFactory: ActionFactory,
-        private readonly pddl: boolean,
     ) {
         this.id = "";
         this.position = new Position(0, 0);
@@ -42,11 +41,9 @@ export class Agent {
     async agent_loop(): Promise<void> {
         await new Promise<void>((resolve) => setTimeout(resolve, 1000));
 
-        if (this.pddl)
-            this.pddlPlanner = new PDDLPlanner();
+        this.pddlPlanner = new PDDLPlanner(this.actionFactory);
 
         while (true) {
-            await new Promise<void>((resolve) => setTimeout(resolve, 5000));
             await new Promise<void>((resolve) =>
                 setTimeout(resolve, this.beliefs.movement_duration)
             );
@@ -62,14 +59,16 @@ export class Agent {
 
             this.filterOptions();
 
-            this.buildPlan(this.pddl);
+            await this.buildPlan();
 
             console.log("Proceeding with:");
             this.currentIntention.log(this.getIntentionContext());
+            this.beliefs.parcels.forEach(parcel => parcel.carriedBy === this.id ? console.log(parcel.id) : {});
             console.log();
 
             while (!this.plan.isEmpty()) {
-                if (this.currentIntention.shouldInterrupt(this.getIntentionContext())) {
+                const context = this.getIntentionContext();
+                if (this.currentIntention.shouldInterrupt(context)) {
                     break;
                 }
 
@@ -82,8 +81,14 @@ export class Agent {
                     break;
                 }
 
-                await nextAction.execute();
-                this.plan.popAction();
+                console.log("Exetuting");
+                const result = await nextAction.execute();
+
+                if(!result) {
+                    await this.buildPlan();
+                } else{
+                    this.plan.popAction();
+                }
             }
         }
     }
@@ -108,40 +113,56 @@ export class Agent {
     filterOptions(): void {
         this.beliefs.updateParcelRewards();
         const context = this.getIntentionContext();
-        let bestOption: Intention = new SearchIntention();
-        let bestScore = bestOption.score(context);
+        let bestOption: Intention | undefined = undefined;
+        let bestScore = Number.MIN_VALUE;
 
         for (const intention of this.intentions) {
             const score = intention.score(context);
+            intention.log(this.getIntentionContext());
+            console.log("Score: ", score);
             if (score >= bestScore) {
                 bestScore = score;
                 bestOption = intention;
             }
         }
 
-        this.currentIntention = bestOption;
+        if(bestOption)
+            this.currentIntention = bestOption;
     }
 
-    buildPlan(usePddl: boolean): void {
-        const context = this.getIntentionContext();
-        if(usePddl) {
-            this.pddlPlanner?.resetPDDL();
-            this.pddlPlanner?.buildPDDLProblem(
-                new GameMap(context.gameMap),
-                [...context.parcels.values()] ,
-                this.id,
-                this.position,
-            );
+    async buildPlan(): Promise<void> {
+        const context: IntentionContext = this.getIntentionContext();
 
-            if(this.currentIntention) {
-                const pddlGoal: PDDLGoal = this.currentIntention.toPddlGoal(context);
-                this.pddlPlanner?.buildGoal(pddlGoal);
-                this.pddlPlanner?.solveProblem();
-            }
-        } else {
-            const actions = this.currentIntention.buildActions(context);
+        const actions = this.currentIntention.buildActions(context);
+
+        if(actions.length > 0){
+            console.log("here");
+            this.plan.newPlan(actions);
+            return;
+        }
+
+        // If normal pathfinding algorithms cannot find a path
+        // then PDDL is used because its likely that the path
+        // must be cleared moving crates
+
+        console.log("Build plan with PDDL");
+        this.pddlPlanner?.resetPDDL();
+
+        this.pddlPlanner?.buildPDDLProblem(
+            new GameMap(context.gameMap),
+            [...context.parcels.values()],
+            [...context.crates.values()],
+            this.id,
+            this.position,
+        );
+
+        if(this.currentIntention) {
+            const pddlGoal: PDDLGoal = this.currentIntention.toPddlGoal(context);
+            this.pddlPlanner?.buildGoal(pddlGoal);
+            const actions = await this.pddlPlanner?.solveProblem() || [];
             this.plan.newPlan(actions);
         }
+
     }
 
     private getIntentionContext(): IntentionContext {
