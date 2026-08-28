@@ -15,12 +15,16 @@ export interface IntentionContext {
     readonly movementDuration: number;
     readonly frameDuration: number;
     readonly observationDistance: number;
+    readonly rewardDecayInterval: number | undefined;
     readonly millisecondsUntilNextRewardDecay: number | undefined;
     readonly freeParcelsCount: number;
     readonly agentId: string;
     readonly pathfinder: BasePathfinder;
     readonly actionFactory: ActionFactory;
 }
+
+// TODO: consider alternate plan is the current fails, eg player is blocking
+// probably this can be done by sensing a new obstacle
 
 /** Structured description used to log an intention without recomputing its score. */
 export type IntentionDescription =
@@ -102,13 +106,19 @@ export abstract class RewardIntention extends Intention {
         extraWaitCount: number,
         movementDuration: number,
         frameDuration: number,
+        rewardDecayInterval: number | undefined,
         millisecondsUntilNextDecay: number | undefined,
     ): number {
+        if (rewardDecayInterval === undefined) {
+            return reward;
+        }
+
         const executionMilliseconds = (
             movementCount * 2 + extraWaitCount
         ) * movementDuration + movementCount * frameDuration;
         const decayTicks = this.estimateDecayTicks(
             executionMilliseconds,
+            rewardDecayInterval,
             millisecondsUntilNextDecay,
         );
         return Math.max(0, reward - decayTicks);
@@ -116,16 +126,18 @@ export abstract class RewardIntention extends Intention {
 
     private estimateDecayTicks(
         executionMilliseconds: number,
+        rewardDecayInterval: number,
         millisecondsUntilNextDecay: number | undefined,
     ): number {
         if (millisecondsUntilNextDecay === undefined) {
-            return Math.round(executionMilliseconds / 1_000);
+            return Math.round(executionMilliseconds / rewardDecayInterval);
         }
         if (executionMilliseconds < millisecondsUntilNextDecay) {
             return 0;
         }
         return 1 + Math.floor(
-            (executionMilliseconds - millisecondsUntilNextDecay) / 1_000,
+            (executionMilliseconds - millisecondsUntilNextDecay)
+                / rewardDecayInterval,
         );
     }
 }
@@ -623,6 +635,7 @@ export class PickUpParcelIntention extends RewardIntention {
             3,
             context.movementDuration,
             context.frameDuration,
+            context.rewardDecayInterval,
             context.millisecondsUntilNextRewardDecay,
         );
         if (candidateReward === 0) {
@@ -638,6 +651,7 @@ export class PickUpParcelIntention extends RewardIntention {
                     3,
                     context.movementDuration,
                     context.frameDuration,
+                    context.rewardDecayInterval,
                     context.millisecondsUntilNextRewardDecay,
                 );
             }
@@ -714,6 +728,7 @@ export class DeliverParcelIntention extends RewardIntention {
                     1,
                     context.movementDuration,
                     context.frameDuration,
+                    context.rewardDecayInterval,
                     context.millisecondsUntilNextRewardDecay,
                 );
             }
@@ -774,6 +789,7 @@ export class DeliverParcelIntention extends RewardIntention {
                     5,
                     context.movementDuration,
                     context.frameDuration,
+                    context.rewardDecayInterval,
                     context.millisecondsUntilNextRewardDecay,
                 ),
             );

@@ -1,4 +1,5 @@
 import type { IOConfig } from "../types/IOConfig.js";
+import type { IOClockEvent } from "../types/IOClockEvent.js";
 import type { IOCrate } from "../types/IOCrate.js";
 import type { IOParcel } from "../types/IOParcel.js";
 import type { IOSensedPosition } from "../types/IOSensing.js";
@@ -9,8 +10,6 @@ export interface Parcel extends IOParcel {
 }
 
 export class Beliefs {
-    private static readonly REWARD_DECAY_INTERVAL = 1_000;
-
     map: string[][];
 
     // OBJECT POSITIONS
@@ -27,6 +26,7 @@ export class Beliefs {
     movement_duration: number;
     frame_duration: number;
     observation_distance: number;
+    private rewardDecayInterval: number | undefined;
     private lastRewardDecayAt: number | undefined;
     // TODO add player position and id to the believes
 
@@ -41,6 +41,7 @@ export class Beliefs {
         this.movement_duration = 0;
         this.frame_duration = 0;
         this.observation_distance = -1;
+        this.rewardDecayInterval = 1_000;
         this.lastRewardDecayAt = undefined;
     }
 
@@ -60,6 +61,11 @@ export class Beliefs {
         this.movement_duration = config.GAME.player.movement_duration;
         this.frame_duration = config.CLOCK;
         this.observation_distance = config.GAME.player.observation_distance;
+        this.rewardDecayInterval = Beliefs.clockEventIntervalMilliseconds(
+            config.GAME.parcels?.decaying_event ?? "1s",
+            this.frame_duration,
+        );
+        this.lastRewardDecayAt = undefined;
 
         const rows = this.map.length;
         const cols = this.map[0].length;
@@ -104,7 +110,7 @@ export class Beliefs {
         return `${position.x},${position.y}`;
     }
 
-    // Sense the parcels
+    /** Revises parcel beliefs from the current sensing snapshot. */
     senseParcels(parcels: IOParcel[]): void {
         parcels.forEach((parcel: IOParcel) => {
             const { id, x, y, carriedBy, reward } = parcel;
@@ -139,14 +145,19 @@ export class Beliefs {
         }
     }
 
-    /** Applies complete one-second decay ticks to stale parcel beliefs. */
+    /** Applies complete configured decay ticks to stale parcel beliefs. */
     updateParcelRewards(): void {
+        const rewardDecayInterval = this.rewardDecayInterval;
+        if (rewardDecayInterval === undefined) {
+            return;
+        }
+
         const timeNow = new Date();
 
         this.parcels.forEach((parcel: Parcel, id: string) => {
             const elapsedMilliseconds = timeNow.getTime() - parcel.lastUpdate.getTime();
             const elapsedTicks = Math.floor(
-                elapsedMilliseconds / Beliefs.REWARD_DECAY_INTERVAL,
+                elapsedMilliseconds / rewardDecayInterval,
             );
             if (elapsedTicks === 0) {
                 return;
@@ -155,7 +166,7 @@ export class Beliefs {
             parcel.reward = Math.max(0, parcel.reward - elapsedTicks);
             parcel.lastUpdate = new Date(
                 parcel.lastUpdate.getTime()
-                + elapsedTicks * Beliefs.REWARD_DECAY_INTERVAL,
+                + elapsedTicks * rewardDecayInterval,
             );
 
             if (parcel.reward <= 0) {
@@ -166,15 +177,47 @@ export class Beliefs {
 
     /** Returns a latency-adjusted delay until the next server reward-decay tick. */
     millisecondsUntilNextRewardDecay(): number | undefined {
-        if (this.lastRewardDecayAt === undefined) {
+        if (
+            this.rewardDecayInterval === undefined
+            || this.lastRewardDecayAt === undefined
+        ) {
             return undefined;
         }
 
         const elapsed = Date.now() - this.lastRewardDecayAt;
-        const elapsedInCurrentInterval = elapsed % Beliefs.REWARD_DECAY_INTERVAL;
-        const delayFromObservedSnapshot = Beliefs.REWARD_DECAY_INTERVAL
+        const elapsedInCurrentInterval = elapsed % this.rewardDecayInterval;
+        const delayFromObservedSnapshot = this.rewardDecayInterval
             - elapsedInCurrentInterval;
         return Math.max(0, delayFromObservedSnapshot - this.frame_duration);
+    }
+
+    /** Returns the configured time between parcel reward decrements. */
+    rewardDecayIntervalMilliseconds(): number | undefined {
+        return this.rewardDecayInterval;
+    }
+
+    private static clockEventIntervalMilliseconds(
+        event: IOClockEvent,
+        frameDuration: number,
+    ): number | undefined {
+        switch (event) {
+            case "frame":
+                return frameDuration;
+            case "1s":
+                return 1_000;
+            case "2s":
+                return 2_000;
+            case "5s":
+                return 5_000;
+            case "10s":
+                return 10_000;
+            case "1m":
+                return 60_000;
+            case "1h":
+                return 3_600_000;
+            case "infinite":
+                return undefined;
+        }
     }
 
     // Sense the crates

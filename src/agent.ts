@@ -222,6 +222,8 @@ export class Agent {
             movementDuration: this.beliefs.movement_duration,
             frameDuration: this.beliefs.frame_duration,
             observationDistance: this.beliefs.observation_distance,
+            rewardDecayInterval:
+                this.beliefs.rewardDecayIntervalMilliseconds(),
             millisecondsUntilNextRewardDecay:
                 this.beliefs.millisecondsUntilNextRewardDecay(),
             freeParcelsCount: this.beliefs.freeParcelsCount(),
