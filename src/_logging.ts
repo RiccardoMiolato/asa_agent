@@ -16,6 +16,7 @@ export interface BeliefLogSummary {
     readonly carriedByAgent: number;
     readonly carriedByOthers: number;
     readonly knownCrates: number;
+    readonly temporaryWall: Position | undefined;
 }
 
 /** Complete, structured record of one deliberation cycle. */
@@ -35,7 +36,11 @@ export interface DeliveryGainLog {
     readonly totalScore: number;
 }
 
-export type MovementSafetyEvent = "encountered" | "observed" | "cleared";
+export type MovementSafetyEvent =
+    | "encountered"
+    | "observed"
+    | "cleared"
+    | "replanned";
 
 export type MovementSafetyReason =
     | "agent-on-next-cell"
@@ -46,7 +51,9 @@ export type MovementSafetyReason =
     | "agent-left-observation-range"
     | "agent-not-visible"
     | "movement-uncertain"
-    | "next-move-is-safe";
+    | "next-move-is-safe"
+    | "agent-stationary-replan"
+    | "agent-oscillating-replan";
 
 /** One relevant observation made while avoiding another agent. */
 export interface MovementSafetyLog {
@@ -57,7 +64,7 @@ export interface MovementSafetyLog {
     readonly observedPosition: Position | undefined;
     readonly movementSource: Position | undefined;
     readonly movementDestination: Position | undefined;
-    readonly decision: "wait" | "move";
+    readonly decision: "wait" | "move" | "replan";
     readonly reason: MovementSafetyReason;
 }
 
@@ -98,7 +105,10 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
             + ` free=${beliefs.freeParcels}`
             + ` carried-by-me=${beliefs.carriedByAgent}`
             + ` carried-by-others=${beliefs.carriedByOthers}`
-            + ` crates=${beliefs.knownCrates}`,
+            + ` crates=${beliefs.knownCrates}`
+            + ` temporary-wall=${beliefs.temporaryWall
+                ? `(${beliefs.temporaryWall.x}, ${beliefs.temporaryWall.y})`
+                : "none"}`,
         );
         console.log(`OPTIONS | ${rankedOptions.length} available (highest score first)`);
 
@@ -142,7 +152,9 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
             ? "AGENT ENCOUNTER"
             : movement.event === "cleared"
                 ? "AGENT CLEAR"
-                : "AGENT MOVEMENT";
+                : movement.event === "replanned"
+                    ? "AGENT REPLAN"
+                    : "AGENT MOVEMENT";
         const observedPosition = movement.observedPosition
             ? `(${movement.observedPosition.x}, ${movement.observedPosition.y})`
             : "not-visible";

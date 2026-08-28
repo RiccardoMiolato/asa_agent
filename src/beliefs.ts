@@ -100,6 +100,29 @@ export class Beliefs {
         });
     }
 
+    /** Resolves with a new revision, or `undefined` when the timeout wins. */
+    waitForSensingAfterOrTimeout(
+        revision: number,
+        timeoutMilliseconds: number,
+    ): Promise<number | undefined> {
+        if (this.sensingRevision > revision) {
+            return Promise.resolve(this.sensingRevision);
+        }
+        return new Promise<number | undefined>(
+            (resolve: (nextRevision: number | undefined) => void): void => {
+                const waiter = (nextRevision: number): void => {
+                    clearTimeout(timeout);
+                    resolve(nextRevision);
+                };
+                const timeout = setTimeout((): void => {
+                    this.sensingWaiters.delete(waiter);
+                    resolve(undefined);
+                }, Math.max(0, timeoutMilliseconds));
+                this.sensingWaiters.add(waiter);
+            },
+        );
+    }
+
     private notifySensingWaiters(): void {
         this.sensingRevision += 1;
         const waiters = [...this.sensingWaiters];

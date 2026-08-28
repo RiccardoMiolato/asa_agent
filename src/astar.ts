@@ -284,14 +284,16 @@ export class AStarPathfinder extends BasePathfinder {
             return false;
         }
 
+        if (temporarilyLocked?.isEqual(neighbor)) {
+            return false;
+        }
+
         if (cell.includes("5")) {
             for (const cratePosition of crates.values()) {
                 if (cratePosition.isEqual(neighbor)) {
                     return false;
                 }
             }
-        } else if (temporarilyLocked && neighbor.isEqual(temporarilyLocked)) {
-            return false;
         }
 
         return true;

@@ -29,6 +29,7 @@ export class Agent {
     private currentIntention: Intention;
     private readonly plan: Plan;
     private readonly movementGuard: ConservativeMovementGuard;
+    private temporarilyBlockedCell: Position | undefined;
     private deliberationCycle: number;
 
     constructor(
@@ -48,6 +49,7 @@ export class Agent {
             this.beliefs,
             this.logger,
         );
+        this.temporarilyBlockedCell = undefined;
         this.deliberationCycle = 0;
     }
 
@@ -73,10 +75,14 @@ export class Agent {
     async agent_loop(): Promise<void> {
         await new Promise<void>((resolve) => setTimeout(resolve, 2000));
 
+        let deliberateImmediately = false;
         while (true) {
-            await new Promise<void>((resolve) =>
-                setTimeout(resolve, this.beliefs.movement_duration)
-            );
+            if (!deliberateImmediately) {
+                await new Promise<void>((resolve) =>
+                    setTimeout(resolve, this.beliefs.movement_duration)
+                );
+            }
+            deliberateImmediately = false;
 
             this.deliberationCycle += 1;
             this.beliefs.updateParcelRewards();
@@ -99,6 +105,7 @@ export class Agent {
                 options: this.makeOptionLogEntries(evaluatedOptions),
                 plannedActions: this.plan.size(),
             });
+            this.temporarilyBlockedCell = undefined;
 
             let planInterrupted = false;
             while (!this.plan.isEmpty()) {
@@ -117,9 +124,15 @@ export class Agent {
                 }
 
                 if (nextAction instanceof MovementAction) {
-                    await this.movementGuard.waitUntilSafe(
+                    const clearance = await this.movementGuard.waitUntilSafe(
                         nextAction.destinationFrom(this.position),
                     );
+                    if (clearance.decision === "replan") {
+                        this.temporarilyBlockedCell = clearance.blockedCell;
+                        deliberateImmediately = true;
+                        planInterrupted = true;
+                        break;
+                    }
                     if (
                         this.currentIntention.shouldInterrupt(
                             this.getIntentionContext(),
@@ -228,6 +241,7 @@ export class Agent {
             carriedByAgent,
             carriedByOthers,
             knownCrates: this.beliefs.crates.size,
+            temporaryWall: this.temporarilyBlockedCell,
         };
     }
 
@@ -251,6 +265,7 @@ export class Agent {
             agentId: this.id,
             pathfinder: this.pathfinder,
             actionFactory: this.actionFactory,
+            temporarilyBlockedCell: this.temporarilyBlockedCell,
         };
     }
 }

@@ -16,6 +16,8 @@ interface AwaitingDeparture {
     readonly phase: "awaiting-departure";
     readonly agentName: string;
     readonly lastObservationKey: string;
+    readonly stationarySince?: number;
+    readonly stationaryPosition?: Position;
 }
 
 interface AwaitingNextDirection {
@@ -23,9 +25,15 @@ interface AwaitingNextDirection {
     readonly departureDestination: Position;
     readonly agentName: string;
     readonly lastObservationKey: string;
+    readonly stationarySince?: number;
+    readonly stationaryPosition?: Position;
 }
 
 type MovementBlocker = AwaitingDeparture | AwaitingNextDirection;
+
+export type MovementClearance =
+    | { readonly decision: "move" }
+    | { readonly decision: "replan"; readonly blockedCell: Position };
 
 /**
  * Prevents a move until nearby-agent trajectories prove its destination safe.
@@ -39,18 +47,34 @@ export class ConservativeMovementGuard {
         private readonly logger: BaseAgentLogger,
     ) { }
 
-    async waitUntilSafe(destination: Position): Promise<void> {
+    async waitUntilSafe(destination: Position): Promise<MovementClearance> {
         const blockers = new Map<string, MovementBlocker>();
         this.addCurrentBlockers(destination, blockers);
 
         let sensingRevision = this.beliefs.currentSensingRevision();
         while (blockers.size > 0) {
-            sensingRevision = await this.beliefs.waitForSensingAfter(
-                sensingRevision,
-            );
-            this.updateBlockers(destination, blockers);
+            const timeoutMilliseconds = this.millisecondsUntilReplan(blockers);
+            const nextRevision = timeoutMilliseconds === undefined
+                ? await this.beliefs.waitForSensingAfter(sensingRevision)
+                : await this.beliefs.waitForSensingAfterOrTimeout(
+                    sensingRevision,
+                    timeoutMilliseconds,
+                );
+            if (nextRevision === undefined) {
+                const replan = this.replanForExpiredBlocker(blockers, destination);
+                if (replan) {
+                    return replan;
+                }
+                continue;
+            }
+            sensingRevision = nextRevision;
+            const replan = this.updateBlockers(destination, blockers);
+            if (replan) {
+                return replan;
+            }
             this.addCurrentBlockers(destination, blockers);
         }
+        return { decision: "move" };
     }
 
     private addCurrentBlockers(
@@ -82,10 +106,14 @@ export class ConservativeMovementGuard {
                 movement?.destination.isEqual(destination)
                 || this.stationaryPosition(agent)?.isEqual(destination)
             ) {
+                const stationaryPosition = this.stationaryPosition(agent);
                 blockers.set(agent.id, {
                     phase: "awaiting-departure",
                     agentName: agent.name,
                     lastObservationKey: this.observationKey(agent),
+                    ...(stationaryPosition
+                        ? this.stationaryState(stationaryPosition)
+                        : {}),
                 });
                 this.logObservation(
                     "encountered",
@@ -104,7 +132,7 @@ export class ConservativeMovementGuard {
     private updateBlockers(
         destination: Position,
         blockers: Map<string, MovementBlocker>,
-    ): void {
+    ): MovementClearance | undefined {
         for (const [agentId, blocker] of blockers) {
             const agent = this.beliefs.agents.get(agentId);
             if (!agent) {
@@ -175,6 +203,15 @@ export class ConservativeMovementGuard {
                     blockers.set(agentId, {
                         ...blocker,
                         lastObservationKey: observationKey,
+                        ...(stationaryPosition
+                            ? this.stationaryState(
+                                stationaryPosition,
+                                blocker,
+                            )
+                            : {
+                                stationarySince: undefined,
+                                stationaryPosition: undefined,
+                            }),
                     });
                     this.logObservation(
                         "observed",
@@ -208,6 +245,7 @@ export class ConservativeMovementGuard {
                             departureDestination: stationaryPosition,
                             agentName: agent.name,
                             lastObservationKey: observationKey,
+                            ...this.stationaryState(stationaryPosition),
                         });
                         this.logObservation(
                             "observed",
@@ -247,20 +285,15 @@ export class ConservativeMovementGuard {
             }
 
             if (stationaryPosition?.isEqual(destination)) {
-                blockers.set(agentId, {
-                    phase: "awaiting-departure",
-                    agentName: agent.name,
-                    lastObservationKey: observationKey,
-                });
                 this.logObservation(
-                    "observed",
+                    "replanned",
                     agent,
                     destination,
                     movement,
-                    "wait",
-                    "agent-returning-to-next-cell",
+                    "replan",
+                    "agent-oscillating-replan",
                 );
-                continue;
+                return { decision: "replan", blockedCell: destination };
             }
             if (!movement) {
                 if (
@@ -283,6 +316,9 @@ export class ConservativeMovementGuard {
                 blockers.set(agentId, {
                     ...blocker,
                     lastObservationKey: observationKey,
+                    ...(stationaryPosition
+                        ? this.stationaryState(stationaryPosition, blocker)
+                        : {}),
                 });
                 this.logObservation(
                     "observed",
@@ -297,20 +333,15 @@ export class ConservativeMovementGuard {
                 continue;
             }
             if (movement.destination.isEqual(destination)) {
-                blockers.set(agentId, {
-                    phase: "awaiting-departure",
-                    agentName: agent.name,
-                    lastObservationKey: observationKey,
-                });
                 this.logObservation(
-                    "observed",
+                    "replanned",
                     agent,
                     destination,
                     movement,
-                    "wait",
-                    "agent-returning-to-next-cell",
+                    "replan",
+                    "agent-oscillating-replan",
                 );
-                continue;
+                return { decision: "replan", blockedCell: destination };
             }
             if (
                 movement.source.isEqual(destination)
@@ -343,6 +374,84 @@ export class ConservativeMovementGuard {
                 "next-move-is-safe",
             );
         }
+        return undefined;
+    }
+
+    private millisecondsUntilReplan(
+        blockers: ReadonlyMap<string, MovementBlocker>,
+    ): number | undefined {
+        let earliestDeadline: number | undefined;
+        for (const blocker of blockers.values()) {
+            if (blocker.stationarySince === undefined) {
+                continue;
+            }
+            const deadline = blocker.stationarySince
+                + Math.max(
+                    1,
+                    this.beliefs.movement_duration,
+                    this.beliefs.frame_duration,
+                );
+            earliestDeadline = earliestDeadline === undefined
+                ? deadline
+                : Math.min(earliestDeadline, deadline);
+        }
+        return earliestDeadline === undefined
+            ? undefined
+            : Math.max(0, earliestDeadline - Date.now());
+    }
+
+    private replanForExpiredBlocker(
+        blockers: ReadonlyMap<string, MovementBlocker>,
+        nextCell: Position,
+    ): MovementClearance | undefined {
+        const timeNow = Date.now();
+        const waitDuration = Math.max(
+            1,
+            this.beliefs.movement_duration,
+            this.beliefs.frame_duration,
+        );
+        for (const [agentId, blocker] of blockers) {
+            if (
+                blocker.stationarySince === undefined
+                || blocker.stationaryPosition === undefined
+                || timeNow - blocker.stationarySince < waitDuration
+            ) {
+                continue;
+            }
+            this.logger.logMovementSafety({
+                event: "replanned",
+                agentId,
+                agentName: blocker.agentName,
+                nextCell,
+                observedPosition: blocker.stationaryPosition,
+                movementSource: undefined,
+                movementDestination: undefined,
+                decision: "replan",
+                reason: "agent-stationary-replan",
+            });
+            return {
+                decision: "replan",
+                blockedCell: blocker.stationaryPosition,
+            };
+        }
+        return undefined;
+    }
+
+    private stationaryState(
+        position: Position,
+        previous?: MovementBlocker,
+    ): {
+        readonly stationarySince: number;
+        readonly stationaryPosition: Position;
+    } {
+        const sameStationaryPosition = previous?.stationaryPosition
+            ?.isEqual(position) ?? false;
+        return {
+            stationarySince: sameStationaryPosition
+                ? previous!.stationarySince ?? Date.now()
+                : Date.now(),
+            stationaryPosition: position,
+        };
     }
 
     private logObservation(
@@ -350,7 +459,7 @@ export class ConservativeMovementGuard {
         agent: IOSensedAgent,
         nextCell: Position,
         movement: ObservedMovement | undefined,
-        decision: "wait" | "move",
+        decision: "wait" | "move" | "replan",
         reason: MovementSafetyReason,
     ): void {
         this.logger.logMovementSafety({
