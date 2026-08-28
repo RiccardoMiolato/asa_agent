@@ -82,15 +82,20 @@ export class AgentGhostMapSnapshotProvider {
             stripedPickupCells: pickupClusters.flatMap(
                 (cluster): readonly Position[] => cluster.stripedCells,
             ),
-            knownParcels: [...this.beliefs.parcels.values()].map(
-                (parcel): GhostMapParcel => ({
-                    id: parcel.id,
-                    position: new Position(parcel.x, parcel.y),
-                    reward: parcel.reward,
-                    carriedBy: parcel.carriedBy ?? null,
-                    lastObservedAt: parcel.lastUpdate.getTime(),
-                }),
-            ),
+            knownParcels: [...this.beliefs.parcels.values()]
+                .filter(
+                    (parcel): boolean => !parcel.carriedBy
+                        || parcel.carriedBy === this.agent.id,
+                )
+                .map(
+                    (parcel): GhostMapParcel => ({
+                        id: parcel.id,
+                        position: new Position(parcel.x, parcel.y),
+                        reward: parcel.reward,
+                        carriedBy: parcel.carriedBy ?? null,
+                        lastObservedAt: parcel.lastUpdate.getTime(),
+                    }),
+                ),
         };
     }
 }

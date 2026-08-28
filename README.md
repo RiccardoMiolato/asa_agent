@@ -358,7 +358,7 @@ The view updates while the agent runs and shows:
 - agent-created temporary walls as an `X`;
 - connected pickup-cell clusters shaded by sensing recency, from dark green for the oldest seen cluster to bright green for the most recently seen cluster;
 - accumulating zebra stripes on pickup cells seen during the current cluster scan; stripes remain after a cell leaves the observation radius and reset together when the cluster scan completes;
-- every remembered parcel at its believed position, labelled with its current believed reward;
+- every actionable remembered parcel—free or carried by this agent—at its believed position, labelled with its current believed reward; parcels carried by other agents stay in beliefs but are hidden from the map until dropped;
 - the agent's current position, score, and deliberation cycle.
 
 Set `GHOST_MAP_PORT` when `8081` is occupied or when running several agents:

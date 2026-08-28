@@ -148,7 +148,9 @@ class GhostMapRenderer {
                 const parcels = parcelsByCell.get(key);
                 if (parcels) {
                     cell.append(makeParcelLayer(parcels, agent.id));
-                    cell.title += ` · ${parcels.length} known parcel${parcels.length === 1 ? "" : "s"}`;
+                    cell.title += ` · parcel reward${parcels.length === 1 ? "" : "s"}: ${
+                        parcels.map((parcel) => parcel.reward).join(", ")
+                    }`;
                 }
                 if (key === agentKey && agent.id) {
                     cell.append(makeMarker("agent-marker", "A"));
@@ -180,6 +182,7 @@ function makeMarker(className, text = "") {
 function makeParcelLayer(parcels, agentId) {
     const layer = document.createElement("span");
     layer.className = "parcel-layer marker";
+    layer.setAttribute("aria-hidden", "true");
     for (const parcel of parcels) {
         const marker = document.createElement("span");
         marker.className = "parcel-marker";
@@ -189,7 +192,12 @@ function makeParcelLayer(parcels, agentId) {
         if (parcel.carriedBy === agentId) {
             marker.classList.add("parcel-carried-by-me");
         }
-        marker.textContent = parcel.reward;
+        const glyph = document.createElement("i");
+        glyph.className = "parcel-glyph";
+        const reward = document.createElement("b");
+        reward.className = "parcel-reward";
+        reward.textContent = parcel.reward;
+        marker.append(glyph, reward);
         marker.title = `Parcel ${parcel.id} · believed reward ${parcel.reward}`
             + (parcel.carriedBy ? ` · carried by ${parcel.carriedBy}` : "");
         layer.append(marker);
