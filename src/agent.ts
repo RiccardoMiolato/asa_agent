@@ -8,6 +8,8 @@ import type { Beliefs } from "./beliefs.js";
 import type { IntentionGenerator } from "./desires.js";
 import { SearchIntention, type Intention, type IntentionContext } from "./intentions.js";
 import type { ActionFactory } from "./move.js";
+import { MovementAction } from "./move.js";
+import { ConservativeMovementGuard } from "./movement-safety.js";
 import { Plan } from "./plan.js";
 import { Position } from "./position.js";
 
@@ -26,6 +28,7 @@ export class Agent {
     private intentions: Intention[];
     private currentIntention: Intention;
     private readonly plan: Plan;
+    private readonly movementGuard: ConservativeMovementGuard;
     private deliberationCycle: number;
 
     constructor(
@@ -41,6 +44,10 @@ export class Agent {
         this.intentions = [];
         this.currentIntention = new SearchIntention();
         this.plan = new Plan();
+        this.movementGuard = new ConservativeMovementGuard(
+            this.beliefs,
+            this.logger,
+        );
         this.deliberationCycle = 0;
     }
 
@@ -107,6 +114,20 @@ export class Agent {
                 const nextAction = this.plan.topAction();
                 if (!nextAction) {
                     break;
+                }
+
+                if (nextAction instanceof MovementAction) {
+                    await this.movementGuard.waitUntilSafe(
+                        nextAction.destinationFrom(this.position),
+                    );
+                    if (
+                        this.currentIntention.shouldInterrupt(
+                            this.getIntentionContext(),
+                        )
+                    ) {
+                        planInterrupted = true;
+                        break;
+                    }
                 }
 
                 await nextAction.execute();

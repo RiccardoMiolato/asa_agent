@@ -1,4 +1,5 @@
 import type { Beliefs } from "./beliefs.js";
+import { Position } from "./position.js";
 
 export type MoveDirection = "up" | "right" | "left" | "down";
 
@@ -13,7 +14,12 @@ export abstract class Action {
     abstract execute(): Promise<void>;
 }
 
-export class MoveUp extends Action {
+/** A movement action whose destination can be checked before server execution. */
+export abstract class MovementAction extends Action {
+    abstract destinationFrom(origin: Position): Position;
+}
+
+export class MoveUp extends MovementAction {
     constructor(private readonly client: GameClient) {
         super();
     }
@@ -21,9 +27,13 @@ export class MoveUp extends Action {
     async execute(): Promise<void> {
         await this.client.emitMove("up");
     }
+
+    destinationFrom(origin: Position): Position {
+        return new Position(origin.x, origin.y + 1);
+    }
 }
 
-export class MoveDown extends Action {
+export class MoveDown extends MovementAction {
     constructor(private readonly client: GameClient) {
         super();
     }
@@ -31,9 +41,13 @@ export class MoveDown extends Action {
     async execute(): Promise<void> {
         await this.client.emitMove("down");
     }
+
+    destinationFrom(origin: Position): Position {
+        return new Position(origin.x, origin.y - 1);
+    }
 }
 
-export class MoveRight extends Action {
+export class MoveRight extends MovementAction {
     constructor(private readonly client: GameClient) {
         super();
     }
@@ -41,15 +55,23 @@ export class MoveRight extends Action {
     async execute(): Promise<void> {
         await this.client.emitMove("right");
     }
+
+    destinationFrom(origin: Position): Position {
+        return new Position(origin.x + 1, origin.y);
+    }
 }
 
-export class MoveLeft extends Action {
+export class MoveLeft extends MovementAction {
     constructor(private readonly client: GameClient) {
         super();
     }
 
     async execute(): Promise<void> {
         await this.client.emitMove("left");
+    }
+
+    destinationFrom(origin: Position): Position {
+        return new Position(origin.x - 1, origin.y);
     }
 }
 

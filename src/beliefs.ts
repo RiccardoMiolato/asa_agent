@@ -2,7 +2,10 @@ import type { IOConfig } from "../types/IOConfig.js";
 import type { IOClockEvent } from "../types/IOClockEvent.js";
 import type { IOCrate } from "../types/IOCrate.js";
 import type { IOParcel } from "../types/IOParcel.js";
-import type { IOSensedPosition } from "../types/IOSensing.js";
+import type {
+    IOSensedAgent,
+    IOSensedPosition,
+} from "../types/IOSensing.js";
 import { Position } from "./position.js";
 
 export interface Parcel extends IOParcel {
@@ -13,8 +16,12 @@ export class Beliefs {
     map: string[][];
 
     // OBJECT POSITIONS
+    agents: Map<string, IOSensedAgent>;
     parcels: Map<string, Parcel>;
     crates: Map<string, Position>;
+    private sensingRevision: number;
+    private sensingWaiters: Set<(revision: number) => void>;
+    private observedPositionKeys: Set<string>;
 
     // MAP LOCATIONS
     delivering_cells: Position[];
@@ -32,8 +39,12 @@ export class Beliefs {
 
     constructor() {
         this.map = [];
+        this.agents = new Map<string, IOSensedAgent>();
         this.parcels = new Map<string, Parcel>();
         this.crates = new Map<string, Position>();
+        this.sensingRevision = 0;
+        this.sensingWaiters = new Set<(revision: number) => void>();
+        this.observedPositionKeys = new Set<string>();
         this.delivering_cells = [];
         this.pickup_cells = [];
         this.pickupCellKeys = new Set<string>();
@@ -50,10 +61,52 @@ export class Beliefs {
         parcels: IOParcel[],
         crates: IOCrate[],
         observedPositions: readonly IOSensedPosition[] = [],
+        agents: readonly IOSensedAgent[] = [],
     ): void {
+        this.agents = new Map<string, IOSensedAgent>(
+            agents.map((agent: IOSensedAgent): [string, IOSensedAgent] => [
+                agent.id,
+                agent,
+            ]),
+        );
+        this.observedPositionKeys = new Set<string>(
+            observedPositions.map(
+                (position: IOSensedPosition): string => this.positionKey(position),
+            ),
+        );
         this.senseParcels(parcels);
         this.senseCrates(crates);
         this.recordObservedPickupCells(observedPositions);
+        this.notifySensingWaiters();
+    }
+
+    /** Monotonically identifies the last complete sensing snapshot. */
+    currentSensingRevision(): number {
+        return this.sensingRevision;
+    }
+
+    /** Reports whether the latest complete snapshot covered a grid cell. */
+    isPositionCurrentlyObserved(position: Position): boolean {
+        return this.observedPositionKeys.has(this.positionKey(position));
+    }
+
+    /** Resolves after a snapshot newer than the supplied revision is available. */
+    waitForSensingAfter(revision: number): Promise<number> {
+        if (this.sensingRevision > revision) {
+            return Promise.resolve(this.sensingRevision);
+        }
+        return new Promise<number>((resolve: (nextRevision: number) => void): void => {
+            this.sensingWaiters.add(resolve);
+        });
+    }
+
+    private notifySensingWaiters(): void {
+        this.sensingRevision += 1;
+        const waiters = [...this.sensingWaiters];
+        this.sensingWaiters.clear();
+        for (const resolve of waiters) {
+            resolve(this.sensingRevision);
+        }
     }
 
     configPhase(config: IOConfig): void {

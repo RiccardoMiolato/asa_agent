@@ -35,10 +35,39 @@ export interface DeliveryGainLog {
     readonly totalScore: number;
 }
 
+export type MovementSafetyEvent = "encountered" | "observed" | "cleared";
+
+export type MovementSafetyReason =
+    | "agent-on-next-cell"
+    | "agent-moving-to-next-cell"
+    | "agent-moving-from-next-cell"
+    | "departure-completed"
+    | "agent-returning-to-next-cell"
+    | "agent-left-observation-range"
+    | "agent-not-visible"
+    | "movement-uncertain"
+    | "next-move-is-safe";
+
+/** One relevant observation made while avoiding another agent. */
+export interface MovementSafetyLog {
+    readonly event: MovementSafetyEvent;
+    readonly agentId: string;
+    readonly agentName: string;
+    readonly nextCell: Position;
+    readonly observedPosition: Position | undefined;
+    readonly movementSource: Position | undefined;
+    readonly movementDestination: Position | undefined;
+    readonly decision: "wait" | "move";
+    readonly reason: MovementSafetyReason;
+}
+
 /** Output contract for agent decisions. */
 export abstract class BaseAgentLogger {
     abstract logDeliberation(deliberation: DeliberationLog): void;
     abstract logDeliveryGain(delivery: DeliveryGainLog): void;
+
+    /** Optional so existing non-console loggers remain source-compatible. */
+    logMovementSafety(_movement: MovementSafetyLog): void { }
 }
 
 /** Human-readable terminal logger for complete agent decisions. */
@@ -105,6 +134,32 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
         console.log(
             `\nDELIVERY RESULT | actual-points-gained=+${delivery.pointsGained}`
             + ` | total-score=${delivery.totalScore}`,
+        );
+    }
+
+    override logMovementSafety(movement: MovementSafetyLog): void {
+        const label = movement.event === "encountered"
+            ? "AGENT ENCOUNTER"
+            : movement.event === "cleared"
+                ? "AGENT CLEAR"
+                : "AGENT MOVEMENT";
+        const observedPosition = movement.observedPosition
+            ? `(${movement.observedPosition.x}, ${movement.observedPosition.y})`
+            : "not-visible";
+        const trajectory = movement.movementSource
+            && movement.movementDestination
+            ? `(${movement.movementSource.x}, ${movement.movementSource.y})`
+                + `->(${movement.movementDestination.x}, ${movement.movementDestination.y})`
+            : "stationary-or-unknown";
+
+        console.log(
+            `\n${label}`
+            + ` | agent=${movement.agentName}(${movement.agentId})`
+            + ` | observed=${observedPosition}`
+            + ` | move=${trajectory}`
+            + ` | our-next=(${movement.nextCell.x}, ${movement.nextCell.y})`
+            + ` | decision=${movement.decision.toUpperCase()}`
+            + ` | reason=${movement.reason}`,
         );
     }
 
