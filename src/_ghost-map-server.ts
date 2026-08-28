@@ -30,13 +30,19 @@ export class GhostMapServer {
         }
 
         this.server = createServer((request, response): void => {
-            const pathname = new URL(
+            const requestUrl = new URL(
                 request.url ?? "/",
                 "http://localhost",
-            ).pathname;
+            );
+            const pathname = requestUrl.pathname;
 
             if (pathname === "/api/state") {
-                this.sendJson(response, this.snapshots.snapshot());
+                const includeMapTiles = requestUrl.searchParams.get("includeMap")
+                    !== "false";
+                this.sendJson(
+                    response,
+                    this.snapshots.snapshot(includeMapTiles),
+                );
                 return;
             }
             if (pathname === "/health") {

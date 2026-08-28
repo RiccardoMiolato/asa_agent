@@ -25,13 +25,15 @@ export interface GhostMapParcel {
 }
 
 export interface GhostMapSnapshot {
-    readonly schemaVersion: 4;
+    readonly schemaVersion: 5;
     readonly updatedAt: number;
+    readonly sensingRevision: number;
     readonly ready: boolean;
     readonly map: {
         readonly width: number;
         readonly height: number;
-        readonly tiles: readonly (readonly string[])[];
+        readonly revision: number;
+        readonly tiles?: readonly (readonly string[])[];
     };
     readonly agent: GhostMapAgentState;
     readonly target: GhostMapTarget | undefined;
@@ -49,17 +51,19 @@ export class AgentGhostMapSnapshotProvider {
         private readonly agentName: string,
     ) { }
 
-    snapshot(): GhostMapSnapshot {
+    snapshot(includeMapTiles: boolean = true): GhostMapSnapshot {
         const decision = this.agent.currentDecision();
         const pickupClusters = this.agent.pickupClusterSnapshots();
         return {
-            schemaVersion: 4,
+            schemaVersion: 5,
             updatedAt: Date.now(),
+            sensingRevision: this.beliefs.currentSensingRevision(),
             ready: this.beliefs.map.length > 0 && this.agent.id.length > 0,
             map: {
                 width: this.beliefs.map.length,
                 height: this.beliefs.map[0]?.length ?? 0,
-                tiles: this.beliefs.map,
+                revision: this.beliefs.currentMapRevision(),
+                tiles: includeMapTiles ? this.beliefs.map : undefined,
             },
             agent: {
                 id: this.agent.id,

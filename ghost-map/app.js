@@ -16,11 +16,28 @@ const elements = {
     lastUpdate: document.querySelector("#last-update"),
 };
 
+const FOREGROUND_REFRESH_MILLISECONDS = 150;
+const BACKGROUND_REFRESH_MILLISECONDS = 2_000;
 let requestInFlight = false;
+let refreshTimer;
 
 class GhostMapRenderer {
+    constructor() {
+        this.cells = new Map();
+        this.dynamicCellKeys = new Set();
+        this.mapRevision = undefined;
+        this.mapWidth = 0;
+        this.mapHeight = 0;
+        this.mapRequestRequired = true;
+        this.dynamicStateKey = undefined;
+    }
+
+    shouldRequestMap() {
+        return this.mapRequestRequired;
+    }
+
     render(snapshot) {
-        this.renderConnection(snapshot.ready, snapshot.schemaVersion === 4);
+        this.renderConnection(snapshot.ready, snapshot.schemaVersion === 5);
         this.renderAgent(snapshot.agent);
         this.renderTarget(snapshot.target);
         this.renderMap(snapshot);
@@ -66,7 +83,19 @@ class GhostMapRenderer {
             target,
             agent,
         } = snapshot;
-        const hasMap = map.width > 0 && map.height > 0;
+        if (map.tiles) {
+            const mapChanged = map.revision !== this.mapRevision
+                || map.width !== this.mapWidth
+                || map.height !== this.mapHeight;
+            if (mapChanged) {
+                this.buildStaticMap(map);
+            }
+            this.mapRequestRequired = false;
+        } else if (map.revision !== this.mapRevision) {
+            this.mapRequestRequired = true;
+        }
+
+        const hasMap = this.cells.size > 0;
         elements.map.classList.toggle("ready", hasMap);
         elements.emptyState.classList.toggle("hidden", hasMap);
         elements.mapTitle.textContent = hasMap ? `${agent.name}'s believed map` : "Waiting for map";
@@ -76,54 +105,34 @@ class GhostMapRenderer {
             ? `${pickupClusters.length} cluster${pickupClusters.length === 1 ? "" : "s"} · stripes reset when a scan completes`
             : "No pickup clusters yet";
         if (!hasMap) {
-            elements.map.replaceChildren();
+            return;
+        }
+        if (this.mapRequestRequired) {
             return;
         }
 
-        elements.map.style.setProperty("--map-width", map.width);
-        elements.map.style.setProperty("--map-height", map.height);
+        const dynamicStateKey = [
+            snapshot.sensingRevision,
+            agent.deliberationCycle,
+            agent.position.x,
+            agent.position.y,
+            agent.score,
+        ].join(":");
+        if (dynamicStateKey === this.dynamicStateKey) {
+            return;
+        }
 
-        const clustersByCell = new Map();
+        this.clearPreviousDynamicCells();
+        const nextDynamicCellKeys = new Set();
         const visitedCount = pickupClusters.filter(
             (cluster) => cluster.visitOrder !== undefined,
         ).length;
         for (const cluster of pickupClusters) {
-            for (const cell of cluster.cells) {
-                clustersByCell.set(positionKey(cell), cluster);
-            }
-        }
-        const temporaryWallKeys = new Set(temporaryWalls.map(positionKey));
-        const stripedPickupCellKeys = new Set(
-            (stripedPickupCells ?? []).map(positionKey),
-        );
-        const parcelsByCell = new Map();
-        for (const parcel of knownParcels ?? []) {
-            const key = positionKey({
-                x: Math.round(parcel.position.x),
-                y: Math.round(parcel.position.y),
-            });
-            const parcels = parcelsByCell.get(key) ?? [];
-            parcels.push(parcel);
-            parcelsByCell.set(key, parcels);
-        }
-        const targetKey = target ? positionKey(target.position) : undefined;
-        const agentKey = positionKey({
-            x: Math.round(agent.position.x),
-            y: Math.round(agent.position.y),
-        });
-        const fragment = document.createDocumentFragment();
-
-        for (let y = map.height - 1; y >= 0; y -= 1) {
-            for (let x = 0; x < map.width; x += 1) {
-                const cell = document.createElement("div");
-                const tileType = String(map.tiles[x]?.[y] ?? "0");
-                const key = `${x},${y}`;
-                cell.className = `cell tile-${tileType}`;
-                cell.dataset.position = key;
-                cell.title = `(${x}, ${y}) · ${tileLabel(tileType)}`;
-
-                const cluster = clustersByCell.get(key);
-                if (cluster) {
+            for (const position of cluster.cells) {
+                const key = positionKey(position);
+                const cell = this.cells.get(key);
+                if (cell) {
+                    nextDynamicCellKeys.add(key);
                     cell.classList.add("pickup-cluster");
                     if (cluster.visitOrder === undefined) {
                         cell.style.setProperty(
@@ -140,34 +149,132 @@ class GhostMapRenderer {
                     if (cluster.active) {
                         cell.classList.add("cluster-active");
                     }
-                    if (stripedPickupCellKeys.has(key)) {
-                        cell.classList.add("pickup-seen");
-                        cell.title += " · seen during the current cluster scan";
-                    }
                 }
-                const parcels = parcelsByCell.get(key);
-                if (parcels) {
-                    cell.append(makeParcelLayer(parcels, agent.id));
-                    cell.title += ` · parcel reward${parcels.length === 1 ? "" : "s"}: ${
-                        parcels.map((parcel) => parcel.reward).join(", ")
-                    }`;
-                }
-                if (key === agentKey && agent.id) {
-                    cell.append(makeMarker("agent-marker", "A"));
-                }
-                if (temporaryWallKeys.has(key)) {
-                    cell.append(makeMarker("temporary-wall", "×"));
-                    cell.title += " · temporary wall";
-                }
-                if (key === targetKey) {
-                    cell.classList.add("target-cell");
-                    cell.append(makeMarker("target-marker"));
-                    cell.title += ` · ${target.intention} target`;
-                }
+            }
+        }
+
+        for (const position of stripedPickupCells ?? []) {
+            const key = positionKey(position);
+            const cell = this.cells.get(key);
+            if (cell) {
+                nextDynamicCellKeys.add(key);
+                cell.classList.add("pickup-seen");
+                cell.title += " · seen during the current cluster scan";
+            }
+        }
+
+        const parcelsByCell = this.groupParcelsByCell(knownParcels ?? []);
+        for (const [key, parcels] of parcelsByCell) {
+            const cell = this.cells.get(key);
+            if (!cell) {
+                continue;
+            }
+            nextDynamicCellKeys.add(key);
+            cell.append(makeParcelLayer(parcels, agent.id));
+            cell.title += ` · parcel reward${parcels.length === 1 ? "" : "s"}: ${
+                parcels.map((parcel) => parcel.reward).join(", ")
+            }`;
+        }
+
+        if (agent.id) {
+            const agentKey = positionKey({
+                x: Math.round(agent.position.x),
+                y: Math.round(agent.position.y),
+            });
+            const agentCell = this.cells.get(agentKey);
+            if (agentCell) {
+                nextDynamicCellKeys.add(agentKey);
+                agentCell.append(makeMarker("agent-marker", "A"));
+            }
+        }
+
+        for (const temporaryWall of temporaryWalls) {
+            const key = positionKey(temporaryWall);
+            const cell = this.cells.get(key);
+            if (cell) {
+                nextDynamicCellKeys.add(key);
+                cell.append(makeMarker("temporary-wall", "×"));
+                cell.title += " · temporary wall";
+            }
+        }
+
+        if (target) {
+            const targetKey = positionKey(target.position);
+            const targetCell = this.cells.get(targetKey);
+            if (targetCell) {
+                nextDynamicCellKeys.add(targetKey);
+                targetCell.classList.add("target-cell");
+                targetCell.append(makeMarker("target-marker"));
+                targetCell.title += ` · ${target.intention} target`;
+            }
+        }
+
+        this.dynamicCellKeys = nextDynamicCellKeys;
+        this.dynamicStateKey = dynamicStateKey;
+    }
+
+    buildStaticMap(map) {
+        const fragment = document.createDocumentFragment();
+        const cells = new Map();
+        elements.map.style.setProperty("--map-width", map.width);
+        elements.map.style.setProperty("--map-height", map.height);
+
+        for (let y = map.height - 1; y >= 0; y -= 1) {
+            for (let x = 0; x < map.width; x += 1) {
+                const cell = document.createElement("div");
+                const tileType = String(map.tiles[x]?.[y] ?? "0");
+                const key = `${x},${y}`;
+                const baseTitle = `(${x}, ${y}) · ${tileLabel(tileType)}`;
+                cell.className = `cell tile-${tileType}`;
+                cell.dataset.position = key;
+                cell.dataset.baseTitle = baseTitle;
+                cell.title = baseTitle;
+                cells.set(key, cell);
                 fragment.append(cell);
             }
         }
+
         elements.map.replaceChildren(fragment);
+        this.cells = cells;
+        this.dynamicCellKeys.clear();
+        this.mapRevision = map.revision;
+        this.mapWidth = map.width;
+        this.mapHeight = map.height;
+        this.dynamicStateKey = undefined;
+    }
+
+    clearPreviousDynamicCells() {
+        for (const key of this.dynamicCellKeys) {
+            const cell = this.cells.get(key);
+            if (!cell) {
+                continue;
+            }
+            cell.classList.remove(
+                "pickup-cluster",
+                "pickup-seen",
+                "cluster-active",
+                "target-cell",
+            );
+            cell.style.removeProperty("--cluster-color");
+            cell.querySelectorAll(".marker").forEach(
+                (marker) => marker.remove(),
+            );
+            cell.title = cell.dataset.baseTitle ?? "";
+        }
+    }
+
+    groupParcelsByCell(parcels) {
+        const parcelsByCell = new Map();
+        for (const parcel of parcels) {
+            const key = positionKey({
+                x: Math.round(parcel.position.x),
+                y: Math.round(parcel.position.y),
+            });
+            const cellParcels = parcelsByCell.get(key) ?? [];
+            cellParcels.push(parcel);
+            parcelsByCell.set(key, cellParcels);
+        }
+        return parcelsByCell;
     }
 }
 
@@ -245,7 +352,11 @@ async function refresh() {
     }
     requestInFlight = true;
     try {
-        const response = await fetch("/api/state", { cache: "no-store" });
+        const includeMap = renderer.shouldRequestMap();
+        const response = await fetch(
+            `/api/state?includeMap=${includeMap}`,
+            { cache: "no-store" },
+        );
         if (!response.ok) {
             throw new Error(`State request failed: ${response.status}`);
         }
@@ -258,8 +369,25 @@ async function refresh() {
             : "Unable to refresh";
     } finally {
         requestInFlight = false;
+        scheduleRefresh();
     }
 }
 
+function scheduleRefresh() {
+    window.clearTimeout(refreshTimer);
+    refreshTimer = window.setTimeout(
+        () => void refresh(),
+        document.hidden
+            ? BACKGROUND_REFRESH_MILLISECONDS
+            : FOREGROUND_REFRESH_MILLISECONDS,
+    );
+}
+
+document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && !requestInFlight) {
+        window.clearTimeout(refreshTimer);
+        void refresh();
+    }
+});
+
 void refresh();
-window.setInterval(() => void refresh(), 350);

@@ -20,6 +20,7 @@ export class Beliefs {
     parcels: Map<string, Parcel>;
     crates: Map<string, Position>;
     private sensingRevision: number;
+    private mapRevisionNumber: number;
     private sensingWaiters: Set<(revision: number) => void>;
     private observedPositionKeys: Set<string>;
 
@@ -43,6 +44,7 @@ export class Beliefs {
         this.parcels = new Map<string, Parcel>();
         this.crates = new Map<string, Position>();
         this.sensingRevision = 0;
+        this.mapRevisionNumber = 0;
         this.sensingWaiters = new Set<(revision: number) => void>();
         this.observedPositionKeys = new Set<string>();
         this.delivering_cells = [];
@@ -83,6 +85,11 @@ export class Beliefs {
     /** Monotonically identifies the last complete sensing snapshot. */
     currentSensingRevision(): number {
         return this.sensingRevision;
+    }
+
+    /** Monotonically identifies the currently configured static map. */
+    currentMapRevision(): number {
+        return this.mapRevisionNumber;
     }
 
     /** Reports whether the latest complete snapshot covered a grid cell. */
@@ -134,6 +141,7 @@ export class Beliefs {
 
     configPhase(config: IOConfig): void {
         this.map = config.GAME.map.tiles;
+        this.mapRevisionNumber += 1;
         this.movement_duration = config.GAME.player.movement_duration;
         this.frame_duration = config.CLOCK;
         this.observation_distance = config.GAME.player.observation_distance;
