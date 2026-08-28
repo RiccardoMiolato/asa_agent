@@ -1,4 +1,5 @@
 import type { Beliefs } from "./beliefs.js";
+import { Direction } from "./map.js";
 
 export type MoveDirection = "up" | "right" | "left" | "down";
 
@@ -10,7 +11,23 @@ export interface GameClient {
 }
 
 export abstract class Action {
-    abstract execute(): Promise<void>;
+    abstract execute(): Promise<boolean>;
+
+    protected async handleMoveAndRetry(client: GameClient, direction: Direction): Promise<{ x: number; y: number } | false> {
+        const result = await client.emitMove(direction);
+
+        if(result)
+            return result;
+
+        for(let i = 0; i < 2; i++) {
+            const retry_res = await client.emitMove(direction);
+
+            if(retry_res)
+                return retry_res;
+        }
+
+        return false;
+    }
 }
 
 export class MoveUp extends Action {
@@ -18,8 +35,10 @@ export class MoveUp extends Action {
         super();
     }
 
-    async execute(): Promise<void> {
-        await this.client.emitMove("up");
+    async execute(): Promise<boolean> {
+        const result = await this.handleMoveAndRetry(this.client, "up");
+
+        return result ? true : false;
     }
 }
 
@@ -28,8 +47,10 @@ export class MoveDown extends Action {
         super();
     }
 
-    async execute(): Promise<void> {
-        await this.client.emitMove("down");
+    async execute(): Promise<boolean> {
+        const result = await this.handleMoveAndRetry(this.client, "down");
+
+        return result ? true : false;
     }
 }
 
@@ -38,8 +59,10 @@ export class MoveRight extends Action {
         super();
     }
 
-    async execute(): Promise<void> {
-        await this.client.emitMove("right");
+    async execute(): Promise<boolean> {
+        const result = await this.handleMoveAndRetry(this.client, "right");
+
+        return result ? true : false;
     }
 }
 
@@ -48,8 +71,10 @@ export class MoveLeft extends Action {
         super();
     }
 
-    async execute(): Promise<void> {
-        await this.client.emitMove("left");
+    async execute(): Promise<boolean> {
+        const result = await this.handleMoveAndRetry(this.client, "left");
+
+        return result ? true : false;
     }
 }
 
@@ -63,9 +88,10 @@ export class PickUp extends Action {
         super();
     }
 
-    async execute(): Promise<void> {
-        await this.client.emitPickup();
+    async execute(): Promise<boolean> {
         this.beliefs.markParcelCarried(this.parcelId, this.agentId);
+        await this.client.emitPickup();
+        return true;
     }
 }
 
@@ -78,9 +104,10 @@ export class Drop extends Action {
         super();
     }
 
-    async execute(): Promise<void> {
-        await this.client.emitPutdown();
+    async execute(): Promise<boolean> {
         this.beliefs.clearDeliveredParcels(this.agentId);
+        await this.client.emitPutdown();
+        return true;
     }
 }
 
