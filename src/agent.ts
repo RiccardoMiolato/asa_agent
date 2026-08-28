@@ -123,9 +123,12 @@ export class Agent {
                     break;
                 }
 
-                if (nextAction instanceof MovementAction) {
+                const movementDestination = nextAction instanceof MovementAction
+                    ? nextAction.destinationFrom(this.position)
+                    : undefined;
+                if (movementDestination) {
                     const clearance = await this.movementGuard.waitUntilSafe(
-                        nextAction.destinationFrom(this.position),
+                        movementDestination,
                     );
                     if (clearance.decision === "replan") {
                         this.temporarilyBlockedCell = clearance.blockedCell;
@@ -143,7 +146,18 @@ export class Agent {
                     }
                 }
 
-                await nextAction.execute();
+                const actionSucceeded = await nextAction.execute();
+                if (!actionSucceeded) {
+                    if (movementDestination) {
+                        this.temporarilyBlockedCell = movementDestination;
+                        this.logger.logMoveFailure({
+                            destination: movementDestination,
+                        });
+                    }
+                    deliberateImmediately = true;
+                    planInterrupted = true;
+                    break;
+                }
                 this.plan.popAction();
             }
 

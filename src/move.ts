@@ -11,7 +11,7 @@ export interface GameClient {
 }
 
 export abstract class Action {
-    abstract execute(): Promise<void>;
+    abstract execute(): Promise<boolean>;
 }
 
 /** A movement action whose destination can be checked before server execution. */
@@ -24,8 +24,8 @@ export class MoveUp extends MovementAction {
         super();
     }
 
-    async execute(): Promise<void> {
-        await this.client.emitMove("up");
+    async execute(): Promise<boolean> {
+        return await this.client.emitMove("up") !== false;
     }
 
     destinationFrom(origin: Position): Position {
@@ -38,8 +38,8 @@ export class MoveDown extends MovementAction {
         super();
     }
 
-    async execute(): Promise<void> {
-        await this.client.emitMove("down");
+    async execute(): Promise<boolean> {
+        return await this.client.emitMove("down") !== false;
     }
 
     destinationFrom(origin: Position): Position {
@@ -52,8 +52,8 @@ export class MoveRight extends MovementAction {
         super();
     }
 
-    async execute(): Promise<void> {
-        await this.client.emitMove("right");
+    async execute(): Promise<boolean> {
+        return await this.client.emitMove("right") !== false;
     }
 
     destinationFrom(origin: Position): Position {
@@ -66,8 +66,8 @@ export class MoveLeft extends MovementAction {
         super();
     }
 
-    async execute(): Promise<void> {
-        await this.client.emitMove("left");
+    async execute(): Promise<boolean> {
+        return await this.client.emitMove("left") !== false;
     }
 
     destinationFrom(origin: Position): Position {
@@ -85,9 +85,10 @@ export class PickUp extends Action {
         super();
     }
 
-    async execute(): Promise<void> {
+    async execute(): Promise<boolean> {
         await this.client.emitPickup();
         this.beliefs.markParcelCarried(this.parcelId, this.agentId);
+        return true;
     }
 }
 
@@ -100,9 +101,10 @@ export class Drop extends Action {
         super();
     }
 
-    async execute(): Promise<void> {
+    async execute(): Promise<boolean> {
         await this.client.emitPutdown();
         this.beliefs.clearDeliveredParcels(this.agentId);
+        return true;
     }
 }
 

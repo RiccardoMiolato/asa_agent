@@ -36,6 +36,11 @@ export interface DeliveryGainLog {
     readonly totalScore: number;
 }
 
+/** A server-rejected movement that causes immediate replanning. */
+export interface MoveFailureLog {
+    readonly destination: Position;
+}
+
 export type MovementSafetyEvent =
     | "encountered"
     | "observed"
@@ -75,6 +80,9 @@ export abstract class BaseAgentLogger {
 
     /** Optional so existing non-console loggers remain source-compatible. */
     logMovementSafety(_movement: MovementSafetyLog): void { }
+
+    /** Optional so existing non-console loggers remain source-compatible. */
+    logMoveFailure(_failure: MoveFailureLog): void { }
 }
 
 /** Human-readable terminal logger for complete agent decisions. */
@@ -172,6 +180,15 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
             + ` | our-next=(${movement.nextCell.x}, ${movement.nextCell.y})`
             + ` | decision=${movement.decision.toUpperCase()}`
             + ` | reason=${movement.reason}`,
+        );
+    }
+
+    override logMoveFailure(failure: MoveFailureLog): void {
+        console.log(
+            `\nMOVE FAILED`
+            + ` | destination=(${failure.destination.x}, ${failure.destination.y})`
+            + ` | decision=REPLAN`
+            + ` | temporary-wall=(${failure.destination.x}, ${failure.destination.y})`,
         );
     }
 
