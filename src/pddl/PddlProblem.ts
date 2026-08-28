@@ -5,6 +5,7 @@ export class PDDLProblem {
     private tiles: string[];
     private agent: string;
     private parcels: string[];
+    private crates: string[];
     private init: string[];
     private goals: string[];
     private goalSet: boolean;
@@ -15,6 +16,7 @@ export class PDDLProblem {
         this.tiles = [];
         this.agent = "";
         this.parcels = [];
+        this.crates = [];
         this.init = [];
         this.goals = [];
 
@@ -25,6 +27,7 @@ export class PDDLProblem {
         this.tiles = [];
         this.agent = "";
         this.parcels = [];
+        this.crates = [];
         this.init = [];
         this.goals = [];
 
@@ -32,13 +35,10 @@ export class PDDLProblem {
     }
 
     public toPDDLProblemString(): string {
-        return `(define (problem problem_to_solve)
+        return `(define (problem deliveroo_problem)
 ${this.padding}(:domain deliveroo)
 ${this.padding}(:objects
-${this.padding}${this.padding}${this.tiles.join(" ").trim()} - position
-${this.padding}${this.padding}${this.agent} - agent
-${this.padding}${this.padding}${this.parcels.join(" ").trim()} - parcel
-${this.padding})
+${this.tiles.length > 0 ? `${this.padding}${this.padding}${this.tiles.join(" ").trim()} - position\n` : ''}${this.agent ? `${this.padding}${this.padding}${this.agent} - agent\n` : ''}${this.parcels.length > 0 ? `${this.padding}${this.padding}${this.parcels.join(" ").trim()} - parcel\n` : ''}${this.padding}${this.crates.length > 0 ? `${this.padding}${this.crates.join(" ").trim()} - crate\n` : ''})
 ${this.padding}(:init ${this.init.join(" ").trim()})
 ${this.padding}(:goal (and ${this.goals.join(" ").trim()}))
 )`;
@@ -48,12 +48,17 @@ ${this.padding}(:goal (and ${this.goals.join(" ").trim()}))
         this.tiles.push(tile);
     }
 
+    public addCrate(crate: string) {
+        this.crates.push(crate);
+    }
+
     public setAgent(agentId: string) {
         this.agent = `ag_${agentId}`;
     }
 
     public addParcel(parcelId: string) {
-        this.parcels.push(`${parcelId}`);
+        // Store as parcel_id to match domain typing
+        this.parcels.push(`parcel_${parcelId}`);
     }
 
     public addInit(initPredicate: string) {
@@ -65,8 +70,8 @@ ${this.padding}(:goal (and ${this.goals.join(" ").trim()}))
         this.goals.push(goalPredicate);
     }
 
-    public async solve(): Promise<SolverResult> {
-        if(!this.goalSet)
+    public async solve(): Promise<SolverResult[]> {
+        if (!this.goalSet)
             throw new Error("Cannot solve this due to missing goals");
 
         const domainPath = './src/pddl/domain.pddl';
@@ -76,9 +81,20 @@ ${this.padding}(:goal (and ${this.goals.join(" ").trim()}))
         const domainText = fs.readFileSync(domainPath, 'utf-8');
 
         const problemText = this.toPDDLProblemString();
-        const plan: SolverResult = await onlineSolver(domainText, problemText);
 
-        console.log("FINAL PLAN: ", plan);
+        // Log the problem for debugging
+        // console.log("=== PDDL PROBLEM ===");
+        const outputDir = './outputs';
+        if (!fs.existsSync(outputDir)) {
+            fs.mkdirSync(outputDir);
+        }
+        const outputPath = `${outputDir}/problem.pddl`;
+        fs.writeFileSync(outputPath, problemText, 'utf-8');
+        console.log(`PDDL problem written to ${outputPath}`);
+        // console.log("=== END PDDL PROBLEM ===");
+
+        const plan: SolverResult[] = await onlineSolver(domainText, problemText);
+
         return plan;
     }
 }

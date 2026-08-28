@@ -141,6 +141,9 @@
     (:action deliver
         :parameters (?a - agent ?p - parcel ?pos - position)
         :precondition (and (agent-at ?a ?pos) (carrying ?a ?p) (delivery-at ?pos))
-        :effect (and (not (carrying ?a ?p)) (delivered ?p))
+        :effect (and
+            (not (carrying ?a ?p))
+            (forall (?prc - parcel) (delivered ?prc))
+        )
     )
 )

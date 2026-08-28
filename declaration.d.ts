@@ -29,5 +29,5 @@ declare module '@unitn-asa/pddl-client' {
     export function onlineSolver(
       domain: string,
       problem: string
-    ): Promise<SolverResult>;
+    ): Promise<SolverResult[]>;
 }
