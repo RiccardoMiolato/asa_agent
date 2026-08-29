@@ -1,6 +1,7 @@
 import type { BasePathfinder } from "./astar.js";
 import type { Parcel } from "./beliefs.js";
 import type { Action, ActionFactory } from "./move.js";
+import { PDDLGoal } from "./pddl/pddlPlanner.js";
 import { Position } from "./position.js";
 
 /** Current world state and services available to an intention. */
@@ -87,6 +88,7 @@ interface RankedCoverageCandidate {
 export abstract class Intention {
     abstract score(context: IntentionContext): number;
     abstract buildActions(context: IntentionContext): Action[];
+    abstract toPddlGoal(context: IntentionContext): PDDLGoal;
     abstract describe(): IntentionDescription;
 
     /** Manhattan distance used to prefer the closest option when scores are equal. */
@@ -306,6 +308,18 @@ export class SearchIntention extends Intention {
                 ),
             }),
         );
+    }
+
+    toPddlGoal(context: IntentionContext): PDDLGoal {
+        const carriedParcels: Parcel[] = Array.from(context.parcels.values()).filter(parcel => parcel.carriedBy === context.agentId);
+
+        return {
+            operationType: "search",
+            agentId: context.agentId,
+            parcelId: null,
+            carriedParcels,
+            finalTargetPosition: this.targetLocation!
+        }
     }
 
     private clusterCellsSeenDuringCurrentScan(
@@ -778,8 +792,35 @@ export class PickUpParcelIntention extends RewardIntention {
             this.parcelPosition,
             context.crates,
         );
-        actions.push(context.actionFactory.pickUp(this.parcel.id, context.agentId));
+
+        if (actions.length > 0 || context.agentPosition.isEqual(this.parcelPosition))
+            actions.push(context.actionFactory.pickUp(this.parcel.id, context.agentId));
+
         return actions;
+    }
+
+    toPddlGoal(context: IntentionContext): PDDLGoal {
+        const carriedParcels: Parcel[] = Array.from(context.parcels.values()).filter(parcel => parcel.carriedBy === context.agentId);
+
+        return {
+            operationType: "pickup",
+            agentId: context.agentId,
+            parcelId: this.parcel.id,
+            carriedParcels,
+            finalTargetPosition: this.parcelPosition
+        }
+    }
+
+    toPddlGoal(context: IntentionContext): PDDLGoal {
+        const carriedParcels: Parcel[] = Array.from(context.parcels.values()).filter(parcel => parcel.carriedBy === context.agentId);
+
+        return {
+            operationType: "pickup",
+            agentId: context.agentId,
+            parcelId: this.parcel.id,
+            carriedParcels,
+            finalTargetPosition: this.parcelPosition
+        }
     }
 
     describe(): IntentionDescription {
@@ -922,7 +963,9 @@ export class DeliverParcelIntention extends RewardIntention {
             this.deliveryCell,
             context.crates,
         );
-        actions.push(context.actionFactory.drop(context.agentId));
+
+        if (actions.length > 0 || context.agentPosition.isEqual(this.deliveryCell))
+            actions.push(context.actionFactory.drop(context.agentId));
         return actions;
     }
 
@@ -938,6 +981,18 @@ export class DeliverParcelIntention extends RewardIntention {
             }
         }
         return freeParcelCount !== this.knownFreeParcelIds.size;
+    }
+
+    toPddlGoal(context: IntentionContext): PDDLGoal {
+        const carriedParcels: Parcel[] = Array.from(context.parcels.values()).filter(parcel => parcel.carriedBy === context.agentId);
+
+        return {
+            operationType: "deliver",
+            agentId: context.agentId,
+            parcelId: null,
+            carriedParcels,
+            finalTargetPosition: this.deliveryCell
+        }
     }
 
     describe(): IntentionDescription {

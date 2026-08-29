@@ -1,21 +1,22 @@
-import type { BasePathfinder } from "./astar.js";
 import {
     type BaseAgentLogger,
     type BeliefLogSummary,
     type IntentionLogEntry,
 } from "./_logging.js";
+import type { BasePathfinder } from "./astar.js";
 import type { Beliefs } from "./beliefs.js";
 import type { IntentionGenerator } from "./desires.js";
 import {
+    Intention,
     SearchIntention,
-    type Intention,
     type IntentionContext,
     type IntentionDescription,
     type PickupClusterSnapshot,
 } from "./intentions.js";
+import { GameMap } from "./map.js";
 import type { ActionFactory } from "./move.js";
-import { MovementAction } from "./move.js";
 import { ConservativeMovementGuard } from "./movement-safety.js";
+import { PDDLGoal, PDDLPlanner } from "./pddl/pddlPlanner.js";
 import { Plan } from "./plan.js";
 import { Position } from "./position.js";
 
@@ -42,6 +43,8 @@ export class Agent {
     private readonly movementGuard: ConservativeMovementGuard;
     private readonly temporarilyBlockedCells: Map<string, TemporaryBlockedCell>;
     private deliberationCycle: number;
+
+    private pddlPlanner: PDDLPlanner | undefined = undefined;
 
     constructor(
         private readonly beliefs: Beliefs,
@@ -113,7 +116,9 @@ export class Agent {
 
     /** Continuously selects and executes the most valuable available intention. */
     async agent_loop(): Promise<void> {
-        await new Promise<void>((resolve) => setTimeout(resolve, 2000));
+        await new Promise<void>((resolve) => setTimeout(resolve, 1000));
+
+        this.pddlPlanner = new PDDLPlanner(this.actionFactory);
 
         let deliberateImmediately = false;
         while (true) {
@@ -261,13 +266,38 @@ export class Agent {
             }
         }
 
-        this.currentIntention = bestOption;
-        return scoredIntentions;
-    }
+        context: IntentionContext = this.getIntentionContext()
 
-    buildPlan(context: IntentionContext = this.getIntentionContext()): void {
+    async buildPlan(context: IntentionContext = this.getIntentionContext()): Promise<void> {
         const actions = this.currentIntention.buildActions(context);
-        this.plan.newPlan(actions);
+
+        if(actions.length > 0){
+            this.plan.newPlan(actions);
+            return;
+        }
+
+        // If normal pathfinding algorithms cannot find a path
+        // then PDDL is used because its likely that the path
+        // must be cleared moving crates
+
+        console.log("Build plan with PDDL");
+        this.pddlPlanner?.resetPDDL();
+
+        this.pddlPlanner?.buildPDDLProblem(
+            new GameMap(context.gameMap),
+            [...context.parcels.values()],
+            [...context.crates.values()],
+            this.id,
+            this.position,
+        );
+
+        if(this.currentIntention) {
+            const pddlGoal: PDDLGoal = this.currentIntention.toPddlGoal(context);
+            this.pddlPlanner?.buildGoal(pddlGoal);
+            const actions = await this.pddlPlanner?.solveProblem() || [];
+            this.plan.newPlan(actions);
+        }
+
     }
 
     private makeOptionLogEntries(

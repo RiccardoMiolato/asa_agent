@@ -1,9 +1,8 @@
-import 'dotenv/config';
 import { DjsConnect, type DjsClientSocket } from "@unitn-asa/deliveroo-js-sdk/client";
-import { Agent } from './src/agent.js';
-import { ConsoleAgentLogger } from './src/_logging.js';
-import { AgentGhostMapSnapshotProvider } from './src/_ghost-map-snapshot.js';
 import { GhostMapServer } from './src/_ghost-map-server.js';
+import { AgentGhostMapSnapshotProvider } from './src/_ghost-map-snapshot.js';
+import { ConsoleAgentLogger } from './src/_logging.js';
+import { Agent } from './src/agent.js';
 import { AStarPathfinder } from './src/astar.js';
 import { Beliefs } from './src/beliefs.js';
 import { IntentionGenerator } from './src/desires.js';

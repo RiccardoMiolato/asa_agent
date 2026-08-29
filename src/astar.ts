@@ -1,4 +1,5 @@
 import { Heap } from "heap-js";
+import { CoordinateOffset, Direction } from "./map.js";
 import type { Action, ActionFactory } from "./move.js";
 import { Position } from "./position.js";
 

@@ -86,8 +86,8 @@ export class PickUp extends Action {
     }
 
     async execute(): Promise<boolean> {
-        await this.client.emitPickup();
         this.beliefs.markParcelCarried(this.parcelId, this.agentId);
+        await this.client.emitPickup();
         return true;
     }
 }
@@ -102,8 +102,8 @@ export class Drop extends Action {
     }
 
     async execute(): Promise<boolean> {
-        await this.client.emitPutdown();
         this.beliefs.clearDeliveredParcels(this.agentId);
+        await this.client.emitPutdown();
         return true;
     }
 }
