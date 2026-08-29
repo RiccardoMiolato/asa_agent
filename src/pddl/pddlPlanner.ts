@@ -34,9 +34,13 @@ export class PDDLPlanner {
     ){
         this.problemPDDL.clearProblem();
 
-        this.convertMapToPDDLRepresentation(map);
+        const occupiedCrateCells = new Set<string>(
+            crates.map((crate: Position): string => this.positionToCellString(crate)),
+        );
+
+        this.convertMapToPDDLRepresentation(map, occupiedCrateCells);
         this.convertPlayerInfoToPDDLRepresentation(playerId, playerPos);
-        this.convertCratesInfoToPDDLRepresentation(crates);
+        this.convertCratesInfoToPDDLRepresentation(occupiedCrateCells);
     }
 
     public buildGoal(goal: PDDLGoal) {
@@ -44,13 +48,11 @@ export class PDDLPlanner {
         this.problemPDDL.addGoal(`(agent-at ag_${goal.agentId} ${cellName})`);
     }
 
-    private convertCratesInfoToPDDLRepresentation(crates: Position[]) {
-        crates.forEach(crate => {
-            const crateName = `crate_${crate.x}_${crate.y}`;
-            const crateTileName = this.positionToCellString(crate);
-
-            this.problemPDDL.addCrate(crateName);
-            this.problemPDDL.addInit(`(crate-at ${crateName} ${crateTileName})`)
+    private convertCratesInfoToPDDLRepresentation(
+        occupiedCrateCells: ReadonlySet<string>,
+    ): void {
+        occupiedCrateCells.forEach((crateCellName: string): void => {
+            this.problemPDDL.addInit(`(crate-at ${crateCellName})`);
         });
     }
 
@@ -62,7 +64,10 @@ export class PDDLPlanner {
         this.problemPDDL.addInit(`(agent-at ag_${playerId} ${cellName})`);
     }
 
-    private convertMapToPDDLRepresentation(map: GameMap) {
+    private convertMapToPDDLRepresentation(
+        map: GameMap,
+        occupiedCrateCells: ReadonlySet<string>,
+    ): void {
         for (let row = 0; row < map.getRows(); row++){
             for (let col = 0; col < map.getCols(); col++){
                 const cellPosition: Position = new Position(row, col);
@@ -70,6 +75,10 @@ export class PDDLPlanner {
                 if(map.isValidCell(cellPosition)){
                     const cellName = this.positionToCellString(new Position(row, col));
                     this.problemPDDL.addTile(cellName);
+
+                    if (!occupiedCrateCells.has(cellName)) {
+                        this.problemPDDL.addInit(`(crate-free ${cellName})`);
+                    }
 
                     const cellType = map.getCellValue(cellPosition);
                     if (cellType === "5" || cellType === "5!") {

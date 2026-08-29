@@ -4,7 +4,6 @@ import localSolver, { PddlPlanStep } from "./onlineSolver.js";
 export class PDDLProblem {
     private tiles: string[];
     private agent: string;
-    private crates: string[];
     private init: string[];
     private goals: string[];
     private goalSet: boolean;
@@ -14,7 +13,6 @@ export class PDDLProblem {
     constructor() {
         this.tiles = [];
         this.agent = "";
-        this.crates = [];
         this.init = [];
         this.goals = [];
 
@@ -24,7 +22,6 @@ export class PDDLProblem {
     public clearProblem() {
         this.tiles = [];
         this.agent = "";
-        this.crates = [];
         this.init = [];
         this.goals = [];
 
@@ -35,7 +32,7 @@ export class PDDLProblem {
         return `(define (problem deliveroo_problem)
 ${this.padding}(:domain deliveroo)
 ${this.padding}(:objects
-${this.tiles.length > 0 ? `${this.padding}${this.padding}${this.tiles.join(" ").trim()} - position\n` : ''}${this.agent ? `${this.padding}${this.padding}${this.agent} - agent\n` : ''}${this.crates.length > 0 ? `${this.padding}${this.padding}${this.crates.join(" ").trim()} - crate\n` : ''})
+${this.tiles.length > 0 ? `${this.padding}${this.padding}${this.tiles.join(" ").trim()} - position\n` : ''}${this.agent ? `${this.padding}${this.padding}${this.agent} - agent\n` : ''})
 ${this.padding}(:init ${this.init.join(" ").trim()})
 ${this.padding}(:goal (and ${this.goals.join(" ").trim()}))
 )`;
@@ -43,10 +40,6 @@ ${this.padding}(:goal (and ${this.goals.join(" ").trim()}))
 
     public addTile(tile: string) {
         this.tiles.push(tile);
-    }
-
-    public addCrate(crate: string) {
-        this.crates.push(crate);
     }
 
     public setAgent(agentId: string) {
