@@ -20,6 +20,7 @@ export class Beliefs {
     parcels: Map<string, Parcel>;
     crates: Map<string, Position>;
     private sensingRevision: number;
+    private crateRevisionNumber: number;
     private mapRevisionNumber: number;
     private sensingWaiters: Set<(revision: number) => void>;
     private observedPositionKeys: Set<string>;
@@ -44,6 +45,7 @@ export class Beliefs {
         this.parcels = new Map<string, Parcel>();
         this.crates = new Map<string, Position>();
         this.sensingRevision = 0;
+        this.crateRevisionNumber = 0;
         this.mapRevisionNumber = 0;
         this.sensingWaiters = new Set<(revision: number) => void>();
         this.observedPositionKeys = new Set<string>();
@@ -85,6 +87,11 @@ export class Beliefs {
     /** Monotonically identifies the last complete sensing snapshot. */
     currentSensingRevision(): number {
         return this.sensingRevision;
+    }
+
+    /** Changes whenever a crate is discovered or moves to another cell. */
+    currentCrateRevision(): number {
+        return this.crateRevisionNumber;
     }
 
     /** Monotonically identifies the currently configured static map. */
@@ -316,6 +323,7 @@ export class Beliefs {
                 // If the crate has been moved then I update the position
                 if (!this.crates.get(id)?.isEqual(position)) {
                     this.crates.set(id, position);
+                    this.crateRevisionNumber += 1;
                 }
             }
         });
@@ -324,6 +332,7 @@ export class Beliefs {
     // Add a crate to the map
     private addCrate(id: string, position: Position): void {
         this.crates.set(id, position);
+        this.crateRevisionNumber += 1;
     }
 
     // Check if a crate exists

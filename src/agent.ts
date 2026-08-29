@@ -141,6 +141,7 @@ export class Agent {
 
             const context = this.getIntentionContext();
             const evaluatedOptions = this.filterOptions(context);
+            const plannedCrateRevision = this.beliefs.currentCrateRevision();
             await this.buildPlan(context);
             this.logger.logDeliberation({
                 cycle: this.deliberationCycle,
@@ -155,6 +156,15 @@ export class Agent {
             let planInterrupted = false;
             let planMoved = false;
             while (!this.plan.isEmpty()) {
+                if (
+                    this.beliefs.currentCrateRevision()
+                    !== plannedCrateRevision
+                ) {
+                    deliberateImmediately = true;
+                    planInterrupted = true;
+                    break;
+                }
+
                 if (this.currentIntention.shouldInterrupt(this.getIntentionContext())) {
                     planInterrupted = true;
                     break;
