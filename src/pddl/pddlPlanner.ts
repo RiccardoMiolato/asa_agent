@@ -1,9 +1,9 @@
-import { SolverResult } from "@unitn-asa/pddl-client";
 import { Parcel } from "../beliefs.js";
 import { GameMap, NeighborCoord } from "../map.js";
 import { Action, ActionFactory } from "../move.js";
 import { Position } from "../position.js";
 import { PDDLProblem } from "./PddlProblem.js";
+import { PddlPlanStep } from "./onlineSolver.js";
 
 export type OperationType = "search" | "pickup" | "deliver";
 
@@ -177,7 +177,7 @@ export class PDDLPlanner {
         }
     }
 
-    private convertPDDLActionsToAgentActions(solverResult: SolverResult[]): Action[] {
+    private convertPDDLActionsToAgentActions(solverResult: PddlPlanStep[]): Action[] {
         const actions: Action[] = [];
 
         for (const result of solverResult) {

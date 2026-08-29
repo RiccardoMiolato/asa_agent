@@ -1,5 +1,5 @@
-import { onlineSolver, SolverResult } from '@unitn-asa/pddl-client';
 import fs from "fs";
+import onlineSolver, { PddlPlanStep } from "./onlineSolver.js";
 
 export class PDDLProblem {
     private tiles: string[];
@@ -70,7 +70,7 @@ ${this.padding}(:goal (and ${this.goals.join(" ").trim()}))
         this.goals.push(goalPredicate);
     }
 
-    public async solve(): Promise<SolverResult[]> {
+    public async solve(): Promise<PddlPlanStep[]> {
         if (!this.goalSet)
             throw new Error("Cannot solve this due to missing goals");
 
@@ -93,8 +93,11 @@ ${this.padding}(:goal (and ${this.goals.join(" ").trim()}))
         console.log(`PDDL problem written to ${outputPath}`);
         // console.log("=== END PDDL PROBLEM ===");
 
-        const plan: SolverResult[] = await onlineSolver(domainText, problemText);
+        const plan: PddlPlanStep[] | undefined = await onlineSolver(domainText, problemText);
 
-        return plan;
+        if (plan)
+            return plan;
+
+        return [];
     }
 }
