@@ -88,7 +88,7 @@ interface RankedCoverageCandidate {
 export abstract class Intention {
     abstract score(context: IntentionContext): number;
     abstract buildActions(context: IntentionContext): Action[];
-    abstract toPddlGoal(context: IntentionContext): PDDLGoal;
+    abstract toPddlGoal(context: IntentionContext): PDDLGoal | undefined;
     abstract describe(): IntentionDescription;
 
     /** Manhattan distance used to prefer the closest option when scores are equal. */
@@ -106,6 +106,36 @@ export abstract class Intention {
 
 /** Base for intentions whose score depends on reward decay during execution. */
 export abstract class RewardIntention extends Intention {
+    /**
+     * Estimates a route while treating known crates as movable obstacles.
+     *
+     * A direct A* route is preferred. If crates are the only thing blocking it,
+     * the crate-free distance keeps the intention eligible so PDDL can plan the
+     * required crate moves.
+     */
+    protected pathLengthAllowingCrateMoves(
+        context: IntentionContext,
+        startingPosition: Position,
+        targetPosition: Position,
+    ): number | undefined {
+        const directDistance = context.pathfinder.pathLength(
+            context.gameMap,
+            startingPosition,
+            targetPosition,
+            context.crates,
+        );
+        if (directDistance !== undefined || context.crates.size === 0) {
+            return directDistance;
+        }
+
+        return context.pathfinder.pathLength(
+            context.gameMap,
+            startingPosition,
+            targetPosition,
+            new Map<string, Position>(),
+        );
+    }
+
     /**
      * Predicts the integer reward remaining after the real action-loop delays.
      * Each move incurs a client wait, server movement, and frame synchronization.
@@ -211,6 +241,28 @@ export class SearchIntention extends Intention {
                 checkpoint.remainingCellKeys,
             );
             if (!plan.complete) {
+                const planWithMovableCrates = context.crates.size > 0
+                    ? this.buildCoveragePlan(
+                        context,
+                        cluster,
+                        checkpoint.remainingCellKeys,
+                        new Map<string, Position>(),
+                    )
+                    : undefined;
+                if (
+                    planWithMovableCrates?.complete
+                    && planWithMovableCrates.actions.length > 0
+                ) {
+                    cluster.scanStartedAt = checkpoint.scanStartedAt;
+                    cluster.remainingCellKeys = checkpoint.remainingCellKeys;
+                    this.targetLocation = planWithMovableCrates.target;
+                    this.plannedCluster = cluster;
+                    // PDDL may use a different route from the optimistic A* path,
+                    // so the next sensing checkpoint must verify actual coverage.
+                    this.plannedCoverageComplete = false;
+                    return [];
+                }
+
                 if (cluster.scanStartedAt !== undefined) {
                     cluster.remainingCellKeys = checkpoint.remainingCellKeys;
                     return [];
@@ -220,6 +272,12 @@ export class SearchIntention extends Intention {
 
             cluster.scanStartedAt = checkpoint.scanStartedAt;
             cluster.remainingCellKeys = checkpoint.remainingCellKeys;
+            if (plan.actions.length === 0) {
+                cluster.lastFullyVisitedAt = Date.now();
+                cluster.scanStartedAt = undefined;
+                cluster.remainingCellKeys = undefined;
+                continue;
+            }
             this.targetLocation = plan.target;
             this.plannedCluster = cluster;
             this.plannedCoverageComplete = true;
@@ -310,7 +368,11 @@ export class SearchIntention extends Intention {
         );
     }
 
-    toPddlGoal(context: IntentionContext): PDDLGoal {
+    toPddlGoal(context: IntentionContext): PDDLGoal | undefined {
+        if (!this.targetLocation) {
+            return undefined;
+        }
+
         const carriedParcels: Parcel[] = Array.from(context.parcels.values()).filter(parcel => parcel.carriedBy === context.agentId);
 
         return {
@@ -318,7 +380,7 @@ export class SearchIntention extends Intention {
             agentId: context.agentId,
             parcelId: null,
             carriedParcels,
-            finalTargetPosition: this.targetLocation!
+            finalTargetPosition: this.targetLocation
         }
     }
 
@@ -507,6 +569,7 @@ export class SearchIntention extends Intention {
         context: IntentionContext,
         cluster: PickupCluster,
         requiredCellKeys: ReadonlySet<string>,
+        crates: ReadonlyMap<string, Position> = context.crates,
     ): ClusterCoveragePlan {
         const uncoveredKeys = new Set(requiredCellKeys);
         const actions: Action[] = [];
@@ -528,7 +591,7 @@ export class SearchIntention extends Intention {
                     context.gameMap,
                     cursor,
                     candidate.destination,
-                    context.crates,
+                    crates,
                 );
                 if (movementPath.positions.length === 0) {
                     continue;
@@ -712,11 +775,10 @@ export class PickUpParcelIntention extends RewardIntention {
     }
 
     score(context: IntentionContext): number {
-        const pickupDistance = context.pathfinder.pathLength(
-            context.gameMap,
+        const pickupDistance = this.pathLengthAllowingCrateMoves(
+            context,
             context.agentPosition,
             this.parcelPosition,
-            context.crates,
         );
         if (pickupDistance === undefined) {
             return -1;
@@ -724,11 +786,10 @@ export class PickUpParcelIntention extends RewardIntention {
 
         let shortestDeliveryDistance: number | undefined;
         for (const deliveryCell of context.deliveringCells) {
-            const deliveryDistance = context.pathfinder.pathLength(
-                context.gameMap,
+            const deliveryDistance = this.pathLengthAllowingCrateMoves(
+                context,
                 this.parcelPosition,
                 deliveryCell,
-                context.crates,
             );
             if (deliveryDistance === undefined) {
                 continue;
@@ -777,11 +838,10 @@ export class PickUpParcelIntention extends RewardIntention {
     }
 
     selectionDistance(context: IntentionContext): number | undefined {
-        return context.pathfinder.pathLength(
-            context.gameMap,
+        return this.pathLengthAllowingCrateMoves(
+            context,
             context.agentPosition,
             this.parcelPosition,
-            context.crates,
         );
     }
 
@@ -846,11 +906,10 @@ export class DeliverParcelIntention extends RewardIntention {
             }
         }
 
-        const firstDeliveryDistance = context.pathfinder.pathLength(
-            context.gameMap,
+        const firstDeliveryDistance = this.pathLengthAllowingCrateMoves(
+            context,
             context.agentPosition,
             this.deliveryCell,
-            context.crates,
         );
         if (firstDeliveryDistance === undefined) {
             return -1;
@@ -882,11 +941,10 @@ export class DeliverParcelIntention extends RewardIntention {
             }
 
             const parcelPosition = new Position(parcel.x, parcel.y);
-            const pickupDistance = context.pathfinder.pathLength(
-                context.gameMap,
+            const pickupDistance = this.pathLengthAllowingCrateMoves(
+                context,
                 this.deliveryCell,
                 parcelPosition,
-                context.crates,
             );
             if (pickupDistance === undefined) {
                 continue;
@@ -894,11 +952,10 @@ export class DeliverParcelIntention extends RewardIntention {
 
             let shortestDeliveryDistance: number | undefined;
             for (const finalDeliveryCell of context.deliveringCells) {
-                const deliveryDistance = context.pathfinder.pathLength(
-                    context.gameMap,
+                const deliveryDistance = this.pathLengthAllowingCrateMoves(
+                    context,
                     parcelPosition,
                     finalDeliveryCell,
-                    context.crates,
                 );
                 if (deliveryDistance === undefined) {
                     continue;
@@ -936,11 +993,10 @@ export class DeliverParcelIntention extends RewardIntention {
     }
 
     selectionDistance(context: IntentionContext): number | undefined {
-        return context.pathfinder.pathLength(
-            context.gameMap,
+        return this.pathLengthAllowingCrateMoves(
+            context,
             context.agentPosition,
             this.deliveryCell,
-            context.crates,
         );
     }
 

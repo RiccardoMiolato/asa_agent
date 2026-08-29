@@ -63,6 +63,7 @@ export abstract class BasePathfinder {
             gameMap,
             startingPosition,
             targetPosition,
+            crates,
             temporarilyLocked,
         );
         if (this.pathLengthCache.has(cacheKey)) {
@@ -93,6 +94,7 @@ export abstract class BasePathfinder {
         gameMap: string[][],
         startingPosition: Position,
         targetPosition: Position,
+        crates: ReadonlyMap<string, Position>,
         temporarilyLocked?: Position,
     ): string {
         const startingKey = `${startingPosition.x},${startingPosition.y}`;
@@ -106,7 +108,11 @@ export abstract class BasePathfinder {
         const lockedPosition = temporarilyLocked
             ? `${temporarilyLocked.x},${temporarilyLocked.y}`
             : "none";
-        return `${firstPosition}:${secondPosition}:${lockedPosition}`;
+        const cratePositions = [...crates.values()]
+            .map((crate: Position): string => `${crate.x},${crate.y}`)
+            .sort()
+            .join("|");
+        return `${firstPosition}:${secondPosition}:${lockedPosition}:${cratePositions}`;
     }
 
     private pathLengthsAreSymmetric(gameMap: string[][]): boolean {

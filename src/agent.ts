@@ -141,7 +141,7 @@ export class Agent {
 
             const context = this.getIntentionContext();
             const evaluatedOptions = this.filterOptions(context);
-            this.buildPlan(context);
+            await this.buildPlan(context);
             this.logger.logDeliberation({
                 cycle: this.deliberationCycle,
                 agentId: this.id,
@@ -294,7 +294,12 @@ export class Agent {
         );
 
         if(this.currentIntention) {
-            const pddlGoal: PDDLGoal = this.currentIntention.toPddlGoal(context);
+            const pddlGoal: PDDLGoal | undefined = this.currentIntention.toPddlGoal(context);
+            if (!pddlGoal) {
+                this.plan.newPlan([]);
+                return;
+            }
+
             this.pddlPlanner?.buildGoal(pddlGoal);
             const actions = await this.pddlPlanner?.solveProblem() || [];
             this.plan.newPlan(actions);
