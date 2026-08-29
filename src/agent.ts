@@ -31,6 +31,18 @@ interface TemporaryBlockedCell {
     readonly protectedThroughCycle: number;
 }
 
+/** Terminal reasons for which the otherwise continuous agent loop can stop. */
+export enum AGENT_EXIT_REASON {
+    NO_FEASIBLE_PLAN = "no-feasible-plan",
+}
+
+/** Outcome of planning one intention. */
+export enum PLAN_BUILD_STATUS {
+    PLANNED = "planned",
+    SATISFIED = "satisfied",
+    INFEASIBLE = "infeasible",
+}
+
 /** Coordinates intention generation, selection, planning, and execution. */
 export class Agent {
     id: string;
@@ -42,9 +54,11 @@ export class Agent {
     private readonly plan: Plan;
     private readonly movementGuard: ConservativeMovementGuard;
     private readonly temporarilyBlockedCells: Map<string, TemporaryBlockedCell>;
+    private readonly gridPositionWaiters: Set<() => void>;
+    private hasAuthoritativePosition: boolean;
     private deliberationCycle: number;
 
-    private pddlPlanner: PDDLPlanner | undefined = undefined;
+    private readonly pddlPlanner: PDDLPlanner;
 
     constructor(
         private readonly beliefs: Beliefs,
@@ -64,12 +78,25 @@ export class Agent {
             this.logger,
         );
         this.temporarilyBlockedCells = new Map<string, TemporaryBlockedCell>();
+        this.gridPositionWaiters = new Set<() => void>();
+        this.hasAuthoritativePosition = false;
         this.deliberationCycle = 0;
+        this.pddlPlanner = new PDDLPlanner(this.actionFactory);
     }
 
     updatePosition(x: number, y: number): void {
         this.position.x = x;
         this.position.y = y;
+        this.hasAuthoritativePosition = true;
+        if (!this.position.isGridAligned()) {
+            return;
+        }
+
+        const waiters = [...this.gridPositionWaiters];
+        this.gridPositionWaiters.clear();
+        for (const resolve of waiters) {
+            resolve();
+        }
     }
 
     /** Applies an authoritative score update and reports newly awarded points. */
@@ -115,10 +142,8 @@ export class Agent {
     }
 
     /** Continuously selects and executes the most valuable available intention. */
-    async agent_loop(): Promise<void> {
+    async agent_loop(): Promise<AGENT_EXIT_REASON> {
         await new Promise<void>((resolve) => setTimeout(resolve, 1000));
-
-        this.pddlPlanner = new PDDLPlanner(this.actionFactory);
 
         let deliberateImmediately = false;
         while (true) {
@@ -129,29 +154,41 @@ export class Agent {
             }
             deliberateImmediately = false;
 
+            await this.waitForGridPosition();
+
             this.deliberationCycle += 1;
             this.refreshTemporaryBlockedCells();
             this.beliefs.updateParcelRewards();
+            const context = this.getIntentionContext();
             const options = this.intentionGenerator.generate({
                 id: this.id,
-                position: this.position,
+                position: context.agentPosition,
             });
             this.addIntentions(options);
             this.pathfinder.clearPathLengthCache();
 
-            const context = this.getIntentionContext();
             const evaluatedOptions = this.filterOptions(context);
             const plannedCrateRevision = this.beliefs.currentCrateRevision();
-            await this.buildPlan(context);
+            const planStatus = await this.buildBestAvailablePlan(
+                evaluatedOptions,
+                context,
+            );
             this.logger.logDeliberation({
                 cycle: this.deliberationCycle,
                 agentId: this.id,
                 agentScore: this.score,
-                position: this.position,
+                position: context.agentPosition,
                 beliefs: this.makeBeliefLogSummary(),
-                options: this.makeOptionLogEntries(evaluatedOptions),
+                options: this.makeOptionLogEntries(
+                    evaluatedOptions,
+                    planStatus !== PLAN_BUILD_STATUS.INFEASIBLE,
+                ),
                 plannedActions: this.plan.size(),
             });
+
+            if (planStatus === PLAN_BUILD_STATUS.INFEASIBLE) {
+                return AGENT_EXIT_REASON.NO_FEASIBLE_PLAN;
+            }
 
             let planInterrupted = false;
             let planMoved = false;
@@ -245,7 +282,7 @@ export class Agent {
         this.intentions = [];
     }
 
-    /** Scores each option once and selects the highest-scoring intention. */
+    /** Scores each option once and ranks them by score, then distance. */
     filterOptions(context: IntentionContext = this.getIntentionContext()): ScoredIntention[] {
         const fallback = this.intentions.find(
             (intention: Intention): boolean => intention instanceof SearchIntention,
@@ -277,15 +314,60 @@ export class Agent {
         }
 
         this.currentIntention = bestOption;
-        return scoredIntentions;
+        return scoredIntentions.sort(
+            (first: ScoredIntention, second: ScoredIntention): number => {
+                const scoreDifference = second.score - first.score;
+                if (scoreDifference !== 0) {
+                    return scoreDifference;
+                }
+                return (first.distance ?? Number.POSITIVE_INFINITY)
+                    - (second.distance ?? Number.POSITIVE_INFINITY);
+            },
+        );
     }
 
-    async buildPlan(context: IntentionContext = this.getIntentionContext()): Promise<void> {
+    /** Tries every ranked option for a plan and preserves all-satisfied idling. */
+    private async buildBestAvailablePlan(
+        rankedIntentions: readonly ScoredIntention[],
+        context: IntentionContext,
+    ): Promise<PLAN_BUILD_STATUS> {
+        let satisfiedIntention: Intention | undefined;
+        let infeasibleIntentionFound = false;
+
+        for (const { intention } of rankedIntentions) {
+            this.currentIntention = intention;
+            const planStatus = await this.buildPlan(context);
+            if (planStatus === PLAN_BUILD_STATUS.PLANNED) {
+                return PLAN_BUILD_STATUS.PLANNED;
+            }
+            if (planStatus === PLAN_BUILD_STATUS.SATISFIED) {
+                satisfiedIntention ??= intention;
+                continue;
+            }
+            infeasibleIntentionFound = true;
+        }
+
+        this.plan.newPlan([]);
+        if (infeasibleIntentionFound || !satisfiedIntention) {
+            return PLAN_BUILD_STATUS.INFEASIBLE;
+        }
+
+        this.currentIntention = satisfiedIntention;
+        return PLAN_BUILD_STATUS.SATISFIED;
+    }
+
+    async buildPlan(
+        context: IntentionContext = this.getIntentionContext(),
+    ): Promise<PLAN_BUILD_STATUS> {
         const actions = this.currentIntention.buildActions(context);
 
-        if(actions.length > 0){
+        if (actions.length > 0) {
             this.plan.newPlan(actions);
-            return;
+            return PLAN_BUILD_STATUS.PLANNED;
+        }
+        if (this.currentIntention.isSatisfied(context)) {
+            this.plan.newPlan([]);
+            return PLAN_BUILD_STATUS.SATISFIED;
         }
 
         // If normal pathfinding algorithms cannot find a path
@@ -293,46 +375,45 @@ export class Agent {
         // must be cleared moving crates
 
         console.log("Build plan with PDDL");
-        this.pddlPlanner?.resetPDDL();
+        this.pddlPlanner.resetPDDL();
 
-        this.pddlPlanner?.buildPDDLProblem(
+        this.pddlPlanner.buildPDDLProblem(
             new GameMap(context.gameMap),
             [...context.crates.values()],
-            this.id,
-            this.position,
+            context.agentId,
+            context.agentPosition,
         );
 
-        if(this.currentIntention) {
-            const pddlGoal: PDDLGoal | undefined = this.currentIntention.toPddlGoal(context);
-            if (!pddlGoal) {
-                this.plan.newPlan([]);
-                return;
-            }
-
-            this.pddlPlanner?.buildGoal(pddlGoal);
-            const navigationActions = await this.pddlPlanner?.solveProblem();
-            if (navigationActions === undefined) {
-                this.plan.newPlan([]);
-                return;
-            }
-
-            this.plan.newPlan([
-                ...navigationActions,
-                ...this.currentIntention.buildPddlCompletionActions(context),
-            ]);
+        const pddlGoal: PDDLGoal | undefined = this.currentIntention.toPddlGoal(context);
+        if (!pddlGoal) {
+            this.plan.newPlan([]);
+            return PLAN_BUILD_STATUS.INFEASIBLE;
         }
 
+        this.pddlPlanner.buildGoal(pddlGoal);
+        const navigationActions = await this.pddlPlanner.solveProblem();
+        if (navigationActions === undefined) {
+            this.plan.newPlan([]);
+            return PLAN_BUILD_STATUS.INFEASIBLE;
+        }
+
+        this.plan.newPlan([
+            ...navigationActions,
+            ...this.currentIntention.buildPddlCompletionActions(context),
+        ]);
+        return PLAN_BUILD_STATUS.PLANNED;
     }
 
     private makeOptionLogEntries(
         evaluatedOptions: readonly ScoredIntention[],
+        planFound: boolean,
     ): IntentionLogEntry[] {
         return evaluatedOptions.map(
             ({ intention, score, distance }: ScoredIntention): IntentionLogEntry => ({
                 description: intention.describe(),
                 score,
                 distance,
-                selected: intention === this.currentIntention,
+                selected: planFound && intention === this.currentIntention,
             }),
         );
     }
@@ -366,7 +447,7 @@ export class Agent {
     private getIntentionContext(): IntentionContext {
         return {
             gameMap: this.gameMapWithTemporaryWalls(),
-            agentPosition: this.position,
+            agentPosition: new Position(this.position.x, this.position.y),
             crates: this.beliefs.crates,
             pickupCells: this.beliefs.pickup_cells,
             pickupCellLastObservedAt: this.beliefs.pickupCellObservationTimes(),
@@ -384,6 +465,16 @@ export class Agent {
             pathfinder: this.pathfinder,
             actionFactory: this.actionFactory,
         };
+    }
+
+    /** Waits out animated fractional coordinates before discrete path planning. */
+    private waitForGridPosition(): Promise<void> {
+        if (this.hasAuthoritativePosition && this.position.isGridAligned()) {
+            return Promise.resolve();
+        }
+        return new Promise<void>((resolve: () => void): void => {
+            this.gridPositionWaiters.add(resolve);
+        });
     }
 
     private addTemporaryBlockedCell(position: Position): void {

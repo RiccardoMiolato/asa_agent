@@ -12,4 +12,9 @@ export class Position {
     distanceTo(other: Position): number {
         return Math.abs(this.x - other.x) + Math.abs(this.y - other.y);
     }
+
+    /** Whether this coordinate identifies a discrete map cell. */
+    isGridAligned(): boolean {
+        return Number.isInteger(this.x) && Number.isInteger(this.y);
+    }
 }

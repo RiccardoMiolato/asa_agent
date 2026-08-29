@@ -2,7 +2,7 @@ import { DjsConnect, type DjsClientSocket } from "@unitn-asa/deliveroo-js-sdk/cl
 import { GhostMapServer } from './src/_ghost-map-server.js';
 import { AgentGhostMapSnapshotProvider } from './src/_ghost-map-snapshot.js';
 import { ConsoleAgentLogger } from './src/_logging.js';
-import { Agent } from './src/agent.js';
+import { Agent, AGENT_EXIT_REASON } from './src/agent.js';
 import { AStarPathfinder } from './src/astar.js';
 import { Beliefs } from './src/beliefs.js';
 import { IntentionGenerator } from './src/desires.js';
@@ -88,4 +88,22 @@ socket.onSensing((sensing: IOSensing): void => {
     );
 });
 
-void agent.agent_loop();
+void agent.agent_loop()
+    .then(async (exitReason: AGENT_EXIT_REASON): Promise<void> => {
+        switch (exitReason) {
+            case AGENT_EXIT_REASON.NO_FEASIBLE_PLAN:
+                console.error("No feasible plan exists for any intention. Quitting the game.");
+                socket.disconnect();
+                await ghostMapServer.stop();
+                return;
+        }
+    })
+    .catch(async (error: unknown): Promise<void> => {
+        console.error("Agent loop crashed:", error);
+        socket.disconnect();
+        try {
+            await ghostMapServer.stop();
+        } finally {
+            process.exitCode = 1;
+        }
+    });

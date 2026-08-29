@@ -14,7 +14,7 @@ build/
 out/
 
 outputs/
-
+sas_plan
 planning-as-a-service/
 
 *pddl_server.sh
@@ -38,3 +38,4 @@ Thumbs.db
 
 # Agent modules
 AGENTS.md
+

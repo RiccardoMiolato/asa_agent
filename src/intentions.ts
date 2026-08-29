@@ -91,6 +91,11 @@ export abstract class Intention {
     abstract toPddlGoal(context: IntentionContext): PDDLGoal | undefined;
     abstract describe(): IntentionDescription;
 
+    /** Whether an empty action list means the intention is already fulfilled. */
+    isSatisfied(_context: IntentionContext): boolean {
+        return false;
+    }
+
     /** Adds intention-specific actions after PDDL has reached the target. */
     buildPddlCompletionActions(_context: IntentionContext): Action[] {
         return [];
@@ -197,6 +202,7 @@ export class SearchIntention extends Intention {
     private readonly knownFreeParcelIdsAtPlanning: Set<string>;
     private plannedCluster: PickupCluster | undefined;
     private plannedCoverageComplete: boolean;
+    private planningSatisfied: boolean;
 
     constructor() {
         super();
@@ -206,6 +212,7 @@ export class SearchIntention extends Intention {
         this.knownFreeParcelIdsAtPlanning = new Set<string>();
         this.plannedCluster = undefined;
         this.plannedCoverageComplete = false;
+        this.planningSatisfied = false;
     }
 
     score(_context: IntentionContext): number {
@@ -218,6 +225,8 @@ export class SearchIntention extends Intention {
         this.targetLocation = undefined;
         this.plannedCluster = undefined;
         this.plannedCoverageComplete = false;
+        this.planningSatisfied = false;
+        let incompleteClusterFound = false;
 
         const oldestClusters = [...this.clusters].sort(
             (first: PickupCluster, second: PickupCluster): number => {
@@ -272,6 +281,7 @@ export class SearchIntention extends Intention {
                     cluster.remainingCellKeys = checkpoint.remainingCellKeys;
                     return [];
                 }
+                incompleteClusterFound = true;
                 continue;
             }
 
@@ -289,7 +299,12 @@ export class SearchIntention extends Intention {
             return plan.actions;
         }
 
+        this.planningSatisfied = !incompleteClusterFound;
         return [];
+    }
+
+    override isSatisfied(_context: IntentionContext): boolean {
+        return this.planningSatisfied;
     }
 
     shouldInterrupt(context: IntentionContext): boolean {

@@ -168,7 +168,7 @@ export class AStarPathfinder extends BasePathfinder {
         crates: ReadonlyMap<string, Position>,
         temporarilyLocked?: Position,
     ): MovementPath {
-        if (startingPosition.x % 1 !== 0 || startingPosition.y % 1 !== 0) {
+        if (!startingPosition.isGridAligned()) {
             return { actions: [], positions: [] };
         }
 

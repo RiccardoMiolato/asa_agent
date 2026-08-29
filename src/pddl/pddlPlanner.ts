@@ -119,16 +119,11 @@ export class PDDLPlanner {
     }
 
     public async solveProblem(): Promise<Action[] | undefined> {
-        try {
-            const pddlResult = await this.problemPDDL.solve();
+        const pddlResult = await this.problemPDDL.solve();
 
-            return pddlResult === undefined
-                ? undefined
-                : this.convertPDDLActionsToAgentActions(pddlResult);
-        } catch (error) {
-            console.error("PDDL planning failed:", error);
-            return undefined;
-        }
+        return pddlResult === undefined
+            ? undefined
+            : this.convertPDDLActionsToAgentActions(pddlResult);
     }
 
     private convertPDDLActionsToAgentActions(solverResult: PddlPlanStep[]): Action[] {

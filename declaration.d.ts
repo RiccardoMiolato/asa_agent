@@ -6,6 +6,7 @@ declare module '@unitn-asa/deliveroo-js-sdk/client' {
         onConfig(callback: (config: import('./types/IOConfig.js').IOConfig) => void): void;
         onYou(callback: (agent: import('./types/IOAgent.js').IOAgent) => void): void;
         onSensing(callback: (sensing: import('./types/IOSensing.js').IOSensing) => void): void;
+        disconnect(): void;
         emitMove(direction: MoveDirection): Promise<{ x: number; y: number } | false>;
         emitPickup(): Promise<{ id: string }[]>;
         emitPutdown(selected?: string[] | null): Promise<{ id: string }[]>;

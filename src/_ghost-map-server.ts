@@ -69,6 +69,25 @@ export class GhostMapServer {
         });
     }
 
+    /** Stops the local visualization server so the process can exit cleanly. */
+    stop(): Promise<void> {
+        if (!this.server) {
+            return Promise.resolve();
+        }
+
+        const server = this.server;
+        this.server = undefined;
+        return new Promise<void>((resolveStop, rejectStop): void => {
+            server.close((error?: Error): void => {
+                if (error) {
+                    rejectStop(error);
+                    return;
+                }
+                resolveStop();
+            });
+        });
+    }
+
     private async sendStaticAsset(
         response: ServerResponse,
         assetName: string,
