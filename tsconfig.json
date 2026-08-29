@@ -10,5 +10,16 @@
         "types": [
             "node",
         ]
-    }
+    },
+    "include": [
+        "index.ts",
+        "declaration.d.ts",
+        "src/**/*.ts",
+        "types/**/*.d.ts"
+    ],
+    "exclude": [
+        "dist",
+        "node_modules",
+        "fast-downward"
+    ]
 }
