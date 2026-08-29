@@ -811,18 +811,6 @@ export class PickUpParcelIntention extends RewardIntention {
         }
     }
 
-    toPddlGoal(context: IntentionContext): PDDLGoal {
-        const carriedParcels: Parcel[] = Array.from(context.parcels.values()).filter(parcel => parcel.carriedBy === context.agentId);
-
-        return {
-            operationType: "pickup",
-            agentId: context.agentId,
-            parcelId: this.parcel.id,
-            carriedParcels,
-            finalTargetPosition: this.parcelPosition
-        }
-    }
-
     describe(): IntentionDescription {
         return {
             type: "pick-up",

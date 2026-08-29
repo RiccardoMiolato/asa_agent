@@ -14,7 +14,7 @@ import {
     type PickupClusterSnapshot,
 } from "./intentions.js";
 import { GameMap } from "./map.js";
-import type { ActionFactory } from "./move.js";
+import { MovementAction, type ActionFactory } from "./move.js";
 import { ConservativeMovementGuard } from "./movement-safety.js";
 import { PDDLGoal, PDDLPlanner } from "./pddl/pddlPlanner.js";
 import { Plan } from "./plan.js";
@@ -266,7 +266,9 @@ export class Agent {
             }
         }
 
-        context: IntentionContext = this.getIntentionContext()
+        this.currentIntention = bestOption;
+        return scoredIntentions;
+    }
 
     async buildPlan(context: IntentionContext = this.getIntentionContext()): Promise<void> {
         const actions = this.currentIntention.buildActions(context);

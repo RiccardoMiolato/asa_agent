@@ -3,9 +3,6 @@ import { CoordinateOffset, Direction } from "./map.js";
 import type { Action, ActionFactory } from "./move.js";
 import { Position } from "./position.js";
 
-type Direction = "up" | "down" | "right" | "left";
-type CoordinateOffset = readonly [x: number, y: number];
-
 /** Executable movements together with every grid position visited by them. */
 export interface MovementPath {
     readonly actions: Action[];
