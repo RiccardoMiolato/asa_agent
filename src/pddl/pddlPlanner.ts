@@ -201,13 +201,14 @@ export class PDDLPlanner {
                     actions.push(this.actionFactory.moveRight());
                     break;
                 case 'PICK-UP':
-                    // args[1] is PARCEL_P514, extract P514
-                    const parcelId = result.args[1]?.replace('PARCEL_', '') || '';
-                    actions.push(this.actionFactory.pickUp(parcelId, result.args[0]));
+                    // Fast Downward normalizes PDDL object names to lowercase.
+                    const parcelId = result.args[1]?.replace(/^parcel_/i, '') || '';
+                    const pickupAgentId = result.args[0]?.replace(/^ag_/i, '') || '';
+                    actions.push(this.actionFactory.pickUp(parcelId, pickupAgentId));
                     break;
                 case 'DELIVER':
-                    // args[0] is agent ID
-                    actions.push(this.actionFactory.drop(result.args[0]));
+                    const deliveryAgentId = result.args[0]?.replace(/^ag_/i, '') || '';
+                    actions.push(this.actionFactory.drop(deliveryAgentId));
                     break;
             }
         }

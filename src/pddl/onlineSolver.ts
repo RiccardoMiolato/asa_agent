@@ -1,61 +1,32 @@
-import fetch from 'node-fetch';
+import { execFile, type ExecFileException } from "node:child_process";
+import { constants as fsConstants } from "node:fs";
+import {
+  access,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { promisify } from "node:util";
 
-const HOST = process.env.PAAS_HOST || 'https://solver.planning.domains:5001';
-const PATH = process.env.PAAS_PATH || '/package/dual-bfws-ffparser/solve';
-const REQUEST_TIMEOUT_MS = readPositiveDuration('PDDL_REQUEST_TIMEOUT_MS', 15_000);
-const SOLVER_TIMEOUT_MS = readPositiveDuration('PDDL_SOLVER_TIMEOUT_MS', 30_000);
-const POLL_INTERVAL_MS = readPositiveDuration('PDDL_POLL_INTERVAL_MS', 250);
+const execFileAsync = promisify(execFile);
+const FAST_DOWNWARD_PATH = path.resolve(
+  process.env.FAST_DOWNWARD_PATH ?? "../fast-downward/fast-downward.py",
+);
+const FAST_DOWNWARD_ALIAS = process.env.FAST_DOWNWARD_ALIAS ?? "lama-first";
+const SOLVER_TIMEOUT_MS = readPositiveDuration(
+  "FAST_DOWNWARD_TIMEOUT_MS",
+  30_000,
+);
+const MAX_OUTPUT_BYTES = 10 * 1024 * 1024;
+const NO_PLAN_EXIT_CODES = new Set<number>([10, 11, 12, 13]);
 
-interface PlanOutput {
-  sas_plan: string;
-  plan: string;
-}
-
-interface SolverResult {
-  stdout: string;
-  call: string;
-  output: PlanOutput;
-}
-
-interface JsonResponse {
-  result: SolverResult;
-  status: string;
-}
-
-interface SubmissionResponse {
-  result: string;
-}
-
-function readPositiveDuration(name: string, fallback: number): number {
-  const value = Number(process.env[name]);
-  return Number.isFinite(value) && value > 0 ? value : fallback;
-}
-
-async function fetchWithTimeout(
-  url: string,
-  options: Parameters<typeof fetch>[1],
-  timeoutMilliseconds: number = REQUEST_TIMEOUT_MS,
-) {
-  const controller = new AbortController();
-  const timeout = setTimeout((): void => controller.abort(), timeoutMilliseconds);
-
-  try {
-    return await fetch(url, {
-      ...options,
-      signal: controller.signal,
-    });
-  } catch (error) {
-    if (controller.signal.aborted) {
-      throw new Error(
-        `PDDL solver request timed out after ${timeoutMilliseconds} ms: ${url}`,
-      );
-    }
-
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`PDDL solver request failed: ${url}: ${message}`);
-  } finally {
-    clearTimeout(timeout);
-  }
+interface FastDownwardError extends ExecFileException {
+  stdout?: string;
+  stderr?: string;
 }
 
 export interface PddlPlanStep {
@@ -64,212 +35,34 @@ export interface PddlPlanStep {
   args: string[];
 }
 
-/**
- * Calls the online PDDL solver service to generate a plan
- * @param pddlDomain - The PDDL domain definition
- * @param pddlProblem - The PDDL problem definition
- * @returns An array of plan steps, or undefined if no plan was found
- */
-export default async function onlineSolver(
-  pddlDomain: string,
-  pddlProblem: string
-): Promise<PddlPlanStep[] | undefined> {
-  const responseCheckUrl = await postRequest(pddlDomain, pddlProblem);
-  const json = await getResult(responseCheckUrl);
-  const plan = await parsePlan(json);
-
-  return plan;
+function readPositiveDuration(name: string, fallback: number): number {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
-/**
- * Posts a planning request to the solver service
- * @param pddlDomain - The PDDL domain definition
- * @param pddlProblem - The PDDL problem definition
- * @returns The URL to check for results
- */
-async function postRequest(pddlDomain: string, pddlProblem: string): Promise<string> {
-  if (typeof pddlDomain !== 'string') {
-    throw new Error('pddlDomain is not a string');
-  }
-
-  if (typeof pddlProblem !== 'string') {
-    throw new Error('pddlProblem is not a string');
-  }
-
-  console.log('POSTING planning request to', HOST + PATH);
-
-  const res = await fetchWithTimeout(HOST + PATH, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      domain: pddlDomain,
-      problem: pddlProblem,
-      number_of_plans: '1',
-    }),
-  });
-
-  if (res.status !== 200) {
-    throw new Error(`Error at ${HOST + PATH} ${await res.text()}`);
-  }
-
-  const json = (await res.json()) as SubmissionResponse;
-
-  if (typeof json.result !== 'string' || json.result.length === 0) {
-    console.log(res);
-    throw new Error(`No value "result" from ${HOST + PATH} ` + res);
-  }
-
-  return new URL(json.result, `${HOST}/`).toString();
-}
-
-/**
- * Polls the solver service until the result is ready
- * @param responseCheckUrl - The URL to poll for results
- * @returns The solver response
- */
-async function getResult(responseCheckUrl: string): Promise<JsonResponse> {
-  const deadline = Date.now() + SOLVER_TIMEOUT_MS;
-
-  while (true) {
-    const remainingMilliseconds = deadline - Date.now();
-    if (remainingMilliseconds <= 0) {
-      throw new Error(
-        `PDDL solver did not finish within ${SOLVER_TIMEOUT_MS} ms: ${responseCheckUrl}`,
-      );
-    }
-
-    console.log('PENDING planning result from', responseCheckUrl);
-
-    const res = await fetchWithTimeout(responseCheckUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    }, Math.min(REQUEST_TIMEOUT_MS, remainingMilliseconds));
-
-    if (res.status !== 200) {
-      throw new Error(`Received HTTP error from ${responseCheckUrl} ` + await res.text());
-    }
-
-    const json = (await res.json()) as JsonResponse & { status: string };
-
-    if (json.status === 'PENDING') {
-      await new Promise((res) => setTimeout(res, POLL_INTERVAL_MS));
-    } else {
-      // Result is ready, return it
-      if (json.status !== 'ok') {
-        console.log(json);
-        throw new Error(`Invalid 'status' in response body from ${responseCheckUrl}`);
-      }
-
-      if (!json.result) {
-        console.log(json);
-        throw new Error(`No 'result' in response body from ${responseCheckUrl}`);
-      }
-
-      if (!('stdout' in json.result)) {
-        console.log(json);
-        throw new Error(`No 'result.stdout' in response from ${responseCheckUrl}`);
-      }
-
-      return json as JsonResponse;
-    }
-  }
-}
-
-/**
- * Parses the plan from the solver response
- * @param json - The solver response
- * @returns An array of plan steps, or undefined if no plan was found
- */
-async function parsePlan(json: JsonResponse): Promise<PddlPlanStep[] | undefined> {
-  let lines: (string | string[])[] = [];
-
-  if (json.result.output.plan) {
-    lines = json.result.output.plan.split('\n');
-  }
-
-  // PARSING plan from /package/dual-bfws-ffparser/solve
-  if (json.result.stdout.includes(' --- OK.')) {
-    console.log('Using parser for /package/dual-bfws-ffparser/solve');
-
-    lines = (lines as string[]).map((line) =>
-      line.replace('(', '').replace(')', '').split(' ')
-    );
-    lines = lines.slice(0, -1);
-  }
-  // PARSING plan from /package/delfi/solve
-  else if (
-    json.result.call.split(' ').includes('delfi') &&
-    json.result.stdout.split('\n').includes('Solution found.')
-  ) {
-    console.log('Using parser for /package/delfi/solve');
-
-    lines = (lines as string[]).map((line) =>
-      line.replace('(', '').replace(')', '').split(' ')
-    );
-    lines = lines.slice(0, -1);
-  }
-  // PARSING plan from /package/enhsp-2020/solve
-  else if (lines.includes('Problem Solved')) {
-    console.log('Using parser for /package/enhsp-2020/solve');
-
-    const startIndex = lines.indexOf('Problem Solved') + 1;
-    const endIndex = lines.findIndex((line) =>
-      typeof line === 'string' && line.includes('Plan-Length')
-    );
-    lines = lines.slice(startIndex, endIndex);
-
-    lines = (lines as string[]).map((line) =>
-      line.replace('(', '').replace(')', '').split(' ').slice(1)
-    );
-  }
-  // PARSING plan from /package/optic/solve
-  else if (
-    json.result.call.split(' ').includes('optic') &&
-    lines.includes(';;;; Solution Found')
-  ) {
-    console.log('Using parser for /package/optic/solve');
-
-    const startIndex = lines.indexOf(';;;; Solution Found') + 1;
-    lines = lines.slice(startIndex + 3);
-
-    lines = (lines as string[]).map((line) =>
-      line.replace('(', '').replace(')', '').split(' ').slice(1, -1)
-    );
-    lines = lines.slice(0, -1);
-  }
-  // PARSING plan from /package/lama-first/solve
-  else if (
-    json.result.call.split(' ').includes('lama-first') &&
-    json.result.stdout.split('\n').includes('Solution found.')
-  ) {
-    console.log('Using parser for /package/lama-first/solve');
-
-    lines = json.result.output.sas_plan.split(';')[0].split('\n');
-    lines = (lines as string[]).map((line) =>
-      line.replace('(', '').replace(')', '').split(' ')
-    );
-    lines = lines.slice(0, -1);
-  }
-  // ERROR
-  else {
-    console.log(json);
-    console.error('Plan not found!');
-    return;
-  }
-
+/** Converts Fast Downward's IPC plan text into the agent's plan format. */
+export function parseFastDownwardPlan(planText: string): PddlPlanStep[] {
   const plan: PddlPlanStep[] = [];
 
-  console.log('Plan found:');
+  for (const rawLine of planText.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith(";")) {
+      continue;
+    }
 
-  for (const line of lines as string[][]) {
-    console.log('- ' + line);
+    const closingParenthesis = line.indexOf(")");
+    if (!line.startsWith("(") || closingParenthesis < 2) {
+      throw new Error(`Invalid Fast Downward plan line: ${rawLine}`);
+    }
 
-    const action = line.shift() || '';
-    const args = line;
+    const tokens = line
+      .slice(1, closingParenthesis)
+      .trim()
+      .split(/\s+/);
+    const [action, ...args] = tokens;
+    if (!action) {
+      throw new Error(`Missing action in Fast Downward plan line: ${rawLine}`);
+    }
 
     plan.push({
       parallel: false,
@@ -279,4 +72,130 @@ async function parsePlan(json: JsonResponse): Promise<PddlPlanStep[] | undefined
   }
 
   return plan;
+}
+
+async function findPlanPath(runDirectory: string): Promise<string | undefined> {
+  const planFiles = (await readdir(runDirectory))
+    .filter((fileName: string): boolean =>
+      fileName === "sas_plan" || /^sas_plan\.\d+$/.test(fileName)
+    )
+    .sort((first: string, second: string): number => {
+      const firstVersion = Number(first.split(".")[1] ?? 0);
+      const secondVersion = Number(second.split(".")[1] ?? 0);
+      return secondVersion - firstVersion;
+    });
+
+  return planFiles[0]
+    ? path.join(runDirectory, planFiles[0])
+    : undefined;
+}
+
+function formatExecutionError(error: FastDownwardError): string {
+  const details = [error.stderr, error.stdout]
+    .filter((output: string | undefined): output is string => Boolean(output?.trim()))
+    .map((output: string): string => output.trim())
+    .join("\n");
+  return details || error.message;
+}
+
+/** Solves one PDDL problem with the locally installed Fast Downward planner. */
+export default async function localSolver(
+  pddlDomain: string,
+  pddlProblem: string,
+): Promise<PddlPlanStep[] | undefined> {
+  if (typeof pddlDomain !== "string" || pddlDomain.trim().length === 0) {
+    throw new Error("pddlDomain must be a non-empty string");
+  }
+  if (typeof pddlProblem !== "string" || pddlProblem.trim().length === 0) {
+    throw new Error("pddlProblem must be a non-empty string");
+  }
+
+  try {
+    await access(FAST_DOWNWARD_PATH, fsConstants.X_OK);
+  } catch {
+    throw new Error(
+      `Fast Downward is not executable at ${FAST_DOWNWARD_PATH}. `
+      + "Set FAST_DOWNWARD_PATH in .env to its fast-downward.py path.",
+    );
+  }
+
+  const runDirectory = await mkdtemp(
+    path.join(tmpdir(), "asa-fast-downward-"),
+  );
+  const domainPath = path.join(runDirectory, "domain.pddl");
+  const problemPath = path.join(runDirectory, "problem.pddl");
+  const planPath = path.join(runDirectory, "sas_plan");
+  const sasPath = path.join(runDirectory, "output.sas");
+
+  try {
+    await Promise.all([
+      writeFile(domainPath, pddlDomain, "utf8"),
+      writeFile(problemPath, pddlProblem, "utf8"),
+    ]);
+
+    console.log(
+      `Running local Fast Downward (${FAST_DOWNWARD_ALIAS}) at ${FAST_DOWNWARD_PATH}`,
+    );
+
+    let executionError: FastDownwardError | undefined;
+    try {
+      await execFileAsync(
+        FAST_DOWNWARD_PATH,
+        [
+          "--alias",
+          FAST_DOWNWARD_ALIAS,
+          "--overall-time-limit",
+          `${Math.max(1, Math.floor(SOLVER_TIMEOUT_MS / 1_000))}s`,
+          "--plan-file",
+          planPath,
+          "--sas-file",
+          sasPath,
+          domainPath,
+          problemPath,
+        ],
+        {
+          cwd: runDirectory,
+          timeout: SOLVER_TIMEOUT_MS + 2_000,
+          maxBuffer: MAX_OUTPUT_BYTES,
+          encoding: "utf8",
+        },
+      );
+    } catch (error) {
+      executionError = error as FastDownwardError;
+    }
+
+    const generatedPlanPath = await findPlanPath(runDirectory);
+    if (generatedPlanPath) {
+      const plan = parseFastDownwardPlan(
+        await readFile(generatedPlanPath, "utf8"),
+      );
+      console.log(`Fast Downward found a plan with ${plan.length} actions`);
+      return plan;
+    }
+
+    if (!executionError) {
+      return undefined;
+    }
+
+    const exitCode = typeof executionError.code === "number"
+      ? executionError.code
+      : undefined;
+    if (exitCode !== undefined && NO_PLAN_EXIT_CODES.has(exitCode)) {
+      console.log(`Fast Downward found no plan (exit code ${exitCode})`);
+      return undefined;
+    }
+
+    if (executionError.killed || executionError.signal) {
+      throw new Error(
+        `Fast Downward timed out after ${SOLVER_TIMEOUT_MS} ms`,
+      );
+    }
+
+    throw new Error(
+      `Fast Downward failed${exitCode === undefined ? "" : ` with exit code ${exitCode}`}:\n`
+      + formatExecutionError(executionError),
+    );
+  } finally {
+    await rm(runDirectory, { recursive: true, force: true });
+  }
 }

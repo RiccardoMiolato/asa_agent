@@ -1,10 +1,7 @@
 (define (domain deliveroo)
-    (:requirements :strips :typing :negative-preconditions)
+    (:requirements :adl)
     (:types
-        position
-        agent
-        parcel
-        crate
+        position agent parcel crate
     )
     (:predicates
         ; Player predicates
@@ -14,7 +11,7 @@
         ; Map predicates
         (upper-cell ?pos1 - position ?pos2 - position)
         (lower-cell ?pos1 - position ?pos2 - position)
-        (left-cell  ?pos1 - position ?pos2 - position)
+        (left-cell ?pos1 - position ?pos2 - position)
         (right-cell ?pos1 - position ?pos2 - position)
 
         ; Points of interest Predicates
@@ -33,7 +30,9 @@
         :precondition (and
             (agent-at ?a ?from)
             (upper-cell ?from ?to)
-            (forall (?c - crate) (not (crate-at ?c ?to)))
+            (forall
+                (?c - crate)
+                (not (crate-at ?c ?to)))
         )
         :effect (and (agent-at ?a ?to) (not (agent-at ?a ?from)))
     )
@@ -43,7 +42,9 @@
         :precondition (and
             (agent-at ?a ?from)
             (lower-cell ?from ?to)
-            (forall (?c - crate) (not (crate-at ?c ?to)))
+            (forall
+                (?c - crate)
+                (not (crate-at ?c ?to)))
         )
         :effect (and (agent-at ?a ?to) (not (agent-at ?a ?from)))
     )
@@ -53,7 +54,9 @@
         :precondition (and
             (agent-at ?a ?from)
             (left-cell ?from ?to)
-            (forall (?c - crate) (not (crate-at ?c ?to)))
+            (forall
+                (?c - crate)
+                (not (crate-at ?c ?to)))
         )
         :effect (and (agent-at ?a ?to) (not (agent-at ?a ?from)))
     )
@@ -63,7 +66,9 @@
         :precondition (and
             (agent-at ?a ?from)
             (right-cell ?from ?to)
-            (forall (?c - crate) (not (crate-at ?c ?to)))
+            (forall
+                (?c - crate)
+                (not (crate-at ?c ?to)))
         )
         :effect (and (agent-at ?a ?to) (not (agent-at ?a ?from)))
     )
@@ -76,7 +81,9 @@
             (upper-cell ?to ?crate_to)
             (crate-cell ?crate_to)
             (crate-at ?c ?to)
-            (forall (?c2 - crate) (not (crate-at ?c2 ?crate_to)))
+            (forall
+                (?c2 - crate)
+                (not (crate-at ?c2 ?crate_to)))
         )
         :effect (and
             (and (agent-at ?a ?to) (not (agent-at ?a ?from)))
@@ -92,7 +99,9 @@
             (lower-cell ?to ?crate_to)
             (crate-cell ?crate_to)
             (crate-at ?c ?to)
-            (forall (?c2 - crate) (not (crate-at ?c2 ?crate_to)))
+            (forall
+                (?c2 - crate)
+                (not (crate-at ?c2 ?crate_to)))
         )
         :effect (and
             (and (agent-at ?a ?to) (not (agent-at ?a ?from)))
@@ -108,7 +117,9 @@
             (left-cell ?to ?crate_to)
             (crate-cell ?crate_to)
             (crate-at ?c ?to)
-            (forall (?c2 - crate) (not (crate-at ?c2 ?crate_to)))
+            (forall
+                (?c2 - crate)
+                (not (crate-at ?c2 ?crate_to)))
         )
         :effect (and
             (and (agent-at ?a ?to) (not (agent-at ?a ?from)))
@@ -124,7 +135,9 @@
             (right-cell ?to ?crate_to)
             (crate-cell ?crate_to)
             (crate-at ?c ?to)
-            (forall (?c2 - crate) (not (crate-at ?c2 ?crate_to)))
+            (forall
+                (?c2 - crate)
+                (not (crate-at ?c2 ?crate_to)))
         )
         :effect (and
             (and (agent-at ?a ?to) (not (agent-at ?a ?from)))
@@ -143,7 +156,9 @@
         :precondition (and (agent-at ?a ?pos) (carrying ?a ?p) (delivery-at ?pos))
         :effect (and
             (not (carrying ?a ?p))
-            (forall (?prc - parcel) (delivered ?prc))
+            (forall
+                (?prc - parcel)
+                (delivered ?prc))
         )
     )
 )

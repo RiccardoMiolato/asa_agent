@@ -1,5 +1,5 @@
 import fs from "fs";
-import onlineSolver, { PddlPlanStep } from "./onlineSolver.js";
+import localSolver, { PddlPlanStep } from "./onlineSolver.js";
 
 export class PDDLProblem {
     private tiles: string[];
@@ -93,7 +93,7 @@ ${this.padding}(:goal (and ${this.goals.join(" ").trim()}))
         console.log(`PDDL problem written to ${outputPath}`);
         // console.log("=== END PDDL PROBLEM ===");
 
-        const plan: PddlPlanStep[] | undefined = await onlineSolver(domainText, problemText);
+        const plan: PddlPlanStep[] | undefined = await localSolver(domainText, problemText);
 
         if (plan)
             return plan;

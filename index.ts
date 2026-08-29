@@ -10,7 +10,6 @@ import { ActionFactory } from './src/move.js';
 import type { IOAgent } from './types/IOAgent.js';
 import type { IOConfig } from './types/IOConfig.js';
 import type { IOSensing } from './types/IOSensing.js';
-
 // Environment variables and script constants
 const host = process.env.HOST || "http://localhost:8080";
 const token = process.env.TOKEN || "";
