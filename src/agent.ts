@@ -287,7 +287,6 @@ export class Agent {
 
         this.pddlPlanner?.buildPDDLProblem(
             new GameMap(context.gameMap),
-            [...context.parcels.values()],
             [...context.crates.values()],
             this.id,
             this.position,
@@ -301,8 +300,16 @@ export class Agent {
             }
 
             this.pddlPlanner?.buildGoal(pddlGoal);
-            const actions = await this.pddlPlanner?.solveProblem() || [];
-            this.plan.newPlan(actions);
+            const navigationActions = await this.pddlPlanner?.solveProblem();
+            if (navigationActions === undefined) {
+                this.plan.newPlan([]);
+                return;
+            }
+
+            this.plan.newPlan([
+                ...navigationActions,
+                ...this.currentIntention.buildPddlCompletionActions(context),
+            ]);
         }
 
     }

@@ -4,7 +4,6 @@ import localSolver, { PddlPlanStep } from "./onlineSolver.js";
 export class PDDLProblem {
     private tiles: string[];
     private agent: string;
-    private parcels: string[];
     private crates: string[];
     private init: string[];
     private goals: string[];
@@ -15,7 +14,6 @@ export class PDDLProblem {
     constructor() {
         this.tiles = [];
         this.agent = "";
-        this.parcels = [];
         this.crates = [];
         this.init = [];
         this.goals = [];
@@ -26,7 +24,6 @@ export class PDDLProblem {
     public clearProblem() {
         this.tiles = [];
         this.agent = "";
-        this.parcels = [];
         this.crates = [];
         this.init = [];
         this.goals = [];
@@ -38,7 +35,7 @@ export class PDDLProblem {
         return `(define (problem deliveroo_problem)
 ${this.padding}(:domain deliveroo)
 ${this.padding}(:objects
-${this.tiles.length > 0 ? `${this.padding}${this.padding}${this.tiles.join(" ").trim()} - position\n` : ''}${this.agent ? `${this.padding}${this.padding}${this.agent} - agent\n` : ''}${this.parcels.length > 0 ? `${this.padding}${this.padding}${this.parcels.join(" ").trim()} - parcel\n` : ''}${this.crates.length > 0 ? `${this.padding}${this.padding}${this.crates.join(" ").trim()} - crate\n` : ''})
+${this.tiles.length > 0 ? `${this.padding}${this.padding}${this.tiles.join(" ").trim()} - position\n` : ''}${this.agent ? `${this.padding}${this.padding}${this.agent} - agent\n` : ''}${this.crates.length > 0 ? `${this.padding}${this.padding}${this.crates.join(" ").trim()} - crate\n` : ''})
 ${this.padding}(:init ${this.init.join(" ").trim()})
 ${this.padding}(:goal (and ${this.goals.join(" ").trim()}))
 )`;
@@ -56,11 +53,6 @@ ${this.padding}(:goal (and ${this.goals.join(" ").trim()}))
         this.agent = `ag_${agentId}`;
     }
 
-    public addParcel(parcelId: string) {
-        // Store as parcel_id to match domain typing
-        this.parcels.push(`parcel_${parcelId}`);
-    }
-
     public addInit(initPredicate: string) {
         this.init.push(initPredicate);
     }
@@ -70,7 +62,7 @@ ${this.padding}(:goal (and ${this.goals.join(" ").trim()}))
         this.goals.push(goalPredicate);
     }
 
-    public async solve(): Promise<PddlPlanStep[]> {
+    public async solve(): Promise<PddlPlanStep[] | undefined> {
         if (!this.goalSet)
             throw new Error("Cannot solve this due to missing goals");
 
@@ -93,11 +85,6 @@ ${this.padding}(:goal (and ${this.goals.join(" ").trim()}))
         console.log(`PDDL problem written to ${outputPath}`);
         // console.log("=== END PDDL PROBLEM ===");
 
-        const plan: PddlPlanStep[] | undefined = await localSolver(domainText, problemText);
-
-        if (plan)
-            return plan;
-
-        return [];
+        return await localSolver(domainText, problemText);
     }
 }

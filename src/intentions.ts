@@ -91,6 +91,11 @@ export abstract class Intention {
     abstract toPddlGoal(context: IntentionContext): PDDLGoal | undefined;
     abstract describe(): IntentionDescription;
 
+    /** Adds intention-specific actions after PDDL has reached the target. */
+    buildPddlCompletionActions(_context: IntentionContext): Action[] {
+        return [];
+    }
+
     /** Manhattan distance used to prefer the closest option when scores are equal. */
     selectionDistance(_context: IntentionContext): number | undefined {
         return undefined;
@@ -373,13 +378,8 @@ export class SearchIntention extends Intention {
             return undefined;
         }
 
-        const carriedParcels: Parcel[] = Array.from(context.parcels.values()).filter(parcel => parcel.carriedBy === context.agentId);
-
         return {
-            operationType: "search",
             agentId: context.agentId,
-            parcelId: null,
-            carriedParcels,
             finalTargetPosition: this.targetLocation
         }
     }
@@ -860,15 +860,14 @@ export class PickUpParcelIntention extends RewardIntention {
     }
 
     toPddlGoal(context: IntentionContext): PDDLGoal {
-        const carriedParcels: Parcel[] = Array.from(context.parcels.values()).filter(parcel => parcel.carriedBy === context.agentId);
-
         return {
-            operationType: "pickup",
             agentId: context.agentId,
-            parcelId: this.parcel.id,
-            carriedParcels,
             finalTargetPosition: this.parcelPosition
         }
+    }
+
+    override buildPddlCompletionActions(context: IntentionContext): Action[] {
+        return [context.actionFactory.pickUp(this.parcel.id, context.agentId)];
     }
 
     describe(): IntentionDescription {
@@ -1028,15 +1027,14 @@ export class DeliverParcelIntention extends RewardIntention {
     }
 
     toPddlGoal(context: IntentionContext): PDDLGoal {
-        const carriedParcels: Parcel[] = Array.from(context.parcels.values()).filter(parcel => parcel.carriedBy === context.agentId);
-
         return {
-            operationType: "deliver",
             agentId: context.agentId,
-            parcelId: null,
-            carriedParcels,
             finalTargetPosition: this.deliveryCell
         }
+    }
+
+    override buildPddlCompletionActions(context: IntentionContext): Action[] {
+        return [context.actionFactory.drop(context.agentId)];
     }
 
     describe(): IntentionDescription {

@@ -1,17 +1,11 @@
-import { Parcel } from "../beliefs.js";
 import { GameMap, NeighborCoord } from "../map.js";
 import { Action, ActionFactory } from "../move.js";
 import { Position } from "../position.js";
 import { PDDLProblem } from "./PddlProblem.js";
 import { PddlPlanStep } from "./onlineSolver.js";
 
-export type OperationType = "search" | "pickup" | "deliver";
-
 export interface PDDLGoal {
-    operationType: OperationType,
     agentId: string,
-    parcelId: string | null,
-    carriedParcels: Parcel[],
     finalTargetPosition: Position,
 }
 
@@ -34,7 +28,6 @@ export class PDDLPlanner {
 
     public buildPDDLProblem(
         map: GameMap,
-        parcels: Parcel[],
         crates: Position[],
         playerId: string,
         playerPos: Position,
@@ -43,36 +36,12 @@ export class PDDLPlanner {
 
         this.convertMapToPDDLRepresentation(map);
         this.convertPlayerInfoToPDDLRepresentation(playerId, playerPos);
-        this.convertParcelsInfoToPDDLRepresentation(parcels, playerId);
         this.convertCratesInfoToPDDLRepresentation(crates);
     }
 
     public buildGoal(goal: PDDLGoal) {
-        let cellName: string;
-        switch(goal.operationType) {
-            case "search":
-                if(!goal.finalTargetPosition)
-                    return;
-
-                cellName = this.positionToCellString(goal.finalTargetPosition);
-                this.problemPDDL.addGoal(`(agent-at ag_${goal.agentId} ${cellName})`);
-                break;
-
-            case "pickup":
-                cellName = this.positionToCellString(goal.finalTargetPosition);
-                this.problemPDDL.addGoal(`(agent-at ag_${goal.agentId} ${cellName})`);
-                this.problemPDDL.addGoal(`(carrying ag_${goal.agentId} parcel_${goal.parcelId})`);
-                break;
-
-            case "deliver":
-                cellName = this.positionToCellString(goal.finalTargetPosition);
-
-                this.problemPDDL.addGoal(`(agent-at ag_${goal.agentId} ${cellName})`);
-                goal.carriedParcels.forEach((parcel) => {
-                    this.problemPDDL.addGoal(`(delivered parcel_${parcel.id})`);
-                });
-                break;
-        }
+        const cellName = this.positionToCellString(goal.finalTargetPosition);
+        this.problemPDDL.addGoal(`(agent-at ag_${goal.agentId} ${cellName})`);
     }
 
     private convertCratesInfoToPDDLRepresentation(crates: Position[]) {
@@ -93,23 +62,6 @@ export class PDDLPlanner {
         this.problemPDDL.addInit(`(agent-at ag_${playerId} ${cellName})`);
     }
 
-    private convertParcelsInfoToPDDLRepresentation(parcels: Parcel[], agentId: string) {
-        parcels.forEach((parcel) => {
-            // Only add free parcels (not carried by anyone)
-            const parcelStr: string = parcel.id;
-            this.problemPDDL.addParcel(parcelStr);
-
-            if (parcel.carriedBy == null) {
-                const cellName = this.positionToCellString(new Position(parcel.x, parcel.y));
-
-                // Use parcel_ prefix to match domain typing
-                this.problemPDDL.addInit(`(parcel-at parcel_${parcelStr} ${cellName})`);
-            } else if (parcel.carriedBy === agentId){
-                this.problemPDDL.addInit(`(carrying ag_${agentId} parcel_${parcelStr})`)
-            }
-        });
-    }
-
     private convertMapToPDDLRepresentation(map: GameMap) {
         for (let row = 0; row < map.getRows(); row++){
             for (let col = 0; col < map.getCols(); col++){
@@ -119,13 +71,8 @@ export class PDDLPlanner {
                     const cellName = this.positionToCellString(new Position(row, col));
                     this.problemPDDL.addTile(cellName);
 
-                    // Add pickup/delivery information based on cell type
                     const cellType = map.getCellValue(cellPosition);
-                    if (cellType === "1") {
-                        this.problemPDDL.addInit(`(pickup-at ${cellName})`);
-                    } else if (cellType === "2") {
-                        this.problemPDDL.addInit(`(delivery-at ${cellName})`);
-                    } else if (cellType === "5" || cellType === "5!") {
+                    if (cellType === "5" || cellType === "5!") {
                         this.problemPDDL.addInit(`(crate-cell ${cellName})`);
                     }
 
@@ -162,18 +109,16 @@ export class PDDLPlanner {
         return `t_${pos.x}_${pos.y}`;
     }
 
-    public async solveProblem(): Promise<Action[]> {
+    public async solveProblem(): Promise<Action[] | undefined> {
         try {
             const pddlResult = await this.problemPDDL.solve();
 
-            if (Array.isArray(pddlResult)) {
-                return this.convertPDDLActionsToAgentActions(pddlResult);
-            }
-
-            return [];
+            return pddlResult === undefined
+                ? undefined
+                : this.convertPDDLActionsToAgentActions(pddlResult);
         } catch (error) {
             console.error("PDDL planning failed:", error);
-            return [];
+            return undefined;
         }
     }
 
@@ -199,16 +144,6 @@ export class PDDLPlanner {
                 case 'MOVE-RIGHT':
                 case 'CRATE-MOVE-RIGHT':
                     actions.push(this.actionFactory.moveRight());
-                    break;
-                case 'PICK-UP':
-                    // Fast Downward normalizes PDDL object names to lowercase.
-                    const parcelId = result.args[1]?.replace(/^parcel_/i, '') || '';
-                    const pickupAgentId = result.args[0]?.replace(/^ag_/i, '') || '';
-                    actions.push(this.actionFactory.pickUp(parcelId, pickupAgentId));
-                    break;
-                case 'DELIVER':
-                    const deliveryAgentId = result.args[0]?.replace(/^ag_/i, '') || '';
-                    actions.push(this.actionFactory.drop(deliveryAgentId));
                     break;
             }
         }
