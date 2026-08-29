@@ -2,6 +2,90 @@
 
 This document describes what an autonomous agent receives from the Deliveroo.js server and how it can act on the environment. It is intended both for developers and for AI coding agents working on this repository in the future.
 
+## Local Fast Downward planner
+
+Fast Downward is included in this repository as the `fast-downward` Git
+submodule. Run all commands in this section from the `asa_agent` directory.
+
+### Initialize and build the submodule
+
+A clone created without `--recurse-submodules` contains an empty
+`fast-downward` directory. Initialize it with:
+
+```sh
+git submodule update --init --recursive
+```
+
+Fast Downward requires Python 3, CMake, GNU Make, and a C++ compiler. Build its
+default release configuration once after initializing the submodule:
+
+```sh
+cd fast-downward
+./build.py
+cd ..
+```
+
+The compiled `fast-downward/builds` directory is intentionally local build
+output and does not belong in Git.
+
+### Verify Fast Downward itself
+
+First confirm that the driver can find the release build:
+
+```sh
+./fast-downward/fast-downward.py --version
+```
+
+A working installation prints a Fast Downward version without the message
+`Build not found`. Then solve the small benchmark bundled with the submodule:
+
+```sh
+./fast-downward/fast-downward.py \
+  --alias lama-first \
+  fast-downward/misc/tests/benchmarks/miconic/s1-0.pddl
+```
+
+The check succeeds when the output contains `Solution found` and the command
+exits with status `0`. It may create a `sas_plan` file in the current directory.
+
+### Configure and verify the agent integration
+
+The agent loads its environment from `.env`. Point it at the submodule, using a
+path relative to the `asa_agent` directory:
+
+```dotenv
+FAST_DOWNWARD_PATH=./fast-downward/fast-downward.py
+FAST_DOWNWARD_ALIAS=lama-first
+FAST_DOWNWARD_TIMEOUT_MS=30000
+```
+
+Build and test the agent:
+
+```sh
+npm install
+npm test
+```
+
+Finally, start it with:
+
+```sh
+npm run dev
+```
+
+Fast Downward is invoked only when ordinary pathfinding cannot reach the chosen
+target, usually because a crate must be moved. A successful local invocation is
+visible in the agent log as:
+
+```text
+Build plan with PDDL
+Running local Fast Downward (lama-first) at .../asa_agent/fast-downward/fast-downward.py
+Fast Downward found a plan with N actions
+```
+
+If the agent reports that Fast Downward is not executable, check that commands
+are being run from `asa_agent`, that `FAST_DOWNWARD_PATH` has the value above,
+and that the submodule build completed successfully.
+
 The information below was verified against the local Deliveroo.js backend (`2.5.1`) and SDK (`1.3.10`). If those dependencies are upgraded, re-check the authoritative sources:
 
 - `../Deliveroo.js/backend/src/ioServer.js`: when the server emits events and handles actions.

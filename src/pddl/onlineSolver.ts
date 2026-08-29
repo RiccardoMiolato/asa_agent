@@ -14,7 +14,7 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 const FAST_DOWNWARD_PATH = path.resolve(
-  process.env.FAST_DOWNWARD_PATH ?? "../fast-downward/fast-downward.py",
+  process.env.FAST_DOWNWARD_PATH ?? "./fast-downward/fast-downward.py",
 );
 const FAST_DOWNWARD_ALIAS = process.env.FAST_DOWNWARD_ALIAS ?? "lama-first";
 const SOLVER_TIMEOUT_MS = readPositiveDuration(
