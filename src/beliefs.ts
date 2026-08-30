@@ -1,5 +1,5 @@
-import type { IOConfig } from "../types/IOConfig.js";
 import type { IOClockEvent } from "../types/IOClockEvent.js";
+import type { IOConfig } from "../types/IOConfig.js";
 import type { IOCrate } from "../types/IOCrate.js";
 import type { IOParcel } from "../types/IOParcel.js";
 import type {
@@ -24,6 +24,7 @@ export class Beliefs {
     private mapRevisionNumber: number;
     private sensingWaiters: Set<(revision: number) => void>;
     private observedPositionKeys: Set<string>;
+
 
     // MAP LOCATIONS
     delivering_cells: Position[];
@@ -66,7 +67,7 @@ export class Beliefs {
         crates: IOCrate[],
         observedPositions: readonly IOSensedPosition[] = [],
         agents: readonly IOSensedAgent[] = [],
-    ): void {
+    ): boolean {
         this.agents = new Map<string, IOSensedAgent>(
             agents.map((agent: IOSensedAgent): [string, IOSensedAgent] => [
                 agent.id,
@@ -78,10 +79,13 @@ export class Beliefs {
                 (position: IOSensedPosition): string => this.positionKey(position),
             ),
         );
-        this.senseParcels(parcels);
-        this.senseCrates(crates);
+
+        const isChangedParcels = this.senseParcels(parcels);
+        const isChangedCrates = this.senseCrates(crates);
         this.recordObservedPickupCells(observedPositions);
         this.notifySensingWaiters();
+
+        return isChangedCrates || isChangedParcels;
     }
 
     /** Monotonically identifies the last complete sensing snapshot. */
@@ -202,7 +206,9 @@ export class Beliefs {
     }
 
     /** Revises parcel beliefs from the current sensing snapshot. */
-    senseParcels(parcels: IOParcel[]): void {
+    senseParcels(parcels: IOParcel[]): boolean {
+        let isChanged = false;
+
         parcels.forEach((parcel: IOParcel) => {
             const { id, x, y, carriedBy, reward } = parcel;
             const lastUpdate = new Date();
@@ -212,9 +218,19 @@ export class Beliefs {
                 this.lastRewardDecayAt = lastUpdate.getTime();
             }
             this.parcels.set(id, { id, x, y, carriedBy, reward, lastUpdate });
+
+            if(!existingParcel || this.isParcelChanged(existingParcel as IOParcel, parcel))
+                isChanged = true;
         });
 
         this.updateParcelRewards();
+
+        return isChanged;
+    }
+
+    private isParcelChanged(parcel1: IOParcel, parcel2: IOParcel): boolean {
+        return parcel1.carriedBy === undefined &&
+            ( parcel1.x != parcel2.x || parcel1.y != parcel2.y );
     }
 
     /**
@@ -312,7 +328,9 @@ export class Beliefs {
     }
 
     // Sense the crates
-    senseCrates(crates: IOCrate[]): void {
+    senseCrates(crates: IOCrate[]): boolean {
+        const currentCrateRevisionNuber = this.crateRevisionNumber;
+
         crates.forEach((crate: IOCrate) => {
             const id = crate.id;
             const position = new Position(crate.x, crate.y);
@@ -327,6 +345,9 @@ export class Beliefs {
                 }
             }
         });
+
+        // Check if something has changed
+        return currentCrateRevisionNuber != this.crateRevisionNumber;
     }
 
     // Add a crate to the map

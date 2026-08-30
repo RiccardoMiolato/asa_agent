@@ -52,6 +52,7 @@ export class Agent {
     private score: number | undefined;
     private intentions: Intention[];
     private currentIntention: Intention;
+    private isBeliefChanged: boolean;
     private readonly plan: Plan;
     private readonly movementGuard: ConservativeMovementGuard;
     private readonly temporarilyBlockedCells: Map<string, TemporaryBlockedCell>;
@@ -72,6 +73,7 @@ export class Agent {
         this.position = new Position(0, 0);
         this.score = undefined;
         this.intentions = [];
+        this.isBeliefChanged = false;
         this.currentIntention = new SearchIntention();
         this.plan = new Plan();
         this.movementGuard = new ConservativeMovementGuard(
@@ -182,8 +184,6 @@ export class Agent {
             //     context,
             // );
 
-            console.log(this.plan);
-
             // this.logger.logDeliberation({
             //     cycle: this.deliberationCycle,
             //     agentId: this.id,
@@ -210,12 +210,11 @@ export class Agent {
             let planMoved = false;
             while (!this.plan.isEmpty()) {
                 if (
-                    this.beliefs.currentCrateRevision()
-                    !== plannedCrateRevision
+                    this.isBeliefChanged
                 ) {
-                    console.log("1");
                     deliberateImmediately = true;
                     planInterrupted = true;
+                    this.isBeliefChanged = false;
                     break;
                 }
 
@@ -231,7 +230,6 @@ export class Agent {
 
                 const nextAction = this.plan.topAction();
                 if (!nextAction) {
-                    console.log("3");
                     break;
                 }
 
@@ -243,14 +241,13 @@ export class Agent {
                         movementDestination,
                     );
                     if (clearance.decision === "replan") {
-                        console.log("4");
                         this.addTemporaryBlockedCell(clearance.blockedCell);
                         deliberateImmediately = true;
                         planInterrupted = true;
                         break;
                     }
                     // if (
-                        this.currentIntention.shouldInterrupt(
+                    // this.currentIntention.shouldInterrupt(
                     //         this.getIntentionContext(),
                     //     )
                     // ) {
@@ -268,7 +265,6 @@ export class Agent {
                             destination: movementDestination,
                         });
                     }
-                    console.log("6");
                     deliberateImmediately = true;
                     planInterrupted = true;
                     break;
@@ -619,5 +615,9 @@ export class Agent {
 
     private positionKey(position: Position): string {
         return `${position.x},${position.y}`;
+    }
+
+    signalBeliefChanged(): void {
+        this.isBeliefChanged = true;
     }
 }
