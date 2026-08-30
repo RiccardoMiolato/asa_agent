@@ -250,7 +250,7 @@ export class Agent {
                         break;
                     }
                     // if (
-                    //     this.currentIntention.shouldInterrupt(
+                        this.currentIntention.shouldInterrupt(
                     //         this.getIntentionContext(),
                     //     )
                     // ) {
