@@ -46,7 +46,7 @@ interface EvaluationResult {
 }
 
 export class OptionEvaluator {
-    evaluate(context: IntentionContext): Option | undefined {
+    evaluate(context: IntentionContext): Option[] {
         const optionSet: Set<Option> = new Set();
         const carriedParcelIds: string[] = [];
 
@@ -81,7 +81,7 @@ export class OptionEvaluator {
             0
         );
 
-        return result.bestOption;
+        return result.bestSequence;
     }
 
     private evaluateRec(
@@ -90,14 +90,13 @@ export class OptionEvaluator {
         optionSet: Set<Option>,
         carriedParcelIds: string[],
         elapsedTime: number
-    ): EvaluationResult {
-        // Base case: no more options to evaluate
+    ): { bestSequence: Option[], totalScore: number } {
         if (optionSet.size === 0) {
             const finalScore = this.computeDeliveryScore(context, carriedParcelIds, elapsedTime);
-            return { bestOption: undefined, totalScore: finalScore };
+            return { bestSequence: [], totalScore: finalScore };
         }
 
-        let bestResult: EvaluationResult = { bestOption: undefined, totalScore: Number.NEGATIVE_INFINITY };
+        let bestResult = { bestSequence: [] as Option[], totalScore: Number.NEGATIVE_INFINITY };
 
         optionSet.forEach((option: Option) => {
             const targetDistance = context.pathfinder.pathLength(
@@ -107,7 +106,6 @@ export class OptionEvaluator {
                 context.crates
             );
 
-            // Skip unreachable options
             if (targetDistance === undefined)
                 return;
 
@@ -135,7 +133,7 @@ export class OptionEvaluator {
                     }
                     newOptionSet.add(new Option("drop", closestDeliveryFromParcel));
                 }
-            } else { // drop case
+            } else {
                 scoreForThisOption = this.computeDeliveryScore(context, carriedParcelIds, newElapsedTime);
                 newCarriedIds = [];
             }
@@ -152,7 +150,10 @@ export class OptionEvaluator {
             option.setScore(totalScore);
 
             if (totalScore > bestResult.totalScore) {
-                bestResult = { bestOption: option, totalScore };
+                bestResult = {
+                    bestSequence: [option, ...nextResult.bestSequence],
+                    totalScore
+                };
             }
         });
 

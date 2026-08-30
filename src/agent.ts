@@ -52,7 +52,9 @@ export class Agent {
     private score: number | undefined;
     private intentions: Intention[];
     private currentIntention: Intention;
+    private currentOptionsList: Option[];
     private isBeliefChanged: boolean;
+    private readonly optionEvaluator: OptionEvaluator;
     private readonly plan: Plan;
     private readonly movementGuard: ConservativeMovementGuard;
     private readonly temporarilyBlockedCells: Map<string, TemporaryBlockedCell>;
@@ -74,6 +76,7 @@ export class Agent {
         this.score = undefined;
         this.intentions = [];
         this.isBeliefChanged = false;
+        this.currentOptionsList = [];
         this.currentIntention = new SearchIntention();
         this.plan = new Plan();
         this.movementGuard = new ConservativeMovementGuard(
@@ -85,6 +88,7 @@ export class Agent {
         this.hasAuthoritativePosition = false;
         this.deliberationCycle = 0;
         this.pddlPlanner = new PDDLPlanner(this.actionFactory);
+        this.optionEvaluator = new OptionEvaluator();
     }
 
     updatePosition(x: number, y: number): void {
@@ -164,8 +168,7 @@ export class Agent {
             this.beliefs.updateParcelRewards();
             const context = this.getIntentionContext();
 
-            const newOptionModelRes = new OptionEvaluator().evaluate(context);
-            console.log(`NEW OPTION MODEL: ${newOptionModelRes?.getType()} at (${newOptionModelRes?.getTargetCell().x},${newOptionModelRes?.getTargetCell().y}) ${newOptionModelRes?.getScore()}`);
+            this.currentOptionsList = this.optionEvaluator.evaluate(context);
 
             // const evaluatedOptions = this.filterOptions(context);
             const planStatus = await this.buildPlan(context);
@@ -254,6 +257,10 @@ export class Agent {
                 this.plan.popAction();
                 if (movementDestination) {
                     planMoved = true;
+                }
+
+                if(this.plan.isEmpty() && this.currentOptionsList.length > 0) {
+                    await this.buildPlan(this.getIntentionContext());
                 }
             }
 
@@ -365,8 +372,7 @@ export class Agent {
     async buildPlan(
         context: IntentionContext = this.getIntentionContext(),
     ): Promise<PLAN_BUILD_STATUS> {
-        const optionEvaluator = new OptionEvaluator();
-        const bestOption = optionEvaluator.evaluate(context);
+        const bestOption = this.currentOptionsList.shift();
 
         if (!bestOption) {
             // No viable option found, fall back to search
