@@ -13,10 +13,10 @@ import {
     type IntentionDescription,
     type PickupClusterSnapshot,
 } from "./intentions.js";
-import { GameMap } from "./map.js";
-import { MovementAction, type ActionFactory } from "./move.js";
+import { Action, MovementAction, type ActionFactory } from "./move.js";
 import { ConservativeMovementGuard } from "./movement-safety.js";
-import { PDDLGoal, PDDLPlanner } from "./pddl/pddlPlanner.js";
+import { Option, OptionEvaluator } from "./option_evaluator.js";
+import { PDDLPlanner } from "./pddl/pddlPlanner.js";
 import { Plan } from "./plan.js";
 import { Position } from "./position.js";
 
@@ -161,32 +161,42 @@ export class Agent {
             this.refreshTemporaryBlockedCells();
             this.beliefs.updateParcelRewards();
             const context = this.getIntentionContext();
-            const options = this.intentionGenerator.generate({
-                id: this.id,
-                position: context.agentPosition,
-            });
-            this.addIntentions(options);
-            this.pathfinder.clearPathLengthCache();
 
-            const evaluatedOptions = this.filterOptions(context);
+            const newOptionModelRes = new OptionEvaluator().evaluate(context);
+            console.log(`NEW OPTION MODEL: ${newOptionModelRes?.getType()} at (${newOptionModelRes?.getTargetCell().x},${newOptionModelRes?.getTargetCell().y}) ${newOptionModelRes?.getScore()}`);
+
+            if (false) {
+                const options = this.intentionGenerator.generate({
+                    id: this.id,
+                    position: context.agentPosition,
+                });
+                this.addIntentions(options);
+                this.pathfinder.clearPathLengthCache();
+            }
+
+            // const evaluatedOptions = this.filterOptions(context);
             const plannedCrateRevision = this.beliefs.currentCrateRevision();
-            const planStatus = await this.buildBestAvailablePlan(
-                evaluatedOptions,
-                context,
-            );
-            this.logger.logDeliberation({
-                cycle: this.deliberationCycle,
-                agentId: this.id,
-                agentScore: this.score,
-                position: context.agentPosition,
-                beliefs: this.makeBeliefLogSummary(),
-                options: this.makeOptionLogEntries(
-                    evaluatedOptions,
-                    planStatus === PLAN_BUILD_STATUS.PLANNED
-                    || planStatus === PLAN_BUILD_STATUS.SATISFIED,
-                ),
-                plannedActions: this.plan.size(),
-            });
+            const planStatus = await this.buildPlan(context);
+            // const planStatus = await this.buildBestAvailablePlan(
+            //     evaluatedOptions,
+            //     context,
+            // );
+
+            console.log(this.plan);
+
+            // this.logger.logDeliberation({
+            //     cycle: this.deliberationCycle,
+            //     agentId: this.id,
+            //     agentScore: this.score,
+            //     position: context.agentPosition,
+            //     beliefs: this.makeBeliefLogSummary(),
+            //     options: this.makeOptionLogEntries(
+            //         evaluatedOptions,
+            //         planStatus === PLAN_BUILD_STATUS.PLANNED
+            //         || planStatus === PLAN_BUILD_STATUS.SATISFIED,
+            //     ),
+            //     plannedActions: this.plan.size(),
+            // });
 
             if (planStatus === PLAN_BUILD_STATUS.TRANSIENTLY_BLOCKED) {
                 continue;
@@ -195,6 +205,7 @@ export class Agent {
                 return AGENT_EXIT_REASON.NO_FEASIBLE_PLAN;
             }
 
+
             let planInterrupted = false;
             let planMoved = false;
             while (!this.plan.isEmpty()) {
@@ -202,15 +213,17 @@ export class Agent {
                     this.beliefs.currentCrateRevision()
                     !== plannedCrateRevision
                 ) {
+                    console.log("1");
                     deliberateImmediately = true;
                     planInterrupted = true;
                     break;
                 }
 
-                if (this.currentIntention.shouldInterrupt(this.getIntentionContext())) {
-                    planInterrupted = true;
-                    break;
-                }
+                // if (this.currentIntention.shouldInterrupt(this.getIntentionContext())) {
+                //     console.log("2");
+                //     planInterrupted = true;
+                //     break;
+                // }
 
                 await new Promise<void>((resolve) =>
                     setTimeout(resolve, this.beliefs.movement_duration)
@@ -218,6 +231,7 @@ export class Agent {
 
                 const nextAction = this.plan.topAction();
                 if (!nextAction) {
+                    console.log("3");
                     break;
                 }
 
@@ -229,19 +243,21 @@ export class Agent {
                         movementDestination,
                     );
                     if (clearance.decision === "replan") {
+                        console.log("4");
                         this.addTemporaryBlockedCell(clearance.blockedCell);
                         deliberateImmediately = true;
                         planInterrupted = true;
                         break;
                     }
-                    if (
-                        this.currentIntention.shouldInterrupt(
-                            this.getIntentionContext(),
-                        )
-                    ) {
-                        planInterrupted = true;
-                        break;
-                    }
+                    // if (
+                    //     this.currentIntention.shouldInterrupt(
+                    //         this.getIntentionContext(),
+                    //     )
+                    // ) {
+                    //     console.log("5");
+                    //     planInterrupted = true;
+                    //     break;
+                    // }
                 }
 
                 const actionSucceeded = await nextAction.execute();
@@ -252,6 +268,7 @@ export class Agent {
                             destination: movementDestination,
                         });
                     }
+                    console.log("6");
                     deliberateImmediately = true;
                     planInterrupted = true;
                     break;
@@ -367,52 +384,113 @@ export class Agent {
         return PLAN_BUILD_STATUS.SATISFIED;
     }
 
+    // async buildPlan(
+    //     context: IntentionContext = this.getIntentionContext(),
+    // ): Promise<PLAN_BUILD_STATUS> {
+    //     const actions = this.currentIntention.buildActions(context);
+
+    //     if (actions.length > 0) {
+    //         this.plan.newPlan(actions);
+    //         return PLAN_BUILD_STATUS.PLANNED;
+    //     }
+    //     if (this.currentIntention.isSatisfied(context)) {
+    //         this.plan.newPlan([]);
+    //         return PLAN_BUILD_STATUS.SATISFIED;
+    //     }
+
+    //     // If normal pathfinding algorithms cannot find a path
+    //     // then PDDL is used because its likely that the path
+    //     // must be cleared moving crates
+
+    //     console.log("Build plan with PDDL");
+    //     this.pddlPlanner.resetPDDL();
+
+    //     this.pddlPlanner.buildPDDLProblem(
+    //         new GameMap(context.gameMap),
+    //         [...context.crates.values()],
+    //         context.agentId,
+    //         context.agentPosition,
+    //     );
+
+    //     const pddlGoal: PDDLGoal | undefined = this.currentIntention.toPddlGoal(context);
+    //     if (!pddlGoal) {
+    //         this.plan.newPlan([]);
+    //         return PLAN_BUILD_STATUS.INFEASIBLE;
+    //     }
+
+    //     this.pddlPlanner.buildGoal(pddlGoal);
+    //     const navigationActions = await this.pddlPlanner.solveProblem();
+    //     if (navigationActions === undefined) {
+    //         this.plan.newPlan([]);
+    //         return PLAN_BUILD_STATUS.INFEASIBLE;
+    //     }
+
+    //     this.plan.newPlan([
+    //         ...navigationActions,
+    //         ...this.currentIntention.buildPddlCompletionActions(context),
+    //     ]);
+    //     return PLAN_BUILD_STATUS.PLANNED;
+    // }
+
     async buildPlan(
         context: IntentionContext = this.getIntentionContext(),
     ): Promise<PLAN_BUILD_STATUS> {
-        const actions = this.currentIntention.buildActions(context);
+        const optionEvaluator = new OptionEvaluator();
+        const bestOption = optionEvaluator.evaluate(context);
+
+        if (!bestOption) {
+            // No viable option found, fall back to search
+            const searchActions = this.buildSearchActions(context);
+            this.plan.newPlan(searchActions);
+            return searchActions.length > 0 ? PLAN_BUILD_STATUS.PLANNED : PLAN_BUILD_STATUS.INFEASIBLE;
+        }
+
+        const actions = this.buildActionsFromOption(bestOption, context);
 
         if (actions.length > 0) {
             this.plan.newPlan(actions);
             return PLAN_BUILD_STATUS.PLANNED;
         }
-        if (this.currentIntention.isSatisfied(context)) {
-            this.plan.newPlan([]);
-            return PLAN_BUILD_STATUS.SATISFIED;
-        }
 
-        // If normal pathfinding algorithms cannot find a path
-        // then PDDL is used because its likely that the path
-        // must be cleared moving crates
+        return PLAN_BUILD_STATUS.INFEASIBLE;
+    }
 
-        console.log("Build plan with PDDL");
-        this.pddlPlanner.resetPDDL();
+    private buildActionsFromOption(option: Option, context: IntentionContext): Action[] {
+        const targetCell = option.getTargetCell();
+        const actions: Action[] = [];
 
-        this.pddlPlanner.buildPDDLProblem(
-            new GameMap(context.gameMap),
-            [...context.crates.values()],
-            context.agentId,
+        // Pathfind to option target
+        const path = context.pathfinder.findPath(
+            context.gameMap,
             context.agentPosition,
+            targetCell,
+            context.crates
         );
+        actions.push(...path);
 
-        const pddlGoal: PDDLGoal | undefined = this.currentIntention.toPddlGoal(context);
-        if (!pddlGoal) {
-            this.plan.newPlan([]);
-            return PLAN_BUILD_STATUS.INFEASIBLE;
+        // Add pick/drop action
+        if (option.getType() === "pick") {
+            actions.push(context.actionFactory.pickUp(option.getParcelId()!, context.agentId));
+        } else {
+            actions.push(context.actionFactory.drop(context.agentId));
         }
 
-        this.pddlPlanner.buildGoal(pddlGoal);
-        const navigationActions = await this.pddlPlanner.solveProblem();
-        if (navigationActions === undefined) {
-            this.plan.newPlan([]);
-            return PLAN_BUILD_STATUS.INFEASIBLE;
-        }
+        return actions;
+    }
 
-        this.plan.newPlan([
-            ...navigationActions,
-            ...this.currentIntention.buildPddlCompletionActions(context),
-        ]);
-        return PLAN_BUILD_STATUS.PLANNED;
+    private buildSearchActions(context: IntentionContext): Action[] {
+        if (context.pickupCells.length === 0)
+            return [];
+
+        const index = Math.floor(Math.random() * context.pickupCells.length);
+        const targetLocation = context.pickupCells[index];
+
+        return context.pathfinder.findPath(
+            context.gameMap,
+            context.agentPosition,
+            targetLocation,
+            context.crates
+        );
     }
 
     private makeOptionLogEntries(

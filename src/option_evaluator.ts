@@ -4,7 +4,7 @@ import { Position } from "./position.js";
 
 type OptionType = "pick" | "drop";
 
-class Option {
+export class Option {
     private optionType: OptionType;
     private parcelId: string | undefined;
     private targetCell: Position;
@@ -40,7 +40,12 @@ class Option {
     }
 }
 
-class OptionEvaluator {
+interface EvaluationResult {
+    bestOption: Option | undefined;
+    totalScore: number;
+}
+
+export class OptionEvaluator {
     evaluate(context: IntentionContext): Option | undefined {
         const optionSet: Set<Option> = new Set();
         const carriedParcelIds: string[] = [];
@@ -54,27 +59,29 @@ class OptionEvaluator {
                     new Position(parcel.x, parcel.y),
                     parcel.id
                 );
-
                 optionSet.add(parcelOption);
             }
         });
 
         if(carriedParcelIds.length > 0){
-            const closestDeliveryFromParcel: Position | undefined = this.shortestDeliveryFrom(
+            const closestDeliveryFromAgent: Position | undefined = this.shortestDeliveryFrom(
                 context,
                 context.agentPosition
             );
 
-            if(closestDeliveryFromParcel)
-                optionSet.add(new Option("drop", closestDeliveryFromParcel));
+            if(closestDeliveryFromAgent)
+                optionSet.add(new Option("drop", closestDeliveryFromAgent));
         }
 
-        return this.evaluateRec(
+        const result = this.evaluateRec(
             context,
             context.agentPosition,
             optionSet,
             carriedParcelIds,
-        )
+            0
+        );
+
+        return result.bestOption;
     }
 
     private evaluateRec(
@@ -82,19 +89,17 @@ class OptionEvaluator {
         agentPosition: Position,
         optionSet: Set<Option>,
         carriedParcelIds: string[],
-        elapsedTime: number = 0,
-        carriedScore: number = 0
-    ): Option | undefined {
-        if(optionSet.size == 0)
-            return undefined;
+        elapsedTime: number
+    ): EvaluationResult {
+        // Base case: no more options to evaluate
+        if (optionSet.size === 0) {
+            const finalScore = this.computeDeliveryScore(context, carriedParcelIds, elapsedTime);
+            return { bestOption: undefined, totalScore: finalScore };
+        }
 
-        let bestOption: Option | undefined = undefined;
-        let bestOptionScore: number = -Infinity;
+        let bestResult: EvaluationResult = { bestOption: undefined, totalScore: Number.NEGATIVE_INFINITY };
 
         optionSet.forEach((option: Option) => {
-            const newOptionSet: Set<Option> = new Set(optionSet);
-            newOptionSet.delete(option);
-
             const targetDistance = context.pathfinder.pathLength(
                 context.gameMap,
                 agentPosition,
@@ -102,58 +107,59 @@ class OptionEvaluator {
                 context.crates
             );
 
-            if(!targetDistance)
+            // Skip unreachable options
+            if (targetDistance === undefined)
                 return;
 
-            elapsedTime += (targetDistance * context.movementDuration) / 1000.0;
+            const newElapsedTime = elapsedTime + (targetDistance * context.movementDuration) / 1000.0;
+            const newOptionSet: Set<Option> = new Set(optionSet);
+            newOptionSet.delete(option);
 
-            if(option.getType() === "pick") {
-                carriedParcelIds.push(option.getParcelId()!);
+            let newCarriedIds = [...carriedParcelIds];
+            let scoreForThisOption = 0;
+
+            if (option.getType() === "pick") {
+                newCarriedIds.push(option.getParcelId()!);
 
                 const closestDeliveryFromParcel: Position | undefined = this.shortestDeliveryFrom(
                     context,
-                    agentPosition
+                    option.getTargetCell()
                 );
 
                 if (closestDeliveryFromParcel) {
-                    const dropOption = Array.from(newOptionSet).find(
+                    const existingDropOption = Array.from(newOptionSet).find(
                         (opt) => opt.getType() === "drop"
                     );
-
-                    if (dropOption) {
-                        newOptionSet.delete(dropOption);
+                    if (existingDropOption) {
+                        newOptionSet.delete(existingDropOption);
                     }
-
-                    newOptionSet.add(
-                        new Option("drop", closestDeliveryFromParcel)
-                    );
+                    newOptionSet.add(new Option("drop", closestDeliveryFromParcel));
                 }
             } else { // drop case
-                const deliveryScore = this.computeDeliveryScore(context, carriedParcelIds, elapsedTime);
-                carriedScore += deliveryScore;
-
-                carriedParcelIds = [];
+                scoreForThisOption = this.computeDeliveryScore(context, carriedParcelIds, newElapsedTime);
+                newCarriedIds = [];
             }
 
-            const nextOption: Option | undefined = this.evaluateRec(
+            const nextResult = this.evaluateRec(
                 context,
                 option.getTargetCell(),
                 newOptionSet,
-                carriedParcelIds,
-                elapsedTime,
-                carriedScore
+                newCarriedIds,
+                newElapsedTime
             );
 
-            if (nextOption && nextOption.getScore() > bestOptionScore) {
-                bestOption = nextOption;
-                bestOptionScore = bestOption.getScore();
+            const totalScore = scoreForThisOption + nextResult.totalScore;
+            option.setScore(totalScore);
+
+            if (totalScore > bestResult.totalScore) {
+                bestResult = { bestOption: option, totalScore };
             }
         });
 
-        return bestOption;
+        return bestResult;
     }
 
-    private shortestDeliveryFrom(context: IntentionContext, startingPosition: Position): Position | undefined{
+    private shortestDeliveryFrom(context: IntentionContext, startingPosition: Position): Position | undefined {
         let closestCell: Position | undefined = undefined;
         let closestCellDistance: number = Infinity;
 
@@ -164,7 +170,7 @@ class OptionEvaluator {
                 delivery,
             );
 
-            if(distance && distance < closestCellDistance) {
+            if(distance !== undefined && distance < closestCellDistance) {
                 closestCell = delivery;
                 closestCellDistance = distance;
             }
@@ -179,8 +185,10 @@ class OptionEvaluator {
         carriedParcelIds.forEach((parcelId: string) => {
             const parcel = context.parcels.get(parcelId);
 
-            if(parcel)
-                deliveryScore += Math.max(0, parcel?.reward - elapsedTime);
+            if(parcel) {
+                const remainingReward = Math.max(0, parcel.reward - elapsedTime);
+                deliveryScore += remainingReward;
+            }
         });
 
         return deliveryScore;
