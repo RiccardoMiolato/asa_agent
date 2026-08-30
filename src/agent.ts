@@ -36,10 +36,11 @@ export enum AGENT_EXIT_REASON {
     NO_FEASIBLE_PLAN = "no-feasible-plan",
 }
 
-/** Outcome of planning one intention. */
+/** Outcome of one complete planning pass across the available intentions. */
 export enum PLAN_BUILD_STATUS {
     PLANNED = "planned",
     SATISFIED = "satisfied",
+    TRANSIENTLY_BLOCKED = "transiently-blocked",
     INFEASIBLE = "infeasible",
 }
 
@@ -181,11 +182,15 @@ export class Agent {
                 beliefs: this.makeBeliefLogSummary(),
                 options: this.makeOptionLogEntries(
                     evaluatedOptions,
-                    planStatus !== PLAN_BUILD_STATUS.INFEASIBLE,
+                    planStatus === PLAN_BUILD_STATUS.PLANNED
+                    || planStatus === PLAN_BUILD_STATUS.SATISFIED,
                 ),
                 plannedActions: this.plan.size(),
             });
 
+            if (planStatus === PLAN_BUILD_STATUS.TRANSIENTLY_BLOCKED) {
+                continue;
+            }
             if (planStatus === PLAN_BUILD_STATUS.INFEASIBLE) {
                 return AGENT_EXIT_REASON.NO_FEASIBLE_PLAN;
             }
@@ -348,6 +353,12 @@ export class Agent {
         }
 
         this.plan.newPlan([]);
+        if (this.temporarilyBlockedCells.size > 0) {
+            if (satisfiedIntention) {
+                this.currentIntention = satisfiedIntention;
+            }
+            return PLAN_BUILD_STATUS.TRANSIENTLY_BLOCKED;
+        }
         if (infeasibleIntentionFound || !satisfiedIntention) {
             return PLAN_BUILD_STATUS.INFEASIBLE;
         }

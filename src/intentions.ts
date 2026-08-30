@@ -73,6 +73,12 @@ interface ClusterCoveragePlan {
     readonly complete: boolean;
 }
 
+interface PartialClusterCoveragePlan {
+    readonly cluster: PickupCluster;
+    readonly checkpoint: ClusterCheckpoint;
+    readonly coverage: ClusterCoveragePlan;
+}
+
 interface CoverageSegment {
     readonly actions: Action[];
     readonly destination: Position;
@@ -227,6 +233,7 @@ export class SearchIntention extends Intention {
         this.plannedCoverageComplete = false;
         this.planningSatisfied = false;
         let incompleteClusterFound = false;
+        let partialFallback: PartialClusterCoveragePlan | undefined;
 
         const oldestClusters = [...this.clusters].sort(
             (first: PickupCluster, second: PickupCluster): number => {
@@ -255,6 +262,7 @@ export class SearchIntention extends Intention {
                 checkpoint.remainingCellKeys,
             );
             if (!plan.complete) {
+                incompleteClusterFound = true;
                 const planWithMovableCrates = context.crates.size > 0
                     ? this.buildCoveragePlan(
                         context,
@@ -267,21 +275,27 @@ export class SearchIntention extends Intention {
                     planWithMovableCrates?.complete
                     && planWithMovableCrates.actions.length > 0
                 ) {
-                    cluster.scanStartedAt = checkpoint.scanStartedAt;
-                    cluster.remainingCellKeys = checkpoint.remainingCellKeys;
-                    this.targetLocation = planWithMovableCrates.target;
-                    this.plannedCluster = cluster;
                     // PDDL may use a different route from the optimistic A* path,
                     // so the next sensing checkpoint must verify actual coverage.
-                    this.plannedCoverageComplete = false;
+                    this.rememberPlannedCluster(
+                        cluster,
+                        checkpoint,
+                        planWithMovableCrates.target,
+                        false,
+                    );
                     return [];
                 }
 
                 if (cluster.scanStartedAt !== undefined) {
                     cluster.remainingCellKeys = checkpoint.remainingCellKeys;
-                    return [];
                 }
-                incompleteClusterFound = true;
+                if (plan.actions.length > 0 && !partialFallback) {
+                    partialFallback = {
+                        cluster,
+                        checkpoint,
+                        coverage: plan,
+                    };
+                }
                 continue;
             }
 
@@ -293,10 +307,18 @@ export class SearchIntention extends Intention {
                 cluster.remainingCellKeys = undefined;
                 continue;
             }
-            this.targetLocation = plan.target;
-            this.plannedCluster = cluster;
-            this.plannedCoverageComplete = true;
+            this.rememberPlannedCluster(cluster, checkpoint, plan.target, true);
             return plan.actions;
+        }
+
+        if (partialFallback) {
+            this.rememberPlannedCluster(
+                partialFallback.cluster,
+                partialFallback.checkpoint,
+                partialFallback.coverage.target,
+                false,
+            );
+            return partialFallback.coverage.actions;
         }
 
         this.planningSatisfied = !incompleteClusterFound;
@@ -578,6 +600,19 @@ export class SearchIntention extends Intention {
         );
 
         return { scanStartedAt, remainingCellKeys };
+    }
+
+    private rememberPlannedCluster(
+        cluster: PickupCluster,
+        checkpoint: ClusterCheckpoint,
+        target: Position,
+        coverageComplete: boolean,
+    ): void {
+        cluster.scanStartedAt = checkpoint.scanStartedAt;
+        cluster.remainingCellKeys = checkpoint.remainingCellKeys;
+        this.targetLocation = target;
+        this.plannedCluster = cluster;
+        this.plannedCoverageComplete = coverageComplete;
     }
 
     private buildCoveragePlan(
