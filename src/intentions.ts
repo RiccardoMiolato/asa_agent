@@ -123,36 +123,6 @@ export abstract class Intention {
 /** Base for intentions whose score depends on reward decay during execution. */
 export abstract class RewardIntention extends Intention {
     /**
-     * Estimates a route while treating known crates as movable obstacles.
-     *
-     * A direct A* route is preferred. If crates are the only thing blocking it,
-     * the crate-free distance keeps the intention eligible so PDDL can plan the
-     * required crate moves.
-     */
-    protected pathLengthAllowingCrateMoves(
-        context: IntentionContext,
-        startingPosition: Position,
-        targetPosition: Position,
-    ): number | undefined {
-        const directDistance = context.pathfinder.pathLength(
-            context.gameMap,
-            startingPosition,
-            targetPosition,
-            context.crates,
-        );
-        if (directDistance !== undefined || context.crates.size === 0) {
-            return directDistance;
-        }
-
-        return context.pathfinder.pathLength(
-            context.gameMap,
-            startingPosition,
-            targetPosition,
-            new Map<string, Position>(),
-        );
-    }
-
-    /**
      * Predicts the integer reward remaining after the real action-loop delays.
      * Each move incurs a client wait, server movement, and frame synchronization.
      */
@@ -825,7 +795,7 @@ export class PickUpParcelIntention extends RewardIntention {
     }
 
     score(context: IntentionContext): number {
-        const pickupDistance = this.pathLengthAllowingCrateMoves(
+        const pickupDistance = context.pathfinder.pathLengthAllowingCrateMoves(
             context,
             context.agentPosition,
             this.parcelPosition,
@@ -836,7 +806,7 @@ export class PickUpParcelIntention extends RewardIntention {
 
         let shortestDeliveryDistance: number | undefined;
         for (const deliveryCell of context.deliveringCells) {
-            const deliveryDistance = this.pathLengthAllowingCrateMoves(
+            const deliveryDistance = context.pathfinder.pathLengthAllowingCrateMoves(
                 context,
                 this.parcelPosition,
                 deliveryCell,
@@ -888,7 +858,7 @@ export class PickUpParcelIntention extends RewardIntention {
     }
 
     selectionDistance(context: IntentionContext): number | undefined {
-        return this.pathLengthAllowingCrateMoves(
+        return context.pathfinder.pathLengthAllowingCrateMoves(
             context,
             context.agentPosition,
             this.parcelPosition,
@@ -955,7 +925,7 @@ export class DeliverParcelIntention extends RewardIntention {
             }
         }
 
-        const firstDeliveryDistance = this.pathLengthAllowingCrateMoves(
+        const firstDeliveryDistance = context.pathfinder.pathLengthAllowingCrateMoves(
             context,
             context.agentPosition,
             this.deliveryCell,
@@ -990,7 +960,7 @@ export class DeliverParcelIntention extends RewardIntention {
             }
 
             const parcelPosition = new Position(parcel.x, parcel.y);
-            const pickupDistance = this.pathLengthAllowingCrateMoves(
+            const pickupDistance = context.pathfinder.pathLengthAllowingCrateMoves(
                 context,
                 this.deliveryCell,
                 parcelPosition,
@@ -1001,7 +971,7 @@ export class DeliverParcelIntention extends RewardIntention {
 
             let shortestDeliveryDistance: number | undefined;
             for (const finalDeliveryCell of context.deliveringCells) {
-                const deliveryDistance = this.pathLengthAllowingCrateMoves(
+                const deliveryDistance = context.pathfinder.pathLengthAllowingCrateMoves(
                     context,
                     parcelPosition,
                     finalDeliveryCell,
@@ -1042,7 +1012,7 @@ export class DeliverParcelIntention extends RewardIntention {
     }
 
     selectionDistance(context: IntentionContext): number | undefined {
-        return this.pathLengthAllowingCrateMoves(
+        return context.pathfinder.pathLengthAllowingCrateMoves(
             context,
             context.agentPosition,
             this.deliveryCell,
