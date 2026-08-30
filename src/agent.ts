@@ -167,36 +167,33 @@ export class Agent {
             const newOptionModelRes = new OptionEvaluator().evaluate(context);
             console.log(`NEW OPTION MODEL: ${newOptionModelRes?.getType()} at (${newOptionModelRes?.getTargetCell().x},${newOptionModelRes?.getTargetCell().y}) ${newOptionModelRes?.getScore()}`);
 
-            if (false) {
-                const options = this.intentionGenerator.generate({
-                    id: this.id,
-                    position: context.agentPosition,
-                });
-                this.addIntentions(options);
-                this.pathfinder.clearPathLengthCache();
-            }
-
             // const evaluatedOptions = this.filterOptions(context);
-            const plannedCrateRevision = this.beliefs.currentCrateRevision();
             const planStatus = await this.buildPlan(context);
-            // const planStatus = await this.buildBestAvailablePlan(
-            //     evaluatedOptions,
-            //     context,
-            // );
 
-            // this.logger.logDeliberation({
-            //     cycle: this.deliberationCycle,
-            //     agentId: this.id,
-            //     agentScore: this.score,
-            //     position: context.agentPosition,
-            //     beliefs: this.makeBeliefLogSummary(),
-            //     options: this.makeOptionLogEntries(
-            //         evaluatedOptions,
-            //         planStatus === PLAN_BUILD_STATUS.PLANNED
-            //         || planStatus === PLAN_BUILD_STATUS.SATISFIED,
-            //     ),
-            //     plannedActions: this.plan.size(),
-            // });
+            /**
+             * const options = this.intentionGenerator.generate({
+             *      id: this.id,
+             *      position: context.agentPosition,
+             *  });
+             *  this.addIntentions(options);
+             *  this.pathfinder.clearPathLengthCache();
+             *
+             * const plannedCrateRevision = this.beliefs.currentCrateRevision();
+             *
+             * this.logger.logDeliberation({
+             *     cycle: this.deliberationCycle,
+             *     agentId: this.id,
+             *     agentScore: this.score,
+             *     position: context.agentPosition,
+             *     beliefs: this.makeBeliefLogSummary(),
+             *     options: this.makeOptionLogEntries(
+             *         evaluatedOptions,
+             *         planStatus === PLAN_BUILD_STATUS.PLANNED
+             *         || planStatus === PLAN_BUILD_STATUS.SATISFIED,
+             *     ),
+             *     plannedActions: this.plan.size(),
+             * });
+             */
 
             if (planStatus === PLAN_BUILD_STATUS.TRANSIENTLY_BLOCKED) {
                 continue;
@@ -217,12 +214,6 @@ export class Agent {
                     this.isBeliefChanged = false;
                     break;
                 }
-
-                // if (this.currentIntention.shouldInterrupt(this.getIntentionContext())) {
-                //     console.log("2");
-                //     planInterrupted = true;
-                //     break;
-                // }
 
                 await new Promise<void>((resolve) =>
                     setTimeout(resolve, this.beliefs.movement_duration)
@@ -246,15 +237,6 @@ export class Agent {
                         planInterrupted = true;
                         break;
                     }
-                    // if (
-                    // this.currentIntention.shouldInterrupt(
-                    //         this.getIntentionContext(),
-                    //     )
-                    // ) {
-                    //     console.log("5");
-                    //     planInterrupted = true;
-                    //     break;
-                    // }
                 }
 
                 const actionSucceeded = await nextAction.execute();
@@ -379,54 +361,6 @@ export class Agent {
         this.currentIntention = satisfiedIntention;
         return PLAN_BUILD_STATUS.SATISFIED;
     }
-
-    // async buildPlan(
-    //     context: IntentionContext = this.getIntentionContext(),
-    // ): Promise<PLAN_BUILD_STATUS> {
-    //     const actions = this.currentIntention.buildActions(context);
-
-    //     if (actions.length > 0) {
-    //         this.plan.newPlan(actions);
-    //         return PLAN_BUILD_STATUS.PLANNED;
-    //     }
-    //     if (this.currentIntention.isSatisfied(context)) {
-    //         this.plan.newPlan([]);
-    //         return PLAN_BUILD_STATUS.SATISFIED;
-    //     }
-
-    //     // If normal pathfinding algorithms cannot find a path
-    //     // then PDDL is used because its likely that the path
-    //     // must be cleared moving crates
-
-    //     console.log("Build plan with PDDL");
-    //     this.pddlPlanner.resetPDDL();
-
-    //     this.pddlPlanner.buildPDDLProblem(
-    //         new GameMap(context.gameMap),
-    //         [...context.crates.values()],
-    //         context.agentId,
-    //         context.agentPosition,
-    //     );
-
-    //     const pddlGoal: PDDLGoal | undefined = this.currentIntention.toPddlGoal(context);
-    //     if (!pddlGoal) {
-    //         this.plan.newPlan([]);
-    //         return PLAN_BUILD_STATUS.INFEASIBLE;
-    //     }
-
-    //     this.pddlPlanner.buildGoal(pddlGoal);
-    //     const navigationActions = await this.pddlPlanner.solveProblem();
-    //     if (navigationActions === undefined) {
-    //         this.plan.newPlan([]);
-    //         return PLAN_BUILD_STATUS.INFEASIBLE;
-    //     }
-
-    //     this.plan.newPlan([
-    //         ...navigationActions,
-    //         ...this.currentIntention.buildPddlCompletionActions(context),
-    //     ]);
-    //     return PLAN_BUILD_STATUS.PLANNED;
-    // }
 
     async buildPlan(
         context: IntentionContext = this.getIntentionContext(),
