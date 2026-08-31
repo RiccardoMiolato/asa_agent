@@ -12,6 +12,61 @@ export interface Parcel extends IOParcel {
     lastUpdate: Date;
 }
 
+/** Finite set of dynamic world changes reported by one sensing revision. */
+export enum BELIEF_CHANGE_TYPE {
+    PARCEL_DISCOVERED = "parcel-discovered",
+    PARCEL_REWARD_CHANGED = "parcel-reward-changed",
+    PARCEL_CARRIER_CHANGED = "parcel-carrier-changed",
+    PARCEL_MOVED = "parcel-moved",
+    PARCEL_DISAPPEARED = "parcel-disappeared",
+    CRATE_DISCOVERED = "crate-discovered",
+    CRATE_MOVED = "crate-moved",
+}
+
+export type BeliefChange =
+    | {
+        readonly type: BELIEF_CHANGE_TYPE.PARCEL_DISCOVERED;
+        readonly parcelId: string;
+    }
+    | {
+        readonly type: BELIEF_CHANGE_TYPE.PARCEL_REWARD_CHANGED;
+        readonly parcelId: string;
+        readonly previousReward: number;
+        readonly currentReward: number;
+    }
+    | {
+        readonly type: BELIEF_CHANGE_TYPE.PARCEL_CARRIER_CHANGED;
+        readonly parcelId: string;
+        readonly previousCarrier: string | undefined;
+        readonly currentCarrier: string | undefined;
+    }
+    | {
+        readonly type: BELIEF_CHANGE_TYPE.PARCEL_MOVED;
+        readonly parcelId: string;
+        readonly previousPosition: Position;
+        readonly currentPosition: Position;
+    }
+    | {
+        readonly type: BELIEF_CHANGE_TYPE.PARCEL_DISAPPEARED;
+        readonly parcelId: string;
+    }
+    | {
+        readonly type:
+            | BELIEF_CHANGE_TYPE.CRATE_DISCOVERED
+            | BELIEF_CHANGE_TYPE.CRATE_MOVED;
+        readonly crateId: string;
+        readonly position: Position;
+    };
+
+/** Detailed result of applying one authoritative sensing snapshot. */
+export class BeliefRevision {
+    constructor(readonly changes: readonly BeliefChange[]) { }
+
+    hasChanges(): boolean {
+        return this.changes.length > 0;
+    }
+}
+
 export class Beliefs {
     map: string[][];
 
@@ -68,6 +123,21 @@ export class Beliefs {
         observedPositions: readonly IOSensedPosition[] = [],
         agents: readonly IOSensedAgent[] = [],
     ): boolean {
+        return this.reviseWithChanges(
+            parcels,
+            crates,
+            observedPositions,
+            agents,
+        ).hasChanges();
+    }
+
+    /** Revises beliefs and identifies every planning-relevant state change. */
+    reviseWithChanges(
+        parcels: IOParcel[],
+        crates: IOCrate[],
+        observedPositions: readonly IOSensedPosition[] = [],
+        agents: readonly IOSensedAgent[] = [],
+    ): BeliefRevision {
         this.agents = new Map<string, IOSensedAgent>(
             agents.map((agent: IOSensedAgent): [string, IOSensedAgent] => [
                 agent.id,
@@ -80,12 +150,14 @@ export class Beliefs {
             ),
         );
 
-        const isChangedParcels = this.senseParcels(parcels);
-        const isChangedCrates = this.senseCrates(crates);
+        const changes = [
+            ...this.senseParcelChanges(parcels),
+            ...this.senseCrateChanges(crates),
+        ];
         this.recordObservedPickupCells(observedPositions);
         this.notifySensingWaiters();
 
-        return isChangedCrates || isChangedParcels;
+        return new BeliefRevision(changes);
     }
 
     /** Monotonically identifies the last complete sensing snapshot. */
@@ -207,7 +279,11 @@ export class Beliefs {
 
     /** Revises parcel beliefs from the current sensing snapshot. */
     senseParcels(parcels: IOParcel[]): boolean {
-        let isChanged = false;
+        return this.senseParcelChanges(parcels).length > 0;
+    }
+
+    private senseParcelChanges(parcels: IOParcel[]): BeliefChange[] {
+        const changes: BeliefChange[] = [];
         const sensedParcelIds = new Set<string>();
 
         parcels.forEach((parcel: IOParcel) => {
@@ -219,10 +295,57 @@ export class Beliefs {
             if (existingParcel && reward < existingParcel.reward) {
                 this.lastRewardDecayAt = lastUpdate.getTime();
             }
+            if (reward <= 0) {
+                this.parcels.delete(id);
+                if (existingParcel && existingParcel.reward !== reward) {
+                    changes.push({
+                        type: BELIEF_CHANGE_TYPE.PARCEL_REWARD_CHANGED,
+                        parcelId: id,
+                        previousReward: existingParcel.reward,
+                        currentReward: reward,
+                    });
+                }
+                return;
+            }
             this.parcels.set(id, { id, x, y, carriedBy, reward, lastUpdate });
 
-            if (!existingParcel || this.isParcelChanged(existingParcel, parcel))
-                isChanged = true;
+            if (!existingParcel) {
+                changes.push({
+                    type: BELIEF_CHANGE_TYPE.PARCEL_DISCOVERED,
+                    parcelId: id,
+                });
+                return;
+            }
+            if (existingParcel.reward !== reward) {
+                changes.push({
+                    type: BELIEF_CHANGE_TYPE.PARCEL_REWARD_CHANGED,
+                    parcelId: id,
+                    previousReward: existingParcel.reward,
+                    currentReward: reward,
+                });
+            }
+            if (existingParcel.carriedBy !== carriedBy) {
+                changes.push({
+                    type: BELIEF_CHANGE_TYPE.PARCEL_CARRIER_CHANGED,
+                    parcelId: id,
+                    previousCarrier: existingParcel.carriedBy,
+                    currentCarrier: carriedBy,
+                });
+            }
+            if (
+                carriedBy === undefined
+                && (existingParcel.x !== x || existingParcel.y !== y)
+            ) {
+                changes.push({
+                    type: BELIEF_CHANGE_TYPE.PARCEL_MOVED,
+                    parcelId: id,
+                    previousPosition: new Position(
+                        existingParcel.x,
+                        existingParcel.y,
+                    ),
+                    currentPosition: new Position(x, y),
+                });
+            }
         });
 
         for (const [parcelId, parcel] of this.parcels) {
@@ -235,25 +358,15 @@ export class Beliefs {
                 continue;
             }
             this.parcels.delete(parcelId);
-            isChanged = true;
+            changes.push({
+                type: BELIEF_CHANGE_TYPE.PARCEL_DISAPPEARED,
+                parcelId,
+            });
         }
 
         this.updateParcelRewards();
 
-        return isChanged;
-    }
-
-    private isParcelChanged(parcel1: IOParcel, parcel2: IOParcel): boolean {
-        if (
-            parcel1.reward !== parcel2.reward
-            || parcel1.carriedBy !== parcel2.carriedBy
-        ) {
-            return true;
-        }
-        if (parcel1.carriedBy !== undefined) {
-            return false;
-        }
-        return parcel1.x !== parcel2.x || parcel1.y !== parcel2.y;
+        return changes;
     }
 
     /**
@@ -273,6 +386,11 @@ export class Beliefs {
         if (parcel && !parcel.carriedBy) {
             parcel.carriedBy = agentId;
         }
+    }
+
+    /** Whether the latest authoritative belief assigns a parcel to one agent. */
+    isParcelCarriedBy(parcelId: string, agentId: string): boolean {
+        return this.parcels.get(parcelId)?.carriedBy === agentId;
     }
 
     /** Applies complete configured decay ticks to stale parcel beliefs. */
@@ -352,7 +470,11 @@ export class Beliefs {
 
     // Sense the crates
     senseCrates(crates: IOCrate[]): boolean {
-        const currentCrateRevisionNuber = this.crateRevisionNumber;
+        return this.senseCrateChanges(crates).length > 0;
+    }
+
+    private senseCrateChanges(crates: IOCrate[]): BeliefChange[] {
+        const changes: BeliefChange[] = [];
 
         crates.forEach((crate: IOCrate) => {
             const id = crate.id;
@@ -360,17 +482,26 @@ export class Beliefs {
 
             if (!this.hasCrate(id)) {
                 this.addCrate(id, position);
+                changes.push({
+                    type: BELIEF_CHANGE_TYPE.CRATE_DISCOVERED,
+                    crateId: id,
+                    position,
+                });
             } else {
                 // If the crate has been moved then I update the position
                 if (!this.crates.get(id)?.isEqual(position)) {
                     this.crates.set(id, position);
                     this.crateRevisionNumber += 1;
+                    changes.push({
+                        type: BELIEF_CHANGE_TYPE.CRATE_MOVED,
+                        crateId: id,
+                        position,
+                    });
                 }
             }
         });
 
-        // Check if something has changed
-        return currentCrateRevisionNuber != this.crateRevisionNumber;
+        return changes;
     }
 
     // Add a crate to the map

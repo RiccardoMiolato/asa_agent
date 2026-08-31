@@ -80,16 +80,14 @@ socket.onYou((_agent: IOAgent): void => {
  * players' agent positions.
  */
 socket.onSensing((sensing: IOSensing): void => {
-    const somethingChanged = beliefs.revise(
+    const revision = beliefs.reviseWithChanges(
         sensing.parcels,
         sensing.crates,
         sensing.positions,
         sensing.agents,
     );
 
-    if (somethingChanged) {
-        agent.signalBeliefChanged();
-    }
+    agent.signalBeliefRevision(revision);
 });
 
 void agent.agent_loop()

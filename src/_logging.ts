@@ -1,13 +1,19 @@
 import type { IntentionDescription } from "./intentions.js";
 import {
-    OPTION_BRANCH_DECISION,
+    BELIEF_CHANGE_TYPE,
+    type BeliefChange,
+} from "./beliefs.js";
+import {
     OPTION_TRAVERSABILITY,
-    type OptionEvaluationEdge,
     type OptionEvaluationGraph,
     type OptionEvaluationNode,
     type OptionType,
 } from "./option_evaluator.js";
 import type { Position } from "./position.js";
+import {
+    BaseBranchAndBoundGraphWriter,
+    BranchAndBoundSvgWriter,
+} from "./_branch-and-bound-svg.js";
 
 /** One available intention and its score in the current deliberation. */
 export interface IntentionLogEntry {
@@ -75,9 +81,23 @@ export type OptionSearchOutcome =
     | "transiently-blocked"
     | "infeasible";
 
+/** Event that caused the agent to begin a new deliberation cycle. */
+export enum DELIBERATION_CYCLE_REASON {
+    AGENT_STARTED = "agent-started",
+    BELIEFS_CHANGED = "beliefs-changed",
+    MOVEMENT_SAFETY_REPLAN = "movement-safety-replan",
+    ACTION_FAILED = "action-failed",
+    OPTION_SEGMENT_COMPLETED = "option-segment-completed",
+    PLAN_COMPLETED = "plan-completed",
+    TRANSIENT_BLOCKAGE_RETRY = "transient-blockage-retry",
+}
+
 /** Complete explanation of evaluator passes and executable-plan validation. */
 export interface BranchAndBoundLog {
     readonly cycle: number;
+    readonly cycleReason: DELIBERATION_CYCLE_REASON;
+    readonly beliefChanges: readonly BeliefChange[];
+    readonly agentId: string;
     readonly position: Position;
     readonly evaluationPasses: readonly OptionEvaluationGraph[];
     readonly planningAttempts: readonly OptionPlanAttemptLog[];
@@ -135,6 +155,13 @@ export abstract class BaseAgentLogger {
 
 /** Human-readable terminal logger for complete agent decisions. */
 export class ConsoleAgentLogger extends BaseAgentLogger {
+    constructor(
+        private readonly branchAndBoundGraphWriter:
+            BaseBranchAndBoundGraphWriter = new BranchAndBoundSvgWriter(),
+    ) {
+        super();
+    }
+
     logDeliberation(deliberation: DeliberationLog): void {
         const { x, y } = deliberation.position;
         const { beliefs } = deliberation;
@@ -245,14 +272,26 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
     override logBranchAndBound(search: BranchAndBoundLog): void {
         const lines: string[] = [
             "",
-            "------------------------------------------------------------",
-            `BRANCH-AND-BOUND GRAPH | cycle=${search.cycle}`
-            + ` | start=(${search.position.x}, ${search.position.y})`
+            "",
+            "================================================================================",
+            `TURN ${search.cycle} | BRANCH-AND-BOUND`,
+            "================================================================================",
+            `START REASON | ${search.cycleReason.replace(/-/g, " ").toUpperCase()}`,
+            `STATE | start=(${search.position.x}, ${search.position.y})`
             + ` | evaluation-passes=${search.evaluationPasses.length}`,
-            "TRAVERSABILITY | DIRECT=A* route exists"
-            + " | CRATE-PLAN=optimistic crate-relaxed route; PDDL must validate"
-            + " | UNREACHABLE=no route even after relaxing crates",
         ];
+        if (search.beliefChanges.length > 0) {
+            lines.push("BELIEF CHANGES");
+            for (const change of search.beliefChanges) {
+                lines.push(
+                    `  - ${this.formatBeliefChange(change, search.agentId)}`,
+                );
+            }
+        }
+        lines.push(
+            "--------------------------------------------------------------------------------",
+            "SEARCH",
+        );
 
         search.evaluationPasses.forEach(
             (graph: OptionEvaluationGraph, index: number): void => {
@@ -263,12 +302,12 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
                     "",
                     `PASS ${index + 1}`
                     + ` | nodes=${graph.nodes.length}`
-                    + ` edges=${graph.edges.length}`
-                    + ` best-score=${graph.bestScore.toFixed(3)}`
-                    + ` completion=${graph.estimatedCompletionMilliseconds}ms`
-                    + ` | excluded-roots=${excluded}`,
+                    + ` | edges=${graph.edges.length}`,
+                    `  BEST | score=${graph.bestScore.toFixed(3)}`
+                    + ` | completion=${graph.estimatedCompletionMilliseconds}ms`,
+                    `  ROUTE | ${this.formatSelectedSequence(graph)}`,
+                    `  EXCLUDED ROOTS | ${excluded}`,
                 );
-                this.appendOptionGraph(graph, lines);
             },
         );
 
@@ -299,107 +338,81 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
             `RESULT | ${search.outcome.toUpperCase()}`
             + ` | source=${search.planSource.toUpperCase()}`
             + ` | executable-actions=${search.plannedActions}`,
-            "------------------------------------------------------------",
+            "SVG | generating one zoomable tree per evaluation pass...",
+            "--------------------------------------------------------------------------------",
+            `END TURN ${search.cycle}`,
+            "================================================================================",
+            "",
         );
         console.log(lines.join("\n"));
+        void this.branchAndBoundGraphWriter.writeGraphs(
+            search.agentId,
+            search.cycle,
+            search.evaluationPasses,
+        ).then((paths: readonly string[]): void => {
+            console.log(
+                `\nARTIFACT READY | turn=${search.cycle}`
+                + ` | branch-and-bound-svg=${paths.join(" | ")}\n`,
+            );
+        }).catch((error: unknown): void => {
+            console.error("Could not write branch-and-bound SVG:", error);
+        });
     }
 
-    private appendOptionGraph(
-        graph: OptionEvaluationGraph,
-        lines: string[],
-    ): void {
+    private formatSelectedSequence(graph: OptionEvaluationGraph): string {
         const nodesById = new Map<string, OptionEvaluationNode>(
             graph.nodes.map(
                 (node: OptionEvaluationNode): [string, OptionEvaluationNode] =>
                     [node.id, node],
             ),
         );
-        const edgesBySource = new Map<string, OptionEvaluationEdge[]>();
-        for (const edge of graph.edges) {
-            const outgoingEdges = edgesBySource.get(edge.sourceNodeId) ?? [];
-            outgoingEdges.push(edge);
-            edgesBySource.set(edge.sourceNodeId, outgoingEdges);
-        }
-        for (const outgoingEdges of edgesBySource.values()) {
-            outgoingEdges.sort(
-                (first: OptionEvaluationEdge, second: OptionEvaluationEdge): number =>
-                    first.order - second.order,
+        const actions: string[] = [];
+        let currentNode = nodesById.get(graph.rootNodeId);
+        while (currentNode?.selectedOptionIdentity) {
+            const selectedEdge = graph.edges.find(
+                (edge): boolean => edge.sourceNodeId === currentNode!.id
+                    && edge.optionIdentity === currentNode!.selectedOptionIdentity,
             );
+            if (!selectedEdge) {
+                break;
+            }
+            actions.push(selectedEdge.optionType === "pick"
+                ? `PICK ${selectedEdge.parcelId ?? "missing"}`
+                : `DROP (${selectedEdge.targetPosition.x},${selectedEdge.targetPosition.y})`);
+            currentNode = selectedEdge.targetNodeId
+                ? nodesById.get(selectedEdge.targetNodeId)
+                : undefined;
         }
-
-        const root = nodesById.get(graph.rootNodeId);
-        if (!root) {
-            lines.push("  graph root is missing");
-            return;
-        }
-        this.appendOptionNode(root, nodesById, edgesBySource, lines);
+        return actions.length > 0 ? actions.join(" -> ") : "STOP";
     }
 
-    private appendOptionNode(
-        node: OptionEvaluationNode,
-        nodesById: ReadonlyMap<string, OptionEvaluationNode>,
-        edgesBySource: ReadonlyMap<string, readonly OptionEvaluationEdge[]>,
-        lines: string[],
-    ): void {
-        const indent = "  ".repeat(node.depth + 1);
-        const carried = node.carriedParcelIds.length > 0
-            ? node.carriedParcelIds.join(",")
-            : "none";
-        const decision = node.selectedOptionIdentity ?? "STOP";
-        lines.push(
-            `${indent}STATE (${node.position.x}, ${node.position.y})`
-            + ` elapsed=${node.elapsedMilliseconds}ms`
-            + ` carried=${carried}`
-            + ` | best-next=${decision}`,
-        );
-
-        const outgoingEdges = edgesBySource.get(node.id) ?? [];
-        if (outgoingEdges.length === 0) {
-            lines.push(`${indent}  STOP | no actions remain`);
-            return;
-        }
-        if (node.selectedOptionIdentity === undefined) {
-            lines.push(
-                `${indent}  STOP [SELECTED]`
-                + " | no branch improves the zero-score stop option",
-            );
-        }
-
-        for (const edge of outgoingEdges) {
-            const edgeIndent = `${indent}  `;
-            const { x, y } = edge.targetPosition;
-            const action = edge.optionType === "pick"
-                ? `PICK parcel=${edge.parcelId ?? "missing"}`
-                : "DROP carried parcels";
-            const score = edge.branchScore === undefined
-                ? "unknown"
-                : edge.branchScore.toFixed(3);
-            const marker = edge.decision === OPTION_BRANCH_DECISION.SELECTED
-                ? "[BEST FROM THIS STATE]"
-                : edge.decision === OPTION_BRANCH_DECISION.UNREACHABLE
-                    ? "[REJECTED: UNREACHABLE]"
-                    : "[NOT SELECTED: LOWER VALUE OR SLOWER]";
-            lines.push(
-                `${edgeIndent}-> ${action} at (${x}, ${y}) ${marker}`
-                + ` | route=${this.formatTraversability(edge.traversability)}`
-                + ` distance=${edge.estimatedDistance ?? "n/a"}`
-                + ` arrival=${edge.estimatedArrivalMilliseconds ?? "n/a"}ms`
-                + ` immediate-score=${edge.immediateDeliveryScore.toFixed(3)}`
-                + ` branch-score=${score}`,
-            );
-
-            if (edge.targetNodeId === undefined) {
-                continue;
-            }
-            const targetNode = nodesById.get(edge.targetNodeId);
-            if (targetNode) {
-                this.appendOptionNode(
-                    targetNode,
-                    nodesById,
-                    edgesBySource,
-                    lines,
-                );
-            }
+    private formatBeliefChange(
+        change: BeliefChange,
+        ownAgentId: string,
+    ): string {
+        switch (change.type) {
+            case BELIEF_CHANGE_TYPE.PARCEL_DISCOVERED:
+                return `parcel ${change.parcelId} discovered`;
+            case BELIEF_CHANGE_TYPE.PARCEL_REWARD_CHANGED:
+                return `parcel ${change.parcelId} reward: `
+                    + `${change.previousReward} -> ${change.currentReward}`;
+            case BELIEF_CHANGE_TYPE.PARCEL_CARRIER_CHANGED:
+                return `parcel ${change.parcelId} carrier: `
+                    + `${change.previousCarrier ?? "free"} -> `
+                    + `${change.currentCarrier ?? "free"}`
+                    + `${change.currentCarrier === ownAgentId ? " (self)" : ""}`;
+            case BELIEF_CHANGE_TYPE.PARCEL_MOVED:
+                return `parcel ${change.parcelId} moved: `
+                    + `(${change.previousPosition.x}, ${change.previousPosition.y}) -> `
+                    + `(${change.currentPosition.x}, ${change.currentPosition.y})`;
+            case BELIEF_CHANGE_TYPE.PARCEL_DISAPPEARED:
+                return `parcel ${change.parcelId} disappeared`;
+            case BELIEF_CHANGE_TYPE.CRATE_DISCOVERED:
+                return `crate ${change.crateId} discovered at `
+                    + `(${change.position.x}, ${change.position.y})`;
+            case BELIEF_CHANGE_TYPE.CRATE_MOVED:
+                return `crate ${change.crateId} moved to `
+                    + `(${change.position.x}, ${change.position.y})`;
         }
     }
 

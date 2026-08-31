@@ -147,6 +147,9 @@ export class OptionEvaluator {
     ): OptionEvaluation {
         const optionSet: Set<Option> = new Set();
         const carriedParcelIds: string[] = [];
+        const deliveryCellCandidates = this.selectDeliveryCellCandidates(
+            context,
+        );
 
         context.parcels.forEach((parcel: Parcel) => {
             if(parcel.carriedBy === context.agentId) {
@@ -166,7 +169,12 @@ export class OptionEvaluator {
         });
 
         if(carriedParcelIds.length > 0){
-            for (const deliveryCell of context.deliveringCells) {
+            const rootDeliveryCellCandidates =
+                this.selectDeliveryCellCandidates(
+                    context,
+                    excludedRootOptionIdentities,
+                );
+            for (const deliveryCell of rootDeliveryCellCandidates) {
                 this.addRootOption(
                     optionSet,
                     new Option("drop", deliveryCell),
@@ -188,6 +196,7 @@ export class OptionEvaluator {
             0,
             nodes,
             edges,
+            deliveryCellCandidates,
         );
 
         return {
@@ -226,6 +235,7 @@ export class OptionEvaluator {
         depth: number,
         nodes: OptionEvaluationNode[],
         edges: OptionEvaluationEdge[],
+        deliveryCellCandidates: readonly Position[],
     ): EvaluationResult {
         let bestResult: EvaluationResult = {
             bestSequence: [],
@@ -284,7 +294,7 @@ export class OptionEvaluator {
                     (candidate: Option): boolean => candidate.getType() === "drop",
                 );
                 if (!hasDropOption) {
-                    for (const deliveryCell of context.deliveringCells) {
+                    for (const deliveryCell of deliveryCellCandidates) {
                         newOptionSet.add(new Option("drop", deliveryCell));
                     }
                 }
@@ -313,6 +323,7 @@ export class OptionEvaluator {
                 depth + 1,
                 nodes,
                 edges,
+                deliveryCellCandidates,
             );
 
             const totalScore = scoreForThisOption + nextResult.totalScore;
@@ -369,6 +380,102 @@ export class OptionEvaluator {
         });
 
         return bestResult;
+    }
+
+    /**
+     * Keeps the nearest terminal cell and the cheapest delivery detour from the
+     * present cell toward every known free parcel.
+     */
+    private selectDeliveryCellCandidates(
+        context: IntentionContext,
+        excludedRootOptionIdentities?: ReadonlySet<string>,
+    ): readonly Position[] {
+        const distancesFromPresent = new Map<Position, number>();
+        for (const deliveryCell of context.deliveringCells) {
+            if (
+                excludedRootOptionIdentities?.has(
+                    `drop:${deliveryCell.x},${deliveryCell.y}`,
+                )
+            ) {
+                continue;
+            }
+
+            const assessment = this.assessTraversability(
+                context,
+                context.agentPosition,
+                deliveryCell,
+            );
+            if (assessment.distance !== undefined) {
+                distancesFromPresent.set(deliveryCell, assessment.distance);
+            }
+        }
+
+        const nearestDeliveryCell = this.minimumDistanceCell(
+            distancesFromPresent,
+        );
+        if (nearestDeliveryCell === undefined) {
+            return [];
+        }
+
+        const candidates = new Map<string, Position>();
+        this.addDeliveryCellCandidate(candidates, nearestDeliveryCell);
+
+        for (const parcel of context.parcels.values()) {
+            if (parcel.carriedBy) {
+                continue;
+            }
+
+            const pickupPosition = new Position(parcel.x, parcel.y);
+            let bestDeliveryCell: Position | undefined;
+            let bestDetourDistance = Infinity;
+            for (const [deliveryCell, distanceFromPresent]
+                of distancesFromPresent) {
+                const deliveryToPickup = this.assessTraversability(
+                    context,
+                    deliveryCell,
+                    pickupPosition,
+                ).distance;
+                if (deliveryToPickup === undefined) {
+                    continue;
+                }
+
+                const detourDistance = distanceFromPresent + deliveryToPickup;
+                if (detourDistance < bestDetourDistance) {
+                    bestDeliveryCell = deliveryCell;
+                    bestDetourDistance = detourDistance;
+                }
+            }
+
+            if (bestDeliveryCell !== undefined) {
+                this.addDeliveryCellCandidate(candidates, bestDeliveryCell);
+            }
+        }
+
+        return [...candidates.values()];
+    }
+
+    private minimumDistanceCell(
+        distances: ReadonlyMap<Position, number>,
+    ): Position | undefined {
+        let closestCell: Position | undefined;
+        let closestDistance = Infinity;
+        for (const [cell, distance] of distances) {
+            if (distance < closestDistance) {
+                closestCell = cell;
+                closestDistance = distance;
+            }
+        }
+        return closestCell;
+    }
+
+    private addDeliveryCellCandidate(
+        candidates: Map<string, Position>,
+        deliveryCell: Position,
+    ): void {
+        candidates.set(
+            `${deliveryCell.x},${deliveryCell.y}`,
+            deliveryCell,
+        );
     }
 
     /** Separates guaranteed A* reachability from optimistic crate-relaxed reachability. */

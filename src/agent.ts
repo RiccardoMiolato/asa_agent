@@ -2,13 +2,19 @@ import {
     type BaseAgentLogger,
     type BeliefLogSummary,
     type BranchAndBoundLog,
+    DELIBERATION_CYCLE_REASON,
     type IntentionLogEntry,
     type OptionPlanAttemptLog,
     type OptionPlanMethod,
     type OptionSearchOutcome,
 } from "./_logging.js";
 import type { BasePathfinder } from "./astar.js";
-import type { Beliefs } from "./beliefs.js";
+import {
+    BELIEF_CHANGE_TYPE,
+    type BeliefChange,
+    type BeliefRevision,
+    type Beliefs,
+} from "./beliefs.js";
 import type { IntentionGenerator } from "./desires.js";
 import {
     Intention,
@@ -18,7 +24,12 @@ import {
     type PickupClusterSnapshot,
 } from "./intentions.js";
 import { GameMap } from "./map.js";
-import { Action, MovementAction, type ActionFactory } from "./move.js";
+import {
+    Action,
+    MovementAction,
+    PickUp,
+    type ActionFactory,
+} from "./move.js";
 import { ConservativeMovementGuard } from "./movement-safety.js";
 import {
     OPTION_TRAVERSABILITY,
@@ -86,6 +97,7 @@ export class Agent {
     private currentIntention: Intention;
     private currentOptionsList: Option[];
     private isBeliefChanged: boolean;
+    private pendingBeliefChanges: BeliefChange[];
     private readonly optionEvaluator: OptionEvaluator;
     private readonly plan: Plan;
     private planOwner: Intention | undefined;
@@ -110,6 +122,7 @@ export class Agent {
         this.score = undefined;
         this.intentions = [];
         this.isBeliefChanged = false;
+        this.pendingBeliefChanges = [];
         this.currentOptionsList = [];
         this.currentIntention = new SearchIntention();
         this.plan = new Plan();
@@ -188,6 +201,7 @@ export class Agent {
         await new Promise<void>((resolve) => setTimeout(resolve, 1000));
 
         let deliberateImmediately = false;
+        let nextCycleReason = DELIBERATION_CYCLE_REASON.AGENT_STARTED;
         while (true) {
             if (!deliberateImmediately) {
                 await new Promise<void>((resolve) =>
@@ -195,6 +209,12 @@ export class Agent {
                 );
             }
             deliberateImmediately = false;
+            const cycleReason = nextCycleReason;
+            nextCycleReason = DELIBERATION_CYCLE_REASON.PLAN_COMPLETED;
+            const cycleBeliefChanges = cycleReason
+                === DELIBERATION_CYCLE_REASON.BELIEFS_CHANGED
+                ? this.consumePendingBeliefChanges()
+                : [];
 
             await this.waitForGridPosition();
 
@@ -221,6 +241,8 @@ export class Agent {
                 context,
                 optionSearchTrace,
                 planStatus,
+                cycleReason,
+                cycleBeliefChanges,
             );
 
             /**
@@ -249,6 +271,8 @@ export class Agent {
              */
 
             if (planStatus === PLAN_BUILD_STATUS.TRANSIENTLY_BLOCKED) {
+                nextCycleReason =
+                    DELIBERATION_CYCLE_REASON.TRANSIENT_BLOCKAGE_RETRY;
                 continue;
             }
             if (planStatus === PLAN_BUILD_STATUS.INFEASIBLE) {
@@ -265,6 +289,8 @@ export class Agent {
                     deliberateImmediately = true;
                     planInterrupted = true;
                     this.isBeliefChanged = false;
+                    nextCycleReason =
+                        DELIBERATION_CYCLE_REASON.BELIEFS_CHANGED;
                     break;
                 }
 
@@ -276,6 +302,8 @@ export class Agent {
                     deliberateImmediately = true;
                     planInterrupted = true;
                     this.isBeliefChanged = false;
+                    nextCycleReason =
+                        DELIBERATION_CYCLE_REASON.BELIEFS_CHANGED;
                     break;
                 }
 
@@ -295,6 +323,8 @@ export class Agent {
                         this.addTemporaryBlockedCell(clearance.blockedCell);
                         deliberateImmediately = true;
                         planInterrupted = true;
+                        nextCycleReason =
+                            DELIBERATION_CYCLE_REASON.MOVEMENT_SAFETY_REPLAN;
                         break;
                     }
                 }
@@ -309,6 +339,8 @@ export class Agent {
                     }
                     deliberateImmediately = true;
                     planInterrupted = true;
+                    nextCycleReason =
+                        DELIBERATION_CYCLE_REASON.ACTION_FAILED;
                     break;
                 }
                 this.plan.popAction();
@@ -317,8 +349,17 @@ export class Agent {
                 }
 
                 if (this.plan.isEmpty() && this.currentOptionsList.length > 0) {
+                    if (
+                        nextAction instanceof PickUp
+                        && !this.isBeliefChanged
+                        && await this.continueSelectedOptionSequence()
+                    ) {
+                        continue;
+                    }
                     this.currentOptionsList = [];
                     deliberateImmediately = true;
+                    nextCycleReason =
+                        DELIBERATION_CYCLE_REASON.OPTION_SEGMENT_COMPLETED;
                 }
             }
 
@@ -498,9 +539,14 @@ export class Agent {
         context: IntentionContext,
         trace: OptionSearchTrace,
         planStatus: PLAN_BUILD_STATUS,
+        cycleReason: DELIBERATION_CYCLE_REASON,
+        beliefChanges: readonly BeliefChange[],
     ): void {
         const log: BranchAndBoundLog = {
             cycle: this.deliberationCycle,
+            cycleReason,
+            beliefChanges,
+            agentId: this.id,
             position: context.agentPosition,
             evaluationPasses: trace.evaluationPasses,
             planningAttempts: trace.planningAttempts,
@@ -575,6 +621,29 @@ export class Agent {
     ): Promise<Action[] | undefined> {
         const result = await this.buildOptionActionResult(option, context);
         return result.result === "planned" ? result.actions : undefined;
+    }
+
+    /** Continues the evaluated route after a pickup without rerunning the evaluator. */
+    private async continueSelectedOptionSequence(
+        context: IntentionContext = this.getIntentionContext(),
+    ): Promise<boolean> {
+        const nextOption = this.currentOptionsList[0];
+        if (nextOption === undefined) {
+            return false;
+        }
+
+        this.pathfinder.clearPathLengthCache();
+        const actionBuild = await this.buildOptionActionResult(
+            nextOption,
+            context,
+        );
+        if (actionBuild.result !== "planned") {
+            return false;
+        }
+
+        this.currentOptionsList.shift();
+        this.replacePlan(actionBuild.actions);
+        return true;
     }
 
     /** Builds an option while retaining planner metadata for explainability. */
@@ -881,5 +950,46 @@ export class Agent {
 
     signalBeliefChanged(): void {
         this.isBeliefChanged = true;
+    }
+
+    /** Signals only changes that can invalidate the active evaluated route. */
+    signalBeliefRevision(revision: BeliefRevision): void {
+        const relevantChanges = revision.changes.filter(
+            (change: BeliefChange): boolean =>
+                this.isPlanningRelevantBeliefChange(change),
+        );
+        if (relevantChanges.length === 0) {
+            return;
+        }
+
+        if (
+            relevantChanges.every(
+                (change: BeliefChange): boolean =>
+                    this.isOwnPickupCarrierChange(change),
+            )
+        ) {
+            return;
+        }
+
+        this.pendingBeliefChanges.push(...relevantChanges);
+        this.signalBeliefChanged();
+    }
+
+    /** Reward decay and expiration are already forecast by the evaluator. */
+    private isPlanningRelevantBeliefChange(change: BeliefChange): boolean {
+        return change.type !== BELIEF_CHANGE_TYPE.PARCEL_REWARD_CHANGED
+            && change.type !== BELIEF_CHANGE_TYPE.PARCEL_DISAPPEARED;
+    }
+
+    private consumePendingBeliefChanges(): BeliefChange[] {
+        const changes = this.pendingBeliefChanges;
+        this.pendingBeliefChanges = [];
+        return changes;
+    }
+
+    private isOwnPickupCarrierChange(change: BeliefChange): boolean {
+        return change.type === BELIEF_CHANGE_TYPE.PARCEL_CARRIER_CHANGED
+            && change.previousCarrier === undefined
+            && change.currentCarrier === this.id;
     }
 }

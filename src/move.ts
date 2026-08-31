@@ -86,16 +86,33 @@ export class PickUp extends Action {
     }
 
     async execute(): Promise<boolean> {
+        if (this.beliefs.isParcelCarriedBy(this.parcelId, this.agentId)) {
+            return true;
+        }
+
         const pickedParcels = await this.client.emitPickup();
         const pickedTarget = pickedParcels.some(
             (parcel: { id: string }): boolean => parcel.id === this.parcelId,
         );
-        if (!pickedTarget) {
-            return false;
+        if (pickedTarget) {
+            this.beliefs.markParcelCarried(this.parcelId, this.agentId);
+            return true;
         }
 
-        this.beliefs.markParcelCarried(this.parcelId, this.agentId);
-        return true;
+        if (this.beliefs.isParcelCarriedBy(this.parcelId, this.agentId)) {
+            return true;
+        }
+
+        const sensingRevisionAfterAcknowledgement =
+            this.beliefs.currentSensingRevision();
+        await this.beliefs.waitForSensingAfterOrTimeout(
+            sensingRevisionAfterAcknowledgement,
+            Math.max(50, this.beliefs.frame_duration * 2),
+        );
+        return this.beliefs.isParcelCarriedBy(
+            this.parcelId,
+            this.agentId,
+        );
     }
 }
 
