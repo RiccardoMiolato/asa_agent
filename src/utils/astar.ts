@@ -1,7 +1,7 @@
 import { Heap } from "heap-js";
-import { IntentionContext } from "./intentions.js";
+import { IntentionContext } from "../bdi/intentions.js";
 import { CoordinateOffset, Direction } from "./map.js";
-import type { Action, ActionFactory } from "./move.js";
+import { Action, ActionFactory } from "./move.js";
 import { Position } from "./position.js";
 
 /** Executable movements together with every grid position visited by them. */

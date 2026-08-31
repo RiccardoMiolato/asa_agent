@@ -1,10 +1,10 @@
-import type { IOSensedAgent } from "../types/IOSensing.js";
+import type { IOSensedAgent } from "../../types/IOSensing.js";
+import type { Beliefs } from "../bdi/beliefs.js";
 import type {
     BaseAgentLogger,
     MovementSafetyEvent,
     MovementSafetyReason,
 } from "./_logging.js";
-import type { Beliefs } from "./beliefs.js";
 import { Position } from "./position.js";
 
 interface ObservedMovement {

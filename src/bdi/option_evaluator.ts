@@ -1,7 +1,7 @@
+import { RewardDecayEstimator } from "../utils/_reward-decay.js";
+import { Position } from "../utils/position.js";
 import { Parcel } from "./beliefs.js";
 import { IntentionContext } from "./intentions.js";
-import { Position } from "./position.js";
-import { RewardDecayEstimator } from "./_reward-decay.js";
 
 export type OptionType = "pick" | "drop";
 

@@ -1,4 +1,4 @@
-import type { IntentionDescription } from "./intentions.js";
+import type { IntentionDescription } from "../bdi/intentions.js";
 import {
     OPTION_BRANCH_DECISION,
     OPTION_TRAVERSABILITY,
@@ -6,7 +6,7 @@ import {
     type OptionEvaluationGraph,
     type OptionEvaluationNode,
     type OptionType,
-} from "./option_evaluator.js";
+} from "../bdi/option_evaluator.js";
 import type { Position } from "./position.js";
 
 /** One available intention and its score in the current deliberation. */

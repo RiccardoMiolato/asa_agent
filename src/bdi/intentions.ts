@@ -1,9 +1,9 @@
-import type { BasePathfinder } from "./astar.js";
+import { PDDLGoal } from "../pddl/pddlPlanner.js";
+import { RewardDecayEstimator } from "../utils/_reward-decay.js";
+import { BasePathfinder } from "../utils/astar.js";
+import { Action, ActionFactory } from "../utils/move.js";
+import { Position } from "../utils/position.js";
 import type { Parcel } from "./beliefs.js";
-import type { Action, ActionFactory } from "./move.js";
-import { PDDLGoal } from "./pddl/pddlPlanner.js";
-import { Position } from "./position.js";
-import { RewardDecayEstimator } from "./_reward-decay.js";
 
 /** Current world state and services available to an intention. */
 export interface IntentionContext {

@@ -1,3 +1,4 @@
+import { Position } from "../utils/position.js";
 import type { Beliefs } from "./beliefs.js";
 import {
     DeliverParcelIntention,
@@ -6,7 +7,6 @@ import {
     type PickupClusterSnapshot,
     SearchIntention,
 } from "./intentions.js";
-import { Position } from "./position.js";
 
 export interface AgentState {
     readonly id: string;

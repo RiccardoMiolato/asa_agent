@@ -1,12 +1,12 @@
-import type { IOClockEvent } from "../types/IOClockEvent.js";
-import type { IOConfig } from "../types/IOConfig.js";
-import type { IOCrate } from "../types/IOCrate.js";
-import type { IOParcel } from "../types/IOParcel.js";
+import type { IOClockEvent } from "../../types/IOClockEvent.js";
+import type { IOConfig } from "../../types/IOConfig.js";
+import type { IOCrate } from "../../types/IOCrate.js";
+import type { IOParcel } from "../../types/IOParcel.js";
 import type {
     IOSensedAgent,
     IOSensedPosition,
-} from "../types/IOSensing.js";
-import { Position } from "./position.js";
+} from "../../types/IOSensing.js";
+import { Position } from "../utils/position.js";
 
 export interface Parcel extends IOParcel {
     lastUpdate: Date;

@@ -1,12 +1,13 @@
 import { DjsConnect, type DjsClientSocket } from "@unitn-asa/deliveroo-js-sdk/client";
 import { GhostMapServer } from './src/_ghost-map-server.js';
 import { AgentGhostMapSnapshotProvider } from './src/_ghost-map-snapshot.js';
-import { ConsoleAgentLogger } from './src/_logging.js';
-import { Agent, AGENT_EXIT_REASON } from './src/agent.js';
-import { AStarPathfinder } from './src/astar.js';
-import { Beliefs } from './src/beliefs.js';
-import { IntentionGenerator } from './src/desires.js';
-import { ActionFactory } from './src/move.js';
+import { Agent, AGENT_EXIT_REASON } from './src/bdi/agent.js';
+import { Beliefs } from './src/bdi/beliefs.js';
+import { IntentionGenerator } from './src/bdi/desires.js';
+import { LLMAgent } from "./src/llm/LLMAgent.js";
+import { ConsoleAgentLogger } from './src/utils/_logging.js';
+import { AStarPathfinder } from "./src/utils/astar.js";
+import { ActionFactory } from "./src/utils/move.js";
 import type { IOAgent } from './types/IOAgent.js';
 import { IOConfig } from "./types/IOConfig.js";
 import type { IOSensing } from './types/IOSensing.js';
@@ -14,11 +15,14 @@ import type { IOSensing } from './types/IOSensing.js';
 const host = process.env.HOST || "http://localhost:8080";
 const token = process.env.TOKEN || "";
 const agent_name = process.env.NAME || "cardo";
+const llmHost = process.env.LLM_HOST || "http://localhost:8080";
+const llmToken = process.env.LLM_TOKEN || "";
+const llmAgentName = process.env.LLM_NAME || "cardo";
 const ghostMapPort = Number(process.env.GHOST_MAP_PORT ?? "8081");
 const activeLogging = process.env.ACTIVE_LOGGING === "true";
 
 console.log("Connecting...");
-const socket: DjsClientSocket = DjsConnect(host, token, agent_name);
+const socket: DjsClientSocket = DjsConnect(host, llmToken, agent_name);
 const beliefs = new Beliefs();
 const actionFactory = new ActionFactory(socket, beliefs);
 const pathfinder = new AStarPathfinder(actionFactory);
@@ -34,6 +38,8 @@ const ghostMapServer = new GhostMapServer(
     new AgentGhostMapSnapshotProvider(agent, beliefs, agent_name),
     ghostMapPort,
 );
+
+const llmAgent = new LLMAgent();
 
 void ghostMapServer.start()
     .then((): void => {
@@ -93,9 +99,29 @@ socket.onSensing((sensing: IOSensing): void => {
     }
 });
 
-socket.onMsg(msg => {
-    console.log(msg);
-})
+socket.onMsg((senderId: string, senderName: string, message: any) => {
+    llmAgent.addPendingMessage(message);
+});
+
+void llmAgent.agent_loop()
+    .then(async (exitReason: AGENT_EXIT_REASON): Promise<void> => {
+        switch (exitReason) {
+            case AGENT_EXIT_REASON.NO_FEASIBLE_PLAN:
+                console.error("No feasible plan exists for any intention. Quitting the game.");
+                socket.disconnect();
+                await ghostMapServer.stop();
+                return;
+        }
+    })
+    .catch(async (error: unknown): Promise<void> => {
+        console.error("Agent loop crashed:", error);
+        socket.disconnect();
+        try {
+            await ghostMapServer.stop();
+        } finally {
+            process.exitCode = 1;
+        }
+    });
 
 void agent.agent_loop()
     .then(async (exitReason: AGENT_EXIT_REASON): Promise<void> => {

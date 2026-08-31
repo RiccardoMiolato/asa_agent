@@ -1,4 +1,4 @@
-import type { Beliefs } from "./beliefs.js";
+import type { Beliefs } from "./bdi logic/beliefs.js";
 import { Position } from "./position.js";
 
 export type MoveDirection = "up" | "right" | "left" | "down";

@@ -1,4 +1,13 @@
 import {
+    Intention,
+    SearchIntention,
+    type IntentionContext,
+    type IntentionDescription,
+    type PickupClusterSnapshot,
+} from "../intentions.js";
+import { PDDLPlanner } from "../pddl/pddlPlanner.js";
+import { Plan } from "../plan.js";
+import {
     type BaseAgentLogger,
     type BeliefLogSummary,
     type BranchAndBoundLog,
@@ -6,29 +15,15 @@ import {
     type OptionPlanAttemptLog,
     type OptionPlanMethod,
     type OptionSearchOutcome,
-} from "./_logging.js";
-import type { BasePathfinder } from "./astar.js";
+} from "../utils/_logging.js";
+import type { BasePathfinder } from "../utils/astar.js";
+import { GameMap } from "../utils/map.js";
+import { Action, ActionFactory, MovementAction } from "../utils/move.js";
+import { ConservativeMovementGuard } from "../utils/movement-safety.js";
+import { Position } from "../utils/position.js";
 import type { Beliefs } from "./beliefs.js";
 import type { IntentionGenerator } from "./desires.js";
-import {
-    Intention,
-    SearchIntention,
-    type IntentionContext,
-    type IntentionDescription,
-    type PickupClusterSnapshot,
-} from "./intentions.js";
-import { GameMap } from "./map.js";
-import { Action, MovementAction, type ActionFactory } from "./move.js";
-import { ConservativeMovementGuard } from "./movement-safety.js";
-import {
-    OPTION_TRAVERSABILITY,
-    Option,
-    OptionEvaluator,
-    type OptionEvaluationGraph,
-} from "./option_evaluator.js";
-import { PDDLPlanner } from "./pddl/pddlPlanner.js";
-import { Plan } from "./plan.js";
-import { Position } from "./position.js";
+import { Option, OPTION_TRAVERSABILITY, OptionEvaluationGraph, OptionEvaluator } from "./option_evaluator.js";
 
 interface ScoredIntention {
     readonly intention: Intention;
