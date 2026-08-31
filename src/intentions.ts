@@ -3,6 +3,7 @@ import type { Parcel } from "./beliefs.js";
 import type { Action, ActionFactory } from "./move.js";
 import { PDDLGoal } from "./pddl/pddlPlanner.js";
 import { Position } from "./position.js";
+import { RewardDecayEstimator } from "./_reward-decay.js";
 
 /** Current world state and services available to an intention. */
 export interface IntentionContext {
@@ -135,35 +136,18 @@ export abstract class RewardIntention extends Intention {
         rewardDecayInterval: number | undefined,
         millisecondsUntilNextDecay: number | undefined,
     ): number {
-        if (rewardDecayInterval === undefined) {
-            return reward;
-        }
-
-        const executionMilliseconds = (
-            movementCount * 2 + extraWaitCount
-        ) * movementDuration + movementCount * frameDuration;
-        const decayTicks = this.estimateDecayTicks(
+        const executionMilliseconds =
+            RewardDecayEstimator.actionSequenceDurationMilliseconds(
+                movementCount,
+                extraWaitCount,
+                movementDuration,
+                frameDuration,
+            );
+        return RewardDecayEstimator.remainingReward(
+            reward,
             executionMilliseconds,
             rewardDecayInterval,
             millisecondsUntilNextDecay,
-        );
-        return Math.max(0, reward - decayTicks);
-    }
-
-    private estimateDecayTicks(
-        executionMilliseconds: number,
-        rewardDecayInterval: number,
-        millisecondsUntilNextDecay: number | undefined,
-    ): number {
-        if (millisecondsUntilNextDecay === undefined) {
-            return Math.round(executionMilliseconds / rewardDecayInterval);
-        }
-        if (executionMilliseconds < millisecondsUntilNextDecay) {
-            return 0;
-        }
-        return 1 + Math.floor(
-            (executionMilliseconds - millisecondsUntilNextDecay)
-                / rewardDecayInterval,
         );
     }
 }

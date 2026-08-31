@@ -39,3 +39,4 @@ Thumbs.db
 # Agent modules
 AGENTS.md
 report.tex
+*.test.ts

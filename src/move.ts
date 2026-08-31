@@ -86,8 +86,15 @@ export class PickUp extends Action {
     }
 
     async execute(): Promise<boolean> {
+        const pickedParcels = await this.client.emitPickup();
+        const pickedTarget = pickedParcels.some(
+            (parcel: { id: string }): boolean => parcel.id === this.parcelId,
+        );
+        if (!pickedTarget) {
+            return false;
+        }
+
         this.beliefs.markParcelCarried(this.parcelId, this.agentId);
-        await this.client.emitPickup();
         return true;
     }
 }

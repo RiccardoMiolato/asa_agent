@@ -1,7 +1,11 @@
 import {
     type BaseAgentLogger,
     type BeliefLogSummary,
+    type BranchAndBoundLog,
     type IntentionLogEntry,
+    type OptionPlanAttemptLog,
+    type OptionPlanMethod,
+    type OptionSearchOutcome,
 } from "./_logging.js";
 import type { BasePathfinder } from "./astar.js";
 import type { Beliefs } from "./beliefs.js";
@@ -13,9 +17,15 @@ import {
     type IntentionDescription,
     type PickupClusterSnapshot,
 } from "./intentions.js";
+import { GameMap } from "./map.js";
 import { Action, MovementAction, type ActionFactory } from "./move.js";
 import { ConservativeMovementGuard } from "./movement-safety.js";
-import { Option, OptionEvaluator } from "./option_evaluator.js";
+import {
+    OPTION_TRAVERSABILITY,
+    Option,
+    OptionEvaluator,
+    type OptionEvaluationGraph,
+} from "./option_evaluator.js";
 import { PDDLPlanner } from "./pddl/pddlPlanner.js";
 import { Plan } from "./plan.js";
 import { Position } from "./position.js";
@@ -30,6 +40,28 @@ interface TemporaryBlockedCell {
     readonly position: Position;
     readonly protectedThroughCycle: number;
 }
+
+interface OptionSearchTrace {
+    readonly evaluationPasses: OptionEvaluationGraph[];
+    readonly planningAttempts: OptionPlanAttemptLog[];
+}
+
+interface NavigationBuildResult {
+    readonly actions: Action[];
+    readonly planner: OptionPlanMethod;
+}
+
+type OptionActionBuildResult =
+    | {
+        readonly result: "planned";
+        readonly actions: Action[];
+        readonly planner: OptionPlanMethod;
+    }
+    | {
+        readonly result: "rejected";
+        readonly reason: "no-executable-route" | "missing-parcel-id";
+        readonly planner: OptionPlanMethod;
+    };
 
 /** Terminal reasons for which the otherwise continuous agent loop can stop. */
 export enum AGENT_EXIT_REASON {
@@ -56,6 +88,7 @@ export class Agent {
     private isBeliefChanged: boolean;
     private readonly optionEvaluator: OptionEvaluator;
     private readonly plan: Plan;
+    private planOwner: Intention | undefined;
     private readonly movementGuard: ConservativeMovementGuard;
     private readonly temporarilyBlockedCells: Map<string, TemporaryBlockedCell>;
     private readonly gridPositionWaiters: Set<() => void>;
@@ -70,6 +103,7 @@ export class Agent {
         private readonly pathfinder: BasePathfinder,
         private readonly actionFactory: ActionFactory,
         private readonly logger: BaseAgentLogger,
+        pddlPlanner?: PDDLPlanner,
     ) {
         this.id = "";
         this.position = new Position(0, 0);
@@ -79,6 +113,7 @@ export class Agent {
         this.currentOptionsList = [];
         this.currentIntention = new SearchIntention();
         this.plan = new Plan();
+        this.planOwner = undefined;
         this.movementGuard = new ConservativeMovementGuard(
             this.beliefs,
             this.logger,
@@ -87,7 +122,7 @@ export class Agent {
         this.gridPositionWaiters = new Set<() => void>();
         this.hasAuthoritativePosition = false;
         this.deliberationCycle = 0;
-        this.pddlPlanner = new PDDLPlanner(this.actionFactory);
+        this.pddlPlanner = pddlPlanner ?? new PDDLPlanner(this.actionFactory);
         this.optionEvaluator = new OptionEvaluator();
     }
 
@@ -166,12 +201,27 @@ export class Agent {
             this.deliberationCycle += 1;
             this.refreshTemporaryBlockedCells();
             this.beliefs.updateParcelRewards();
+            this.pathfinder.clearPathLengthCache();
             const context = this.getIntentionContext();
 
-            this.currentOptionsList = this.optionEvaluator.evaluate(context);
+            const initialOptionEvaluation =
+                this.optionEvaluator.evaluateWithGraph(context);
+            this.currentOptionsList = initialOptionEvaluation.bestSequence;
+            const optionSearchTrace: OptionSearchTrace = {
+                evaluationPasses: [initialOptionEvaluation.graph],
+                planningAttempts: [],
+            };
 
             // const evaluatedOptions = this.filterOptions(context);
-            const planStatus = await this.buildPlan(context);
+            const planStatus = await this.buildPlanWithTrace(
+                context,
+                optionSearchTrace,
+            );
+            this.logOptionSearch(
+                context,
+                optionSearchTrace,
+                planStatus,
+            );
 
             /**
              * const options = this.intentionGenerator.generate({
@@ -222,6 +272,13 @@ export class Agent {
                     setTimeout(resolve, this.beliefs.movement_duration)
                 );
 
+                if (this.isBeliefChanged) {
+                    deliberateImmediately = true;
+                    planInterrupted = true;
+                    this.isBeliefChanged = false;
+                    break;
+                }
+
                 const nextAction = this.plan.topAction();
                 if (!nextAction) {
                     break;
@@ -259,13 +316,17 @@ export class Agent {
                     planMoved = true;
                 }
 
-                if(this.plan.isEmpty() && this.currentOptionsList.length > 0) {
-                    await this.buildPlan(this.getIntentionContext());
+                if (this.plan.isEmpty() && this.currentOptionsList.length > 0) {
+                    this.currentOptionsList = [];
+                    deliberateImmediately = true;
                 }
             }
 
+            if (planInterrupted) {
+                this.planOwner = undefined;
+            }
             if (!planInterrupted && this.plan.isEmpty()) {
-                this.currentIntention.onPlanCompleted(this.getIntentionContext());
+                this.completePlan(this.getIntentionContext());
                 if (planMoved) {
                     this.temporarilyBlockedCells.clear();
                 }
@@ -354,7 +415,7 @@ export class Agent {
             infeasibleIntentionFound = true;
         }
 
-        this.plan.newPlan([]);
+        this.replacePlan([]);
         if (this.temporarilyBlockedCells.size > 0) {
             if (satisfiedIntention) {
                 this.currentIntention = satisfiedIntention;
@@ -372,61 +433,322 @@ export class Agent {
     async buildPlan(
         context: IntentionContext = this.getIntentionContext(),
     ): Promise<PLAN_BUILD_STATUS> {
-        const bestOption = this.currentOptionsList.shift();
+        return this.buildPlanWithTrace(context);
+    }
 
-        if (!bestOption) {
-            // No viable option found, fall back to search
-            const searchActions = this.buildSearchActions(context);
-            this.plan.newPlan(searchActions);
-            return searchActions.length > 0 ? PLAN_BUILD_STATUS.PLANNED : PLAN_BUILD_STATUS.INFEASIBLE;
+    /** Builds a plan and optionally records each evaluator and planner decision. */
+    private async buildPlanWithTrace(
+        context: IntentionContext,
+        optionSearchTrace?: OptionSearchTrace,
+    ): Promise<PLAN_BUILD_STATUS> {
+        const rejectedRootOptionIdentities = new Set<string>();
+
+        while (this.currentOptionsList.length > 0) {
+            const bestOption = this.currentOptionsList[0];
+            const actionBuild = await this.buildOptionActionResult(
+                bestOption,
+                context,
+            );
+            const estimatedTraversability = optionSearchTrace
+                ? this.findRootTraversability(
+                    optionSearchTrace.evaluationPasses[
+                        optionSearchTrace.evaluationPasses.length - 1
+                    ],
+                    bestOption.identity(),
+                )
+                : undefined;
+            optionSearchTrace?.planningAttempts.push({
+                optionIdentity: bestOption.identity(),
+                optionType: bestOption.getType(),
+                parcelId: bestOption.getParcelId(),
+                targetPosition: bestOption.getTargetCell(),
+                estimatedTraversability,
+                result: actionBuild.result,
+                planner: actionBuild.planner,
+                plannedActions: actionBuild.result === "planned"
+                    ? actionBuild.actions.length
+                    : 0,
+                reason: actionBuild.result === "planned"
+                    ? "route-found"
+                    : actionBuild.reason,
+            });
+
+            if (actionBuild.result === "planned") {
+                this.currentOptionsList.shift();
+                this.replacePlan(actionBuild.actions);
+                return PLAN_BUILD_STATUS.PLANNED;
+            }
+
+            rejectedRootOptionIdentities.add(bestOption.identity());
+            const fallbackEvaluation = this.optionEvaluator.evaluateWithGraph(
+                context,
+                rejectedRootOptionIdentities,
+            );
+            this.currentOptionsList = fallbackEvaluation.bestSequence;
+            optionSearchTrace?.evaluationPasses.push(fallbackEvaluation.graph);
         }
 
-        const actions = this.buildActionsFromOption(bestOption, context);
+        return this.resolveTemporaryBlockageStatus(
+            await this.buildSearchPlan(context),
+        );
+    }
 
-        if (actions.length > 0) {
-            this.plan.newPlan(actions);
+    /** Emits the evaluator graph together with real A-star/PDDL validation outcomes. */
+    private logOptionSearch(
+        context: IntentionContext,
+        trace: OptionSearchTrace,
+        planStatus: PLAN_BUILD_STATUS,
+    ): void {
+        const log: BranchAndBoundLog = {
+            cycle: this.deliberationCycle,
+            position: context.agentPosition,
+            evaluationPasses: trace.evaluationPasses,
+            planningAttempts: trace.planningAttempts,
+            outcome: this.optionSearchOutcome(planStatus),
+            planSource: this.optionPlanSource(trace, planStatus),
+            plannedActions: this.plan.size(),
+        };
+        this.logger.logBranchAndBound(log);
+    }
+
+    private optionSearchOutcome(
+        planStatus: PLAN_BUILD_STATUS,
+    ): OptionSearchOutcome {
+        switch (planStatus) {
+            case PLAN_BUILD_STATUS.PLANNED:
+                return "planned";
+            case PLAN_BUILD_STATUS.SATISFIED:
+                return "satisfied";
+            case PLAN_BUILD_STATUS.TRANSIENTLY_BLOCKED:
+                return "transiently-blocked";
+            case PLAN_BUILD_STATUS.INFEASIBLE:
+                return "infeasible";
+        }
+    }
+
+    private optionPlanSource(
+        trace: OptionSearchTrace,
+        planStatus: PLAN_BUILD_STATUS,
+    ): "option" | "search" | "none" {
+        if (trace.planningAttempts.some(
+            (attempt: OptionPlanAttemptLog): boolean =>
+                attempt.result === "planned",
+        )) {
+            return "option";
+        }
+        if (
+            planStatus === PLAN_BUILD_STATUS.PLANNED
+            || planStatus === PLAN_BUILD_STATUS.SATISFIED
+        ) {
+            return "search";
+        }
+        return "none";
+    }
+
+    private findRootTraversability(
+        graph: OptionEvaluationGraph | undefined,
+        optionIdentity: string,
+    ): OPTION_TRAVERSABILITY | undefined {
+        return graph?.edges.find(
+            (edge): boolean => edge.sourceNodeId === graph.rootNodeId
+                && edge.optionIdentity === optionIdentity,
+        )?.traversability;
+    }
+
+    /** Keeps temporary navigation failures retryable instead of terminating the agent. */
+    private resolveTemporaryBlockageStatus(
+        planStatus: PLAN_BUILD_STATUS,
+    ): PLAN_BUILD_STATUS {
+        if (
+            planStatus !== PLAN_BUILD_STATUS.INFEASIBLE
+            || this.temporarilyBlockedCells.size === 0
+        ) {
+            return planStatus;
+        }
+
+        return PLAN_BUILD_STATUS.TRANSIENTLY_BLOCKED;
+    }
+
+    private async buildActionsFromOption(
+        option: Option,
+        context: IntentionContext,
+    ): Promise<Action[] | undefined> {
+        const result = await this.buildOptionActionResult(option, context);
+        return result.result === "planned" ? result.actions : undefined;
+    }
+
+    /** Builds an option while retaining planner metadata for explainability. */
+    private async buildOptionActionResult(
+        option: Option,
+        context: IntentionContext,
+    ): Promise<OptionActionBuildResult> {
+        const targetCell = option.getTargetCell();
+        const navigation = await this.buildNavigationActions(
+            targetCell,
+            context,
+        );
+        if (navigation === undefined) {
+            return {
+                result: "rejected",
+                reason: "no-executable-route",
+                planner: "astar-then-pddl",
+            };
+        }
+
+        if (option.getType() === "pick") {
+            const parcelId = option.getParcelId();
+            if (parcelId === undefined) {
+                return {
+                    result: "rejected",
+                    reason: "missing-parcel-id",
+                    planner: navigation.planner,
+                };
+            }
+            return {
+                result: "planned",
+                actions: [
+                    ...navigation.actions,
+                    context.actionFactory.pickUp(parcelId, context.agentId),
+                ],
+                planner: navigation.planner,
+            };
+        }
+
+        return {
+            result: "planned",
+            actions: [
+                ...navigation.actions,
+                context.actionFactory.drop(context.agentId),
+            ],
+            planner: navigation.planner,
+        };
+    }
+
+    private async buildSearchPlan(
+        context: IntentionContext,
+    ): Promise<PLAN_BUILD_STATUS> {
+        const searchIntention = this.intentionGenerator.generate({
+            id: context.agentId,
+            position: context.agentPosition,
+        }).find(
+            (intention: Intention): boolean => intention instanceof SearchIntention,
+        );
+        if (!searchIntention) {
+            this.replacePlan([]);
+            return PLAN_BUILD_STATUS.INFEASIBLE;
+        }
+
+        this.currentIntention = searchIntention;
+        const searchActions = searchIntention.buildActions(context);
+        if (searchActions.length > 0) {
+            this.replacePlan(searchActions, searchIntention);
             return PLAN_BUILD_STATUS.PLANNED;
         }
-
-        return PLAN_BUILD_STATUS.INFEASIBLE;
-    }
-
-    private buildActionsFromOption(option: Option, context: IntentionContext): Action[] {
-        const targetCell = option.getTargetCell();
-        const actions: Action[] = [];
-
-        // Pathfind to option target
-        const path = context.pathfinder.findPath(
-            context.gameMap,
-            context.agentPosition,
-            targetCell,
-            context.crates
-        );
-        actions.push(...path);
-
-        // Add pick/drop action
-        if (option.getType() === "pick") {
-            actions.push(context.actionFactory.pickUp(option.getParcelId()!, context.agentId));
-        } else {
-            actions.push(context.actionFactory.drop(context.agentId));
+        if (searchIntention.isSatisfied(context)) {
+            this.replacePlan([], searchIntention);
+            return PLAN_BUILD_STATUS.SATISFIED;
         }
 
-        return actions;
+        const pddlGoal = searchIntention.toPddlGoal(context);
+        if (!pddlGoal) {
+            this.replacePlan([]);
+            return PLAN_BUILD_STATUS.INFEASIBLE;
+        }
+        const navigationActions = await this.buildPddlNavigationActions(
+            pddlGoal.finalTargetPosition,
+            context,
+        );
+        if (navigationActions === undefined) {
+            this.replacePlan([]);
+            return PLAN_BUILD_STATUS.INFEASIBLE;
+        }
+
+        this.replacePlan(
+            [
+                ...navigationActions,
+                ...searchIntention.buildPddlCompletionActions(context),
+            ],
+            searchIntention,
+        );
+        return PLAN_BUILD_STATUS.PLANNED;
     }
 
-    private buildSearchActions(context: IntentionContext): Action[] {
-        if (context.pickupCells.length === 0)
-            return [];
+    /** Replaces executable actions together with the intention entitled to completion. */
+    private replacePlan(actions: Action[], owner?: Intention): void {
+        this.plan.newPlan(actions);
+        this.planOwner = owner;
+    }
 
-        const index = Math.floor(Math.random() * context.pickupCells.length);
-        const targetLocation = context.pickupCells[index];
+    /** Notifies only the intention that created the successfully executed plan. */
+    private completePlan(context: IntentionContext): void {
+        const completedPlanOwner = this.planOwner;
+        this.planOwner = undefined;
+        completedPlanOwner?.onPlanCompleted(context);
+    }
 
-        return context.pathfinder.findPath(
+    private async buildNavigationActions(
+        targetLocation: Position,
+        context: IntentionContext,
+    ): Promise<NavigationBuildResult | undefined> {
+        const directActions = context.pathfinder.findPath(
             context.gameMap,
             context.agentPosition,
             targetLocation,
-            context.crates
+            context.crates,
         );
+        if (directActions.length > 0) {
+            return {
+                actions: directActions,
+                planner: "astar",
+            };
+        }
+        if (context.agentPosition.isEqual(targetLocation)) {
+            return {
+                actions: directActions,
+                planner: "already-at-target",
+            };
+        }
+
+        const pddlActions = await this.buildPddlNavigationActions(
+            targetLocation,
+            context,
+        );
+        return pddlActions === undefined
+            ? undefined
+            : {
+                actions: pddlActions,
+                planner: "pddl",
+            };
+    }
+
+    private async buildPddlNavigationActions(
+        targetLocation: Position,
+        context: IntentionContext,
+    ): Promise<Action[] | undefined> {
+        this.pddlPlanner.resetPDDL();
+        this.pddlPlanner.buildPDDLProblem(
+            new GameMap(context.gameMap),
+            [...context.crates.values()],
+            context.agentId,
+            context.agentPosition,
+        );
+        this.pddlPlanner.buildGoal({
+            agentId: context.agentId,
+            finalTargetPosition: targetLocation,
+        });
+
+        const navigationActions = await this.pddlPlanner.solveProblem();
+        if (
+            navigationActions === undefined
+            || (
+                navigationActions.length === 0
+                && !context.agentPosition.isEqual(targetLocation)
+            )
+        ) {
+            return undefined;
+        }
+
+        return navigationActions;
     }
 
     private makeOptionLogEntries(

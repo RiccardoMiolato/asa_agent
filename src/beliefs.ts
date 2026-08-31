@@ -208,9 +208,11 @@ export class Beliefs {
     /** Revises parcel beliefs from the current sensing snapshot. */
     senseParcels(parcels: IOParcel[]): boolean {
         let isChanged = false;
+        const sensedParcelIds = new Set<string>();
 
         parcels.forEach((parcel: IOParcel) => {
             const { id, x, y, carriedBy, reward } = parcel;
+            sensedParcelIds.add(id);
             const lastUpdate = new Date();
             const existingParcel = this.parcels.get(id);
 
@@ -219,9 +221,22 @@ export class Beliefs {
             }
             this.parcels.set(id, { id, x, y, carriedBy, reward, lastUpdate });
 
-            if(!existingParcel || this.isParcelChanged(existingParcel as IOParcel, parcel))
+            if (!existingParcel || this.isParcelChanged(existingParcel, parcel))
                 isChanged = true;
         });
+
+        for (const [parcelId, parcel] of this.parcels) {
+            if (
+                sensedParcelIds.has(parcelId)
+                || !this.isPositionCurrentlyObserved(
+                    new Position(parcel.x, parcel.y),
+                )
+            ) {
+                continue;
+            }
+            this.parcels.delete(parcelId);
+            isChanged = true;
+        }
 
         this.updateParcelRewards();
 
@@ -229,8 +244,16 @@ export class Beliefs {
     }
 
     private isParcelChanged(parcel1: IOParcel, parcel2: IOParcel): boolean {
-        return parcel1.carriedBy === undefined &&
-            ( parcel1.x != parcel2.x || parcel1.y != parcel2.y );
+        if (
+            parcel1.reward !== parcel2.reward
+            || parcel1.carriedBy !== parcel2.carriedBy
+        ) {
+            return true;
+        }
+        if (parcel1.carriedBy !== undefined) {
+            return false;
+        }
+        return parcel1.x !== parcel2.x || parcel1.y !== parcel2.y;
     }
 
     /**

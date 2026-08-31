@@ -128,6 +128,7 @@ export abstract class BasePathfinder {
         crates: ReadonlyMap<string, Position>,
         temporarilyLocked?: Position,
     ): string {
+        const mapSignature = JSON.stringify(gameMap);
         const startingKey = `${startingPosition.x},${startingPosition.y}`;
         const targetKey = `${targetPosition.x},${targetPosition.y}`;
         const symmetricPath = temporarilyLocked === undefined
@@ -143,7 +144,7 @@ export abstract class BasePathfinder {
             .map((crate: Position): string => `${crate.x},${crate.y}`)
             .sort()
             .join("|");
-        return `${firstPosition}:${secondPosition}:${lockedPosition}:${cratePositions}`;
+        return `${mapSignature}:${firstPosition}:${secondPosition}:${lockedPosition}:${cratePositions}`;
     }
 
     private pathLengthsAreSymmetric(gameMap: string[][]): boolean {

@@ -1,4 +1,12 @@
 import type { IntentionDescription } from "./intentions.js";
+import {
+    OPTION_BRANCH_DECISION,
+    OPTION_TRAVERSABILITY,
+    type OptionEvaluationEdge,
+    type OptionEvaluationGraph,
+    type OptionEvaluationNode,
+    type OptionType,
+} from "./option_evaluator.js";
 import type { Position } from "./position.js";
 
 /** One available intention and its score in the current deliberation. */
@@ -39,6 +47,43 @@ export interface DeliveryGainLog {
 /** A server-rejected movement that causes immediate replanning. */
 export interface MoveFailureLog {
     readonly destination: Position;
+}
+
+/** Planner used to validate a selected root option against the real map. */
+export type OptionPlanMethod =
+    | "already-at-target"
+    | "astar"
+    | "pddl"
+    | "astar-then-pddl";
+
+/** One attempt to turn an evaluator-selected root into executable actions. */
+export interface OptionPlanAttemptLog {
+    readonly optionIdentity: string;
+    readonly optionType: OptionType;
+    readonly parcelId: string | undefined;
+    readonly targetPosition: Position;
+    readonly estimatedTraversability: OPTION_TRAVERSABILITY | undefined;
+    readonly result: "planned" | "rejected";
+    readonly planner: OptionPlanMethod;
+    readonly plannedActions: number;
+    readonly reason: "route-found" | "no-executable-route" | "missing-parcel-id";
+}
+
+export type OptionSearchOutcome =
+    | "planned"
+    | "satisfied"
+    | "transiently-blocked"
+    | "infeasible";
+
+/** Complete explanation of evaluator passes and executable-plan validation. */
+export interface BranchAndBoundLog {
+    readonly cycle: number;
+    readonly position: Position;
+    readonly evaluationPasses: readonly OptionEvaluationGraph[];
+    readonly planningAttempts: readonly OptionPlanAttemptLog[];
+    readonly outcome: OptionSearchOutcome;
+    readonly planSource: "option" | "search" | "none";
+    readonly plannedActions: number;
 }
 
 export type MovementSafetyEvent =
@@ -83,6 +128,9 @@ export abstract class BaseAgentLogger {
 
     /** Optional so existing non-console loggers remain source-compatible. */
     logMoveFailure(_failure: MoveFailureLog): void { }
+
+    /** Optional so existing non-console loggers remain source-compatible. */
+    logBranchAndBound(_search: BranchAndBoundLog): void { }
 }
 
 /** Human-readable terminal logger for complete agent decisions. */
@@ -192,6 +240,182 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
             + ` | decision=REPLAN`
             + ` | temporary-wall=(${failure.destination.x}, ${failure.destination.y})`,
         );
+    }
+
+    override logBranchAndBound(search: BranchAndBoundLog): void {
+        const lines: string[] = [
+            "",
+            "------------------------------------------------------------",
+            `BRANCH-AND-BOUND GRAPH | cycle=${search.cycle}`
+            + ` | start=(${search.position.x}, ${search.position.y})`
+            + ` | evaluation-passes=${search.evaluationPasses.length}`,
+            "TRAVERSABILITY | DIRECT=A* route exists"
+            + " | CRATE-PLAN=optimistic crate-relaxed route; PDDL must validate"
+            + " | UNREACHABLE=no route even after relaxing crates",
+        ];
+
+        search.evaluationPasses.forEach(
+            (graph: OptionEvaluationGraph, index: number): void => {
+                const excluded = graph.excludedRootOptionIdentities.length > 0
+                    ? graph.excludedRootOptionIdentities.join(", ")
+                    : "none";
+                lines.push(
+                    "",
+                    `PASS ${index + 1}`
+                    + ` | nodes=${graph.nodes.length}`
+                    + ` edges=${graph.edges.length}`
+                    + ` best-score=${graph.bestScore.toFixed(3)}`
+                    + ` completion=${graph.estimatedCompletionMilliseconds}ms`
+                    + ` | excluded-roots=${excluded}`,
+                );
+                this.appendOptionGraph(graph, lines);
+            },
+        );
+
+        lines.push("", "EXECUTABLE PLAN VALIDATION");
+        if (search.planningAttempts.length === 0) {
+            lines.push("  no option root was selected for executable validation");
+        }
+        search.planningAttempts.forEach(
+            (attempt: OptionPlanAttemptLog, index: number): void => {
+                const { x, y } = attempt.targetPosition;
+                lines.push(
+                    `  #${index + 1} ${attempt.optionIdentity}`
+                    + ` target=(${x}, ${y})`
+                    + ` estimate=${this.formatTraversability(
+                        attempt.estimatedTraversability,
+                    )}`
+                    + ` | ${attempt.result.toUpperCase()}`
+                    + ` planner=${attempt.planner.toUpperCase()}`
+                    + ` actions=${attempt.plannedActions}`
+                    + ` reason=${attempt.reason}`,
+                );
+            },
+        );
+        if (search.planSource === "search") {
+            lines.push("  FALLBACK | parcel options exhausted; SEARCH plan selected");
+        }
+        lines.push(
+            `RESULT | ${search.outcome.toUpperCase()}`
+            + ` | source=${search.planSource.toUpperCase()}`
+            + ` | executable-actions=${search.plannedActions}`,
+            "------------------------------------------------------------",
+        );
+        console.log(lines.join("\n"));
+    }
+
+    private appendOptionGraph(
+        graph: OptionEvaluationGraph,
+        lines: string[],
+    ): void {
+        const nodesById = new Map<string, OptionEvaluationNode>(
+            graph.nodes.map(
+                (node: OptionEvaluationNode): [string, OptionEvaluationNode] =>
+                    [node.id, node],
+            ),
+        );
+        const edgesBySource = new Map<string, OptionEvaluationEdge[]>();
+        for (const edge of graph.edges) {
+            const outgoingEdges = edgesBySource.get(edge.sourceNodeId) ?? [];
+            outgoingEdges.push(edge);
+            edgesBySource.set(edge.sourceNodeId, outgoingEdges);
+        }
+        for (const outgoingEdges of edgesBySource.values()) {
+            outgoingEdges.sort(
+                (first: OptionEvaluationEdge, second: OptionEvaluationEdge): number =>
+                    first.order - second.order,
+            );
+        }
+
+        const root = nodesById.get(graph.rootNodeId);
+        if (!root) {
+            lines.push("  graph root is missing");
+            return;
+        }
+        this.appendOptionNode(root, nodesById, edgesBySource, lines);
+    }
+
+    private appendOptionNode(
+        node: OptionEvaluationNode,
+        nodesById: ReadonlyMap<string, OptionEvaluationNode>,
+        edgesBySource: ReadonlyMap<string, readonly OptionEvaluationEdge[]>,
+        lines: string[],
+    ): void {
+        const indent = "  ".repeat(node.depth + 1);
+        const carried = node.carriedParcelIds.length > 0
+            ? node.carriedParcelIds.join(",")
+            : "none";
+        const decision = node.selectedOptionIdentity ?? "STOP";
+        lines.push(
+            `${indent}STATE (${node.position.x}, ${node.position.y})`
+            + ` elapsed=${node.elapsedMilliseconds}ms`
+            + ` carried=${carried}`
+            + ` | best-next=${decision}`,
+        );
+
+        const outgoingEdges = edgesBySource.get(node.id) ?? [];
+        if (outgoingEdges.length === 0) {
+            lines.push(`${indent}  STOP | no actions remain`);
+            return;
+        }
+        if (node.selectedOptionIdentity === undefined) {
+            lines.push(
+                `${indent}  STOP [SELECTED]`
+                + " | no branch improves the zero-score stop option",
+            );
+        }
+
+        for (const edge of outgoingEdges) {
+            const edgeIndent = `${indent}  `;
+            const { x, y } = edge.targetPosition;
+            const action = edge.optionType === "pick"
+                ? `PICK parcel=${edge.parcelId ?? "missing"}`
+                : "DROP carried parcels";
+            const score = edge.branchScore === undefined
+                ? "unknown"
+                : edge.branchScore.toFixed(3);
+            const marker = edge.decision === OPTION_BRANCH_DECISION.SELECTED
+                ? "[BEST FROM THIS STATE]"
+                : edge.decision === OPTION_BRANCH_DECISION.UNREACHABLE
+                    ? "[REJECTED: UNREACHABLE]"
+                    : "[NOT SELECTED: LOWER VALUE OR SLOWER]";
+            lines.push(
+                `${edgeIndent}-> ${action} at (${x}, ${y}) ${marker}`
+                + ` | route=${this.formatTraversability(edge.traversability)}`
+                + ` distance=${edge.estimatedDistance ?? "n/a"}`
+                + ` arrival=${edge.estimatedArrivalMilliseconds ?? "n/a"}ms`
+                + ` immediate-score=${edge.immediateDeliveryScore.toFixed(3)}`
+                + ` branch-score=${score}`,
+            );
+
+            if (edge.targetNodeId === undefined) {
+                continue;
+            }
+            const targetNode = nodesById.get(edge.targetNodeId);
+            if (targetNode) {
+                this.appendOptionNode(
+                    targetNode,
+                    nodesById,
+                    edgesBySource,
+                    lines,
+                );
+            }
+        }
+    }
+
+    private formatTraversability(
+        traversability: OPTION_TRAVERSABILITY | undefined,
+    ): string {
+        switch (traversability) {
+            case OPTION_TRAVERSABILITY.DIRECT:
+                return "DIRECT";
+            case OPTION_TRAVERSABILITY.REQUIRES_CRATE_PLANNING:
+                return "CRATE-PLAN";
+            case OPTION_TRAVERSABILITY.UNREACHABLE:
+                return "UNREACHABLE";
+            case undefined:
+                return "UNKNOWN";
+        }
     }
 
     private formatDescription(description: IntentionDescription): string {
