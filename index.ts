@@ -8,7 +8,7 @@ import { Beliefs } from './src/beliefs.js';
 import { IntentionGenerator } from './src/desires.js';
 import { ActionFactory } from './src/move.js';
 import type { IOAgent } from './types/IOAgent.js';
-import type { IOConfig } from './types/IOConfig.js';
+import { IOConfig } from "./types/IOConfig.js";
 import type { IOSensing } from './types/IOSensing.js';
 // Environment variables and script constants
 const host = process.env.HOST || "http://localhost:8080";
@@ -91,6 +91,10 @@ socket.onSensing((sensing: IOSensing): void => {
         agent.signalBeliefChanged();
     }
 });
+
+socket.onMsg(msg => {
+    console.log(msg);
+})
 
 void agent.agent_loop()
     .then(async (exitReason: AGENT_EXIT_REASON): Promise<void> => {
