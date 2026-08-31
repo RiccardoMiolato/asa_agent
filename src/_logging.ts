@@ -135,7 +135,14 @@ export abstract class BaseAgentLogger {
 
 /** Human-readable terminal logger for complete agent decisions. */
 export class ConsoleAgentLogger extends BaseAgentLogger {
+    constructor(private readonly isLoggingActive: boolean) {
+        super();
+    }
+
     logDeliberation(deliberation: DeliberationLog): void {
+        if(!this.isLoggingActive)
+            return;
+
         const { x, y } = deliberation.position;
         const { beliefs } = deliberation;
         const rankedOptions = [...deliberation.options].sort(
@@ -199,6 +206,9 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
     }
 
     logDeliveryGain(delivery: DeliveryGainLog): void {
+        if(!this.isLoggingActive)
+            return;
+
         console.log(
             `\nDELIVERY RESULT | actual-points-gained=+${delivery.pointsGained}`
             + ` | total-score=${delivery.totalScore}`,
@@ -206,6 +216,9 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
     }
 
     override logMovementSafety(movement: MovementSafetyLog): void {
+        if(!this.isLoggingActive)
+            return;
+
         const label = movement.event === "encountered"
             ? "AGENT ENCOUNTER"
             : movement.event === "cleared"
@@ -234,6 +247,9 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
     }
 
     override logMoveFailure(failure: MoveFailureLog): void {
+        if(!this.isLoggingActive)
+            return;
+
         console.log(
             `\nMOVE FAILED`
             + ` | destination=(${failure.destination.x}, ${failure.destination.y})`
@@ -243,6 +259,9 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
     }
 
     override logBranchAndBound(search: BranchAndBoundLog): void {
+        if(!this.isLoggingActive)
+            return;
+
         const lines: string[] = [
             "",
             "------------------------------------------------------------",

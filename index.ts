@@ -15,6 +15,7 @@ const host = process.env.HOST || "http://localhost:8080";
 const token = process.env.TOKEN || "";
 const agent_name = process.env.NAME || "cardo";
 const ghostMapPort = Number(process.env.GHOST_MAP_PORT ?? "8081");
+const activeLogging = process.env.ACTIVE_LOGGING === "true";
 
 console.log("Connecting...");
 const socket: DjsClientSocket = DjsConnect(host, token, agent_name);
@@ -27,7 +28,7 @@ const agent = new Agent(
     intentionGenerator,
     pathfinder,
     actionFactory,
-    new ConsoleAgentLogger(),
+    new ConsoleAgentLogger(activeLogging),
 );
 const ghostMapServer = new GhostMapServer(
     new AgentGhostMapSnapshotProvider(agent, beliefs, agent_name),
