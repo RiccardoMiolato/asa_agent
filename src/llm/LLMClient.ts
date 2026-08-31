@@ -1,8 +1,10 @@
+import { LLMMessage } from "./LLMMemory.js";
+
 /**
  * The client is responsible to be the interface between the
  * LLM-Agent and the LLM model
  */
-interface Message {
+export interface LLMMessage {
     role: string,
     content: string,
 }
@@ -10,7 +12,7 @@ interface Message {
 interface RequestBody {
     model: string,
     max_tokens: number,
-    messages: Message[],
+    messages: LLMMessage[],
     system?: string,
 }
 
@@ -24,7 +26,7 @@ export class LLMClient {
 
     }
 
-    public async callLLM(messages: Message[], systemPrompt: string): Promise<string> {
+    public async callLLM(messages: LLMMessage[], systemPrompt: string): Promise<string> {
         if(!this.api_url)
             throw new Error("API URL not defined");
 
