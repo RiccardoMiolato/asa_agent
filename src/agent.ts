@@ -449,7 +449,7 @@ export class Agent {
             outcome: this.optionSearchOutcome(planStatus),
             planSource: this.optionPlanSource(trace, planStatus),
             plannedActions: this.plan.size(),
-            currentObjective: this.currentIntention.describe(),
+            nextExecutableObjective: this.currentIntention.describe(),
         };
         this.logger.logBranchAndBound(log);
     }

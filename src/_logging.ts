@@ -15,6 +15,52 @@ import {
     BranchAndBoundSvgWriter,
 } from "./_branch-and-bound-svg.js";
 
+/** ANSI presentation used only when stdout is attached to a color terminal. */
+class TerminalTheme {
+    private static readonly RESET = "\u001B[0m";
+    private static readonly BOLD = "\u001B[1m";
+    private static readonly DIM = "\u001B[2m";
+    private static readonly RED = "\u001B[31m";
+    private static readonly GREEN = "\u001B[32m";
+    private static readonly YELLOW = "\u001B[33m";
+    private static readonly BLUE = "\u001B[34m";
+    private static readonly CYAN = "\u001B[36m";
+
+    private readonly enabled: boolean = process.stdout.isTTY
+        && process.env.NO_COLOR === undefined;
+
+    heading(value: string): string {
+        return this.decorate(value, [TerminalTheme.BOLD, TerminalTheme.CYAN]);
+    }
+
+    label(value: string): string {
+        return this.decorate(value, [TerminalTheme.BOLD, TerminalTheme.BLUE]);
+    }
+
+    success(value: string): string {
+        return this.decorate(value, [TerminalTheme.BOLD, TerminalTheme.GREEN]);
+    }
+
+    warning(value: string): string {
+        return this.decorate(value, [TerminalTheme.BOLD, TerminalTheme.YELLOW]);
+    }
+
+    error(value: string): string {
+        return this.decorate(value, [TerminalTheme.BOLD, TerminalTheme.RED]);
+    }
+
+    muted(value: string): string {
+        return this.decorate(value, [TerminalTheme.DIM]);
+    }
+
+    private decorate(value: string, codes: readonly string[]): string {
+        if (!this.enabled) {
+            return value;
+        }
+        return `${codes.join("")}${value}${TerminalTheme.RESET}`;
+    }
+}
+
 /** Authoritative score increase reported by the server after a delivery. */
 export interface DeliveryGainLog {
     readonly pointsGained: number;
@@ -75,7 +121,8 @@ export interface BranchAndBoundLog {
     readonly outcome: OptionSearchOutcome;
     readonly planSource: "option" | "search" | "none";
     readonly plannedActions: number;
-    readonly currentObjective: PlanningObjectiveDescription;
+    /** First route-validated objective whose actions are queued for execution. */
+    readonly nextExecutableObjective: PlanningObjectiveDescription;
 }
 
 /** Lifecycle state of one executable segment within a chosen objective sequence. */
@@ -156,6 +203,8 @@ export abstract class BaseAgentLogger {
 
 /** Human-readable terminal logger for complete agent decisions. */
 export class ConsoleAgentLogger extends BaseAgentLogger {
+    private readonly theme: TerminalTheme = new TerminalTheme();
+
     constructor(
         private readonly branchAndBoundGraphWriter:
             BaseBranchAndBoundGraphWriter = new BranchAndBoundSvgWriter(),
@@ -165,8 +214,10 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
 
     logDeliveryGain(delivery: DeliveryGainLog): void {
         console.log(
-            `\nDELIVERY RESULT | actual-points-gained=+${delivery.pointsGained}`
-            + ` | total-score=${delivery.totalScore}`,
+            `\n${this.theme.success("◆ DELIVERY")}`
+            + `  ${this.theme.success(`+${delivery.pointsGained} points`)}`
+            + `  ${this.theme.muted("·")}`
+            + `  total ${delivery.totalScore}`,
         );
     }
 
@@ -212,27 +263,34 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
             (attempt: OptionPlanAttemptLog): boolean =>
                 attempt.result === "planned",
         );
+        const graphPaths = this.branchAndBoundGraphWriter.outputPaths(
+            search.agentId,
+            search.cycle,
+            search.evaluationPasses.length,
+        );
         const lines: string[] = [
             "",
             "",
-            "================================================================================",
-            `PLANNING CYCLE ${search.cycle}`,
-            "================================================================================",
-            `TRIGGER | ${this.formatCycleReason(search.cycleReason)}`,
-            `START POSITION | (${search.position.x}, ${search.position.y})`,
+            this.theme.heading(`╭─ PLANNING CYCLE ${search.cycle}`),
+            this.formatDetail(
+                "TRIGGER",
+                this.formatCycleReason(search.cycleReason),
+            ),
+            this.formatDetail(
+                "START POSITION",
+                `(${search.position.x}, ${search.position.y})`,
+            ),
         ];
         if (search.beliefChanges.length > 0) {
-            lines.push("", "BELIEF CHANGES");
+            lines.push(this.formatSection("BELIEF CHANGES"));
             for (const change of search.beliefChanges) {
                 lines.push(
-                    `  - ${this.formatBeliefChange(change, search.agentId)}`,
+                    `│  ${this.theme.warning("•")}`
+                    + ` ${this.formatBeliefChange(change, search.agentId)}`,
                 );
             }
         }
-        lines.push(
-            "--------------------------------------------------------------------------------",
-            "CANDIDATE EVALUATION",
-        );
+        lines.push(this.formatSection("CANDIDATE EVALUATION"));
 
         search.evaluationPasses.forEach(
             (graph: OptionEvaluationGraph, index: number): void => {
@@ -240,14 +298,27 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
                     ? graph.excludedRootOptionIdentities.join(", ")
                     : "none";
                 lines.push(
-                    "",
-                    `RUN ${index + 1}`
-                    + ` | considered ${graph.nodes.length} states`
-                    + ` and ${graph.edges.length} transitions`,
-                    `  CHOSEN OBJECTIVE SEQUENCE | ${this.formatSelectedSequence(graph)}`,
-                    `  EXPECTED REWARD | ${graph.bestScore.toFixed(3)}`,
-                    `  EXPECTED COMPLETION TIME | ${graph.estimatedCompletionMilliseconds}ms`,
-                    `  REJECTED ROOT OPTIONS BEFORE RUN | ${excluded}`,
+                    "│",
+                    `│  ${this.theme.label(`PASS ${index + 1}`)}`
+                    + `  ${this.formatCount(graph.nodes.length, "state")}`
+                    + ` ${this.theme.muted("·")}`
+                    + ` ${this.formatCount(graph.edges.length, "transition")}`,
+                    this.formatDetail(
+                        "CHOSEN SEQUENCE",
+                        this.formatSelectedSequence(graph),
+                        4,
+                    ),
+                    this.formatDetail(
+                        "EXPECTED REWARD",
+                        graph.bestScore.toFixed(3),
+                        4,
+                    ),
+                    this.formatDetail(
+                        "COMPLETION TIME",
+                        `${graph.estimatedCompletionMilliseconds}ms`,
+                        4,
+                    ),
+                    this.formatDetail("PREVIOUSLY REJECTED", excluded, 4),
                 );
             },
         );
@@ -257,61 +328,81 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
                 attempt.result === "rejected",
         );
         if (rejectedAttempts.length > 0) {
-            lines.push("", "REJECTED ROUTE ATTEMPTS");
+            lines.push(this.formatSection("REJECTED ROUTE ATTEMPTS"));
             rejectedAttempts.forEach(
                 (attempt: OptionPlanAttemptLog, index: number): void => {
                     const { x, y } = attempt.targetPosition;
                     lines.push(
-                        `  #${index + 1} ${attempt.optionIdentity}`
+                        `│  ${this.theme.error(`✗ #${index + 1}`)}`
+                        + ` ${attempt.optionIdentity}`
                         + ` at (${x}, ${y})`
-                        + ` | estimate=${this.formatTraversability(
+                        + ` ${this.theme.muted("·")}`
+                        + ` estimate ${this.formatTraversability(
                             attempt.estimatedTraversability,
                         )}`
-                        + ` | pathfinder=${this.formatPlanMethod(attempt.planner)}`
-                        + ` | reason=${attempt.reason}`,
+                        + ` ${this.theme.muted("·")}`
+                        + ` ${this.formatPlanMethod(attempt.planner)}`
+                        + ` ${this.theme.muted("·")}`
+                        + ` ${attempt.reason}`,
                     );
                 },
             );
         }
 
-        lines.push("", "CURRENT SEGMENT");
+        lines.push(this.formatSection("NEXT EXECUTABLE OBJECTIVE"));
         lines.push(
-            `  OBJECTIVE | ${this.formatObjective(search.currentObjective)}`,
-            `  PATHFINDER | ${successfulAttempt
+            this.formatDetail(
+                "OBJECTIVE",
+                this.theme.success(
+                    this.formatObjective(search.nextExecutableObjective),
+                ),
+            ),
+            this.formatDetail(
+                "ROLE",
+                successfulAttempt
+                    ? "first objective in the chosen sequence"
+                    : search.planSource === "search"
+                        ? "exploration fallback"
+                        : "no executable objective",
+            ),
+            this.formatDetail("PATHFINDER", successfulAttempt
                 ? this.formatPlanMethod(successfulAttempt.planner)
                 : search.planSource === "search"
                     ? "EXPLORATION FALLBACK"
-                    : "NONE"}`,
-            `  STATUS | ${this.formatPlanStatus(search.outcome)}`,
-            `  ACTIONS READY | ${search.plannedActions}`,
+                    : "NONE"),
+            this.formatDetail(
+                "STATUS",
+                this.formatColoredPlanStatus(search.outcome),
+            ),
+            this.formatDetail("QUEUED ACTIONS", `${search.plannedActions}`),
         );
         if (successfulAttempt) {
             const { x, y } = successfulAttempt.targetPosition;
             lines.push(
-                `  ROUTE CHECK | target=(${x}, ${y})`
-                + ` | estimate=${this.formatTraversability(
-                    successfulAttempt.estimatedTraversability,
-                )}`,
+                this.formatDetail(
+                    "ROUTE CHECK",
+                    `target (${x}, ${y})`
+                    + ` ${this.theme.muted("·")}`
+                    + ` ${this.formatTraversability(
+                        successfulAttempt.estimatedTraversability,
+                    )}`,
+                ),
             );
         }
 
-        lines.push(
-            "",
-            `DECISION GRAPH | generating ${search.evaluationPasses.length}`
-            + ` zoomable tree${search.evaluationPasses.length === 1 ? "" : "s"}...`,
-            "--------------------------------------------------------------------------------",
-        );
+        lines.push(this.formatSection("DECISION GRAPH"));
+        graphPaths.forEach((path: string): void => {
+            lines.push(this.formatDetail("FILE", path));
+        });
+        lines.push(this.theme.heading(
+            "╰───────────────────────────────────────────────────────────────────────────────",
+        ));
         console.log(lines.join("\n"));
         void this.branchAndBoundGraphWriter.writeGraphs(
             search.agentId,
             search.cycle,
             search.evaluationPasses,
-        ).then((paths: readonly string[]): void => {
-            console.log(
-                `\nDECISION GRAPH READY | planning-cycle=${search.cycle}`
-                + ` | files=${paths.join(" | ")}\n`,
-            );
-        }).catch((error: unknown): void => {
+        ).catch((error: unknown): void => {
             console.error("Could not write branch-and-bound SVG:", error);
         });
     }
@@ -321,27 +412,66 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
         switch (segment.event) {
             case PLAN_SEGMENT_EVENT.STARTED:
                 console.log(
-                    `\nSEGMENT STARTED | planning-cycle=${segment.cycle}`
-                    + ` | objective=${objective}`
-                    + ` | actions=${segment.remainingActions}`,
+                    `\n${this.theme.label("▶ EXECUTING")}`
+                    + `  ${this.theme.success(objective)}`
+                    + `  ${this.theme.muted("·")}`
+                    + ` ${segment.remainingActions} queued actions`
+                    + `  ${this.theme.muted("·")}`
+                    + ` cycle ${segment.cycle}`,
                 );
                 break;
             case PLAN_SEGMENT_EVENT.COMPLETED:
                 console.log(
-                    `\nSEGMENT COMPLETED | planning-cycle=${segment.cycle}`
-                    + ` | objective=${objective}`,
+                    `\n${this.theme.success("✓ OBJECTIVE COMPLETED")}`
+                    + `  ${objective}`
+                    + `  ${this.theme.muted("·")}`
+                    + ` cycle ${segment.cycle}`,
                 );
                 break;
             case PLAN_SEGMENT_EVENT.INTERRUPTED:
                 console.log(
-                    `\nSEGMENT INTERRUPTED | planning-cycle=${segment.cycle}`
-                    + ` | objective=${objective}`
-                    + ` | remaining-actions=${segment.remainingActions}`
-                    + ` | reason=${this.formatCycleReason(
+                    `\n${this.theme.warning("⚠ OBJECTIVE INTERRUPTED")}`
+                    + `  ${objective}`
+                    + `  ${this.theme.muted("·")}`
+                    + ` ${segment.remainingActions} actions left`
+                    + `  ${this.theme.muted("·")}`
+                    + ` ${this.formatCycleReason(
                         segment.interruptionReason,
-                    )}`,
+                    )}`
+                    + `  ${this.theme.muted("·")}`
+                    + ` cycle ${segment.cycle}`,
                 );
                 break;
+        }
+    }
+
+    private formatSection(title: string): string {
+        return this.theme.heading(`├─ ${title}`);
+    }
+
+    private formatCount(count: number, noun: string): string {
+        return `${count} ${noun}${count === 1 ? "" : "s"}`;
+    }
+
+    private formatDetail(
+        label: string,
+        value: string,
+        indentation: number = 2,
+    ): string {
+        const prefix = `│${" ".repeat(indentation)}`;
+        return `${prefix}${this.theme.muted(label.padEnd(21))}${value}`;
+    }
+
+    private formatColoredPlanStatus(outcome: OptionSearchOutcome): string {
+        const status = this.formatPlanStatus(outcome);
+        switch (outcome) {
+            case "planned":
+            case "satisfied":
+                return this.theme.success(status);
+            case "transiently-blocked":
+                return this.theme.warning(status);
+            case "infeasible":
+                return this.theme.error(status);
         }
     }
 

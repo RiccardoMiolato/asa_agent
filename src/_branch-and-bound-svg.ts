@@ -32,6 +32,13 @@ interface SvgDimensions {
 
 /** Contract for persisting vector representations of option-search graphs. */
 export abstract class BaseBranchAndBoundGraphWriter {
+    /** Returns the graph destinations before asynchronous rendering starts. */
+    abstract outputPaths(
+        agentId: string,
+        cycle: number,
+        graphCount: number,
+    ): readonly string[];
+
     abstract writeGraphs(
         agentId: string,
         cycle: number,
@@ -470,6 +477,22 @@ export class BranchAndBoundSvgWriter extends BaseBranchAndBoundGraphWriter {
         super();
     }
 
+    outputPaths(
+        agentId: string,
+        cycle: number,
+        graphCount: number,
+    ): readonly string[] {
+        const absoluteOutputDirectory = resolve(this.outputDirectory);
+        const safeAgentId = this.safeFileSegment(agentId || "unknown-agent");
+        return Array.from(
+            { length: graphCount },
+            (_value: unknown, index: number): string => join(
+                absoluteOutputDirectory,
+                `${safeAgentId}-cycle-${cycle}-pass-${index + 1}.svg`,
+            ),
+        );
+    }
+
     async writeGraphs(
         agentId: string,
         cycle: number,
@@ -477,13 +500,7 @@ export class BranchAndBoundSvgWriter extends BaseBranchAndBoundGraphWriter {
     ): Promise<readonly string[]> {
         const absoluteOutputDirectory = resolve(this.outputDirectory);
         await mkdir(absoluteOutputDirectory, { recursive: true });
-        const safeAgentId = this.safeFileSegment(agentId || "unknown-agent");
-        const outputPaths = graphs.map(
-            (_graph: OptionEvaluationGraph, index: number): string => join(
-                absoluteOutputDirectory,
-                `${safeAgentId}-cycle-${cycle}-pass-${index + 1}.svg`,
-            ),
-        );
+        const outputPaths = this.outputPaths(agentId, cycle, graphs.length);
         await Promise.all(graphs.map(
             async (graph: OptionEvaluationGraph, index: number): Promise<void> => {
                 const svg = this.renderer.render(graph, {
