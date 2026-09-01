@@ -14,6 +14,7 @@ interface ObservedMovement {
 
 interface AwaitingDeparture {
     readonly phase: "awaiting-departure";
+    readonly arrivalObservedAt: number;
     readonly agentName: string;
     readonly lastObservationKey: string;
     readonly stationarySince?: number;
@@ -23,6 +24,7 @@ interface AwaitingDeparture {
 interface AwaitingNextDirection {
     readonly phase: "awaiting-next-direction";
     readonly departureDestination: Position;
+    readonly departureObservedAt: number;
     readonly agentName: string;
     readonly lastObservationKey: string;
     readonly stationarySince?: number;
@@ -93,6 +95,7 @@ export class ConservativeMovementGuard {
                 blockers.set(agent.id, {
                     phase: "awaiting-next-direction",
                     departureDestination: movement.destination,
+                    departureObservedAt: Date.now(),
                     agentName: agent.name,
                     lastObservationKey: this.observationKey(agent),
                 });
@@ -111,6 +114,7 @@ export class ConservativeMovementGuard {
                 const stationaryPosition = this.stationaryPosition(agent);
                 blockers.set(agent.id, {
                     phase: "awaiting-departure",
+                    arrivalObservedAt: Date.now(),
                     agentName: agent.name,
                     lastObservationKey: this.observationKey(agent),
                     ...(stationaryPosition
@@ -185,6 +189,7 @@ export class ConservativeMovementGuard {
                     blockers.set(agentId, {
                         phase: "awaiting-next-direction",
                         departureDestination: movement.destination,
+                        departureObservedAt: Date.now(),
                         agentName: agent.name,
                         lastObservationKey: observationKey,
                     });
@@ -245,6 +250,7 @@ export class ConservativeMovementGuard {
                         blockers.set(agentId, {
                             phase: "awaiting-next-direction",
                             departureDestination: stationaryPosition,
+                            departureObservedAt: Date.now(),
                             agentName: agent.name,
                             lastObservationKey: observationKey,
                             ...this.stationaryState(stationaryPosition),
@@ -384,11 +390,11 @@ export class ConservativeMovementGuard {
     ): number | undefined {
         let earliestDeadline: number | undefined;
         for (const blocker of blockers.values()) {
-            if (blocker.stationarySince === undefined) {
-                continue;
-            }
-            const deadline = blocker.stationarySince
-                + this.stationaryWaitDuration();
+            const waitingSince = blocker.stationarySince
+                ?? (blocker.phase === "awaiting-next-direction"
+                    ? blocker.departureObservedAt
+                    : blocker.arrivalObservedAt);
+            const deadline = waitingSince + this.stationaryWaitDuration();
             earliestDeadline = earliestDeadline === undefined
                 ? deadline
                 : Math.min(earliestDeadline, deadline);
@@ -406,27 +412,60 @@ export class ConservativeMovementGuard {
         const waitDuration = this.stationaryWaitDuration();
         for (const [agentId, blocker] of blockers) {
             if (
-                blocker.stationarySince === undefined
-                || blocker.stationaryPosition === undefined
-                || timeNow - blocker.stationarySince < waitDuration
+                blocker.stationarySince !== undefined
+                && blocker.stationaryPosition !== undefined
+                && timeNow - blocker.stationarySince >= waitDuration
             ) {
+                this.logger.logMovementSafety({
+                    event: "replanned",
+                    agentId,
+                    agentName: blocker.agentName,
+                    nextCell,
+                    observedPosition: blocker.stationaryPosition,
+                    movementSource: undefined,
+                    movementDestination: undefined,
+                    decision: "replan",
+                    reason: "agent-stationary-replan",
+                });
+                return {
+                    decision: "replan",
+                    blockedCell: blocker.stationaryPosition,
+                };
+            }
+            if (blocker.phase === "awaiting-departure") {
+                if (timeNow - blocker.arrivalObservedAt < waitDuration) {
+                    continue;
+                }
+
+                this.logger.logMovementSafety({
+                    event: "replanned",
+                    agentId,
+                    agentName: blocker.agentName,
+                    nextCell,
+                    observedPosition: nextCell,
+                    movementSource: undefined,
+                    movementDestination: nextCell,
+                    decision: "replan",
+                    reason: "movement-uncertain-replan",
+                });
+                return { decision: "replan", blockedCell: nextCell };
+            }
+            if (timeNow - blocker.departureObservedAt < waitDuration) {
                 continue;
             }
+
             this.logger.logMovementSafety({
                 event: "replanned",
                 agentId,
                 agentName: blocker.agentName,
                 nextCell,
-                observedPosition: blocker.stationaryPosition,
-                movementSource: undefined,
-                movementDestination: undefined,
+                observedPosition: blocker.departureDestination,
+                movementSource: nextCell,
+                movementDestination: blocker.departureDestination,
                 decision: "replan",
-                reason: "agent-stationary-replan",
+                reason: "movement-uncertain-replan",
             });
-            return {
-                decision: "replan",
-                blockedCell: blocker.stationaryPosition,
-            };
+            return { decision: "replan", blockedCell: nextCell };
         }
         return undefined;
     }

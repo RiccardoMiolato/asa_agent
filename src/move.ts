@@ -86,10 +86,12 @@ export class PickUp extends Action {
     }
 
     async execute(): Promise<boolean> {
-        if (this.beliefs.isParcelCarriedBy(this.parcelId, this.agentId)) {
+        if (this.confirmCarriedBelief()) {
             return true;
         }
 
+        const sensingRevisionBeforePickup =
+            this.beliefs.currentSensingRevision();
         const pickedParcels = await this.client.emitPickup();
         const pickedTarget = pickedParcels.some(
             (parcel: { id: string }): boolean => parcel.id === this.parcelId,
@@ -99,20 +101,30 @@ export class PickUp extends Action {
             return true;
         }
 
-        if (this.beliefs.isParcelCarriedBy(this.parcelId, this.agentId)) {
+        if (this.confirmCarriedBelief()) {
             return true;
         }
 
-        const sensingRevisionAfterAcknowledgement =
-            this.beliefs.currentSensingRevision();
         await this.beliefs.waitForSensingAfterOrTimeout(
-            sensingRevisionAfterAcknowledgement,
+            sensingRevisionBeforePickup,
             Math.max(50, this.beliefs.frame_duration * 2),
         );
-        return this.beliefs.isParcelCarriedBy(
+        if (this.confirmCarriedBelief()) {
+            return true;
+        }
+
+        return this.beliefs.confirmUnresolvedPickup(
             this.parcelId,
             this.agentId,
         );
+    }
+
+    private confirmCarriedBelief(): boolean {
+        if (!this.beliefs.isParcelCarriedBy(this.parcelId, this.agentId)) {
+            return false;
+        }
+        this.beliefs.markParcelCarried(this.parcelId, this.agentId);
+        return true;
     }
 }
 

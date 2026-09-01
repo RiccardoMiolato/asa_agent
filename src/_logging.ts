@@ -167,6 +167,7 @@ export type MovementSafetyReason =
     | "agent-left-observation-range"
     | "agent-not-visible"
     | "movement-uncertain"
+    | "movement-uncertain-replan"
     | "next-move-is-safe"
     | "agent-stationary-replan"
     | "agent-oscillating-replan";

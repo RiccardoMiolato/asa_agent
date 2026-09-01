@@ -14,6 +14,11 @@ export interface Parcel extends Omit<IOParcel, "carriedBy"> {
     lastUpdate: Date;
 }
 
+/** Locally acknowledged pickup that must survive stale sensing snapshots. */
+interface LocalPickupConfirmation {
+    readonly agentId: string;
+}
+
 /** Finite set of dynamic world changes reported by one sensing revision. */
 export enum BELIEF_CHANGE_TYPE {
     PARCEL_DISCOVERED = "parcel-discovered",
@@ -76,6 +81,8 @@ export class Beliefs {
     agents: Map<string, IOSensedAgent>;
     parcels: Map<string, Parcel>;
     crates: Map<string, Position>;
+    private readonly localPickupConfirmations:
+        Map<string, LocalPickupConfirmation>;
     private sensingRevision: number;
     private crateRevisionNumber: number;
     private mapRevisionNumber: number;
@@ -102,6 +109,8 @@ export class Beliefs {
         this.agents = new Map<string, IOSensedAgent>();
         this.parcels = new Map<string, Parcel>();
         this.crates = new Map<string, Position>();
+        this.localPickupConfirmations =
+            new Map<string, LocalPickupConfirmation>();
         this.sensingRevision = 0;
         this.crateRevisionNumber = 0;
         this.mapRevisionNumber = 0;
@@ -290,7 +299,10 @@ export class Beliefs {
 
         parcels.forEach((parcel: IOParcel) => {
             const { id, x, y, reward } = parcel;
-            const carriedBy = parcel.carriedBy ?? undefined;
+            const carriedBy = this.reconcileSensedParcelCarrier(
+                id,
+                parcel.carriedBy ?? undefined,
+            );
             sensedParcelIds.add(id);
             const lastUpdate = new Date();
             const existingParcel = this.parcels.get(id);
@@ -300,6 +312,7 @@ export class Beliefs {
             }
             if (reward <= 0) {
                 this.parcels.delete(id);
+                this.localPickupConfirmations.delete(id);
                 if (existingParcel && existingParcel.reward !== reward) {
                     changes.push({
                         type: BELIEF_CHANGE_TYPE.PARCEL_REWARD_CHANGED,
@@ -354,6 +367,7 @@ export class Beliefs {
         for (const [parcelId, parcel] of this.parcels) {
             if (
                 sensedParcelIds.has(parcelId)
+                || this.localPickupConfirmations.has(parcelId)
                 || !this.isPositionCurrentlyObserved(
                     new Position(parcel.x, parcel.y),
                 )
@@ -380,20 +394,66 @@ export class Beliefs {
         this.parcels.forEach((parcel: Parcel, parcel_id: string) => {
             if (parcel.carriedBy === agentId) {
                 this.parcels.delete(parcel_id);
+                this.localPickupConfirmations.delete(parcel_id);
             }
         });
     }
 
     markParcelCarried(parcelId: string, agentId: string): void {
         const parcel = this.parcels.get(parcelId);
-        if (parcel && !parcel.carriedBy) {
-            parcel.carriedBy = agentId;
+        if (parcel === undefined) {
+            return;
         }
+        parcel.carriedBy = agentId;
+        this.localPickupConfirmations.set(parcelId, { agentId });
+    }
+
+    /**
+     * Resolves an acknowledged pickup when current sensing still exposes the
+     * target cell and parcel as free. Missing or contrary evidence wins.
+     */
+    confirmUnresolvedPickup(parcelId: string, agentId: string): boolean {
+        const parcel = this.parcels.get(parcelId);
+        if (
+            parcel === undefined
+            || parcel.carriedBy !== undefined
+            || !this.isPositionCurrentlyObserved(
+                new Position(parcel.x, parcel.y),
+            )
+        ) {
+            return false;
+        }
+
+        this.markParcelCarried(parcelId, agentId);
+        return true;
     }
 
     /** Whether the latest authoritative belief assigns a parcel to one agent. */
     isParcelCarriedBy(parcelId: string, agentId: string): boolean {
         return this.parcels.get(parcelId)?.carriedBy === agentId;
+    }
+
+    /**
+     * A free snapshot cannot undo our acknowledged pickup because this agent
+     * never puts parcels down outside the explicit delivery action.
+     */
+    private reconcileSensedParcelCarrier(
+        parcelId: string,
+        sensedCarrier: string | undefined,
+    ): string | undefined {
+        const confirmation = this.localPickupConfirmations.get(parcelId);
+        if (confirmation === undefined) {
+            return sensedCarrier;
+        }
+        if (
+            sensedCarrier === undefined
+            || sensedCarrier === confirmation.agentId
+        ) {
+            return confirmation.agentId;
+        }
+
+        this.localPickupConfirmations.delete(parcelId);
+        return sensedCarrier;
     }
 
     /** Applies complete configured decay ticks to stale parcel beliefs. */
@@ -422,6 +482,7 @@ export class Beliefs {
 
             if (parcel.reward <= 0) {
                 this.parcels.delete(id);
+                this.localPickupConfirmations.delete(id);
             }
         });
     }
