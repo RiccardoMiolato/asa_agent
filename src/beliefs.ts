@@ -8,7 +8,9 @@ import type {
 } from "../types/IOSensing.js";
 import { Position } from "./position.js";
 
-export interface Parcel extends IOParcel {
+/** Canonical internal parcel state; an absent carrier is always `undefined`. */
+export interface Parcel extends Omit<IOParcel, "carriedBy"> {
+    carriedBy?: string;
     lastUpdate: Date;
 }
 
@@ -287,7 +289,8 @@ export class Beliefs {
         const sensedParcelIds = new Set<string>();
 
         parcels.forEach((parcel: IOParcel) => {
-            const { id, x, y, carriedBy, reward } = parcel;
+            const { id, x, y, reward } = parcel;
+            const carriedBy = parcel.carriedBy ?? undefined;
             sensedParcelIds.add(id);
             const lastUpdate = new Date();
             const existingParcel = this.parcels.get(id);

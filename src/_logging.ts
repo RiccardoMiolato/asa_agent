@@ -8,6 +8,7 @@ import {
     type OptionEvaluationNode,
 } from "./option_evaluator.js";
 import type { DESIRE_TYPE } from "./desires.js";
+import type { PlanningObjectiveDescription } from "./planning.js";
 import type { Position } from "./position.js";
 import {
     BaseBranchAndBoundGraphWriter,
@@ -74,7 +75,35 @@ export interface BranchAndBoundLog {
     readonly outcome: OptionSearchOutcome;
     readonly planSource: "option" | "search" | "none";
     readonly plannedActions: number;
+    readonly currentObjective: PlanningObjectiveDescription;
 }
+
+/** Lifecycle state of one executable segment within a chosen objective sequence. */
+export enum PLAN_SEGMENT_EVENT {
+    STARTED = "started",
+    COMPLETED = "completed",
+    INTERRUPTED = "interrupted",
+}
+
+interface PlanSegmentLogBase {
+    readonly cycle: number;
+    readonly objective: PlanningObjectiveDescription;
+    readonly remainingActions: number;
+}
+
+/** Execution update emitted separately from planning-cycle output. */
+export type PlanSegmentLog = PlanSegmentLogBase & (
+    | {
+        readonly event:
+            | PLAN_SEGMENT_EVENT.STARTED
+            | PLAN_SEGMENT_EVENT.COMPLETED;
+        readonly interruptionReason?: never;
+    }
+    | {
+        readonly event: PLAN_SEGMENT_EVENT.INTERRUPTED;
+        readonly interruptionReason: DELIBERATION_CYCLE_REASON;
+    }
+);
 
 export type MovementSafetyEvent =
     | "encountered"
@@ -120,6 +149,9 @@ export abstract class BaseAgentLogger {
 
     /** Optional so existing non-console loggers remain source-compatible. */
     logBranchAndBound(_search: BranchAndBoundLog): void { }
+
+    /** Optional so existing non-console loggers remain source-compatible. */
+    logPlanSegment(_segment: PlanSegmentLog): void { }
 }
 
 /** Human-readable terminal logger for complete agent decisions. */
@@ -176,18 +208,21 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
     }
 
     override logBranchAndBound(search: BranchAndBoundLog): void {
+        const successfulAttempt = search.planningAttempts.find(
+            (attempt: OptionPlanAttemptLog): boolean =>
+                attempt.result === "planned",
+        );
         const lines: string[] = [
             "",
             "",
             "================================================================================",
-            `TURN ${search.cycle} | BRANCH-AND-BOUND`,
+            `PLANNING CYCLE ${search.cycle}`,
             "================================================================================",
-            `START REASON | ${search.cycleReason.replace(/-/g, " ").toUpperCase()}`,
-            `STATE | start=(${search.position.x}, ${search.position.y})`
-            + ` | evaluation-passes=${search.evaluationPasses.length}`,
+            `TRIGGER | ${this.formatCycleReason(search.cycleReason)}`,
+            `START POSITION | (${search.position.x}, ${search.position.y})`,
         ];
         if (search.beliefChanges.length > 0) {
-            lines.push("BELIEF CHANGES");
+            lines.push("", "BELIEF CHANGES");
             for (const change of search.beliefChanges) {
                 lines.push(
                     `  - ${this.formatBeliefChange(change, search.agentId)}`,
@@ -196,7 +231,7 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
         }
         lines.push(
             "--------------------------------------------------------------------------------",
-            "SEARCH",
+            "CANDIDATE EVALUATION",
         );
 
         search.evaluationPasses.forEach(
@@ -206,49 +241,65 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
                     : "none";
                 lines.push(
                     "",
-                    `PASS ${index + 1}`
-                    + ` | nodes=${graph.nodes.length}`
-                    + ` | edges=${graph.edges.length}`,
-                    `  BEST | score=${graph.bestScore.toFixed(3)}`
-                    + ` | completion=${graph.estimatedCompletionMilliseconds}ms`,
-                    `  ROUTE | ${this.formatSelectedSequence(graph)}`,
-                    `  EXCLUDED ROOTS | ${excluded}`,
+                    `RUN ${index + 1}`
+                    + ` | considered ${graph.nodes.length} states`
+                    + ` and ${graph.edges.length} transitions`,
+                    `  CHOSEN OBJECTIVE SEQUENCE | ${this.formatSelectedSequence(graph)}`,
+                    `  EXPECTED REWARD | ${graph.bestScore.toFixed(3)}`,
+                    `  EXPECTED COMPLETION TIME | ${graph.estimatedCompletionMilliseconds}ms`,
+                    `  REJECTED ROOT OPTIONS BEFORE RUN | ${excluded}`,
                 );
             },
         );
 
-        lines.push("", "EXECUTABLE PLAN VALIDATION");
-        if (search.planningAttempts.length === 0) {
-            lines.push("  no option root was selected for executable validation");
-        }
-        search.planningAttempts.forEach(
-            (attempt: OptionPlanAttemptLog, index: number): void => {
-                const { x, y } = attempt.targetPosition;
-                lines.push(
-                    `  #${index + 1} ${attempt.optionIdentity}`
-                    + ` target=(${x}, ${y})`
-                    + ` estimate=${this.formatTraversability(
-                        attempt.estimatedTraversability,
-                    )}`
-                    + ` | ${attempt.result.toUpperCase()}`
-                    + ` planner=${attempt.planner.toUpperCase()}`
-                    + ` actions=${attempt.plannedActions}`
-                    + ` reason=${attempt.reason}`,
-                );
-            },
+        const rejectedAttempts = search.planningAttempts.filter(
+            (attempt: OptionPlanAttemptLog): boolean =>
+                attempt.result === "rejected",
         );
-        if (search.planSource === "search") {
-            lines.push("  FALLBACK | parcel options exhausted; SEARCH plan selected");
+        if (rejectedAttempts.length > 0) {
+            lines.push("", "REJECTED ROUTE ATTEMPTS");
+            rejectedAttempts.forEach(
+                (attempt: OptionPlanAttemptLog, index: number): void => {
+                    const { x, y } = attempt.targetPosition;
+                    lines.push(
+                        `  #${index + 1} ${attempt.optionIdentity}`
+                        + ` at (${x}, ${y})`
+                        + ` | estimate=${this.formatTraversability(
+                            attempt.estimatedTraversability,
+                        )}`
+                        + ` | pathfinder=${this.formatPlanMethod(attempt.planner)}`
+                        + ` | reason=${attempt.reason}`,
+                    );
+                },
+            );
         }
+
+        lines.push("", "CURRENT SEGMENT");
         lines.push(
-            `RESULT | ${search.outcome.toUpperCase()}`
-            + ` | source=${search.planSource.toUpperCase()}`
-            + ` | executable-actions=${search.plannedActions}`,
-            "SVG | generating one zoomable tree per evaluation pass...",
-            "--------------------------------------------------------------------------------",
-            `END TURN ${search.cycle}`,
-            "================================================================================",
+            `  OBJECTIVE | ${this.formatObjective(search.currentObjective)}`,
+            `  PATHFINDER | ${successfulAttempt
+                ? this.formatPlanMethod(successfulAttempt.planner)
+                : search.planSource === "search"
+                    ? "EXPLORATION FALLBACK"
+                    : "NONE"}`,
+            `  STATUS | ${this.formatPlanStatus(search.outcome)}`,
+            `  ACTIONS READY | ${search.plannedActions}`,
+        );
+        if (successfulAttempt) {
+            const { x, y } = successfulAttempt.targetPosition;
+            lines.push(
+                `  ROUTE CHECK | target=(${x}, ${y})`
+                + ` | estimate=${this.formatTraversability(
+                    successfulAttempt.estimatedTraversability,
+                )}`,
+            );
+        }
+
+        lines.push(
             "",
+            `DECISION GRAPH | generating ${search.evaluationPasses.length}`
+            + ` zoomable tree${search.evaluationPasses.length === 1 ? "" : "s"}...`,
+            "--------------------------------------------------------------------------------",
         );
         console.log(lines.join("\n"));
         void this.branchAndBoundGraphWriter.writeGraphs(
@@ -257,12 +308,101 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
             search.evaluationPasses,
         ).then((paths: readonly string[]): void => {
             console.log(
-                `\nARTIFACT READY | turn=${search.cycle}`
-                + ` | branch-and-bound-svg=${paths.join(" | ")}\n`,
+                `\nDECISION GRAPH READY | planning-cycle=${search.cycle}`
+                + ` | files=${paths.join(" | ")}\n`,
             );
         }).catch((error: unknown): void => {
             console.error("Could not write branch-and-bound SVG:", error);
         });
+    }
+
+    override logPlanSegment(segment: PlanSegmentLog): void {
+        const objective = this.formatObjective(segment.objective);
+        switch (segment.event) {
+            case PLAN_SEGMENT_EVENT.STARTED:
+                console.log(
+                    `\nSEGMENT STARTED | planning-cycle=${segment.cycle}`
+                    + ` | objective=${objective}`
+                    + ` | actions=${segment.remainingActions}`,
+                );
+                break;
+            case PLAN_SEGMENT_EVENT.COMPLETED:
+                console.log(
+                    `\nSEGMENT COMPLETED | planning-cycle=${segment.cycle}`
+                    + ` | objective=${objective}`,
+                );
+                break;
+            case PLAN_SEGMENT_EVENT.INTERRUPTED:
+                console.log(
+                    `\nSEGMENT INTERRUPTED | planning-cycle=${segment.cycle}`
+                    + ` | objective=${objective}`
+                    + ` | remaining-actions=${segment.remainingActions}`
+                    + ` | reason=${this.formatCycleReason(
+                        segment.interruptionReason,
+                    )}`,
+                );
+                break;
+        }
+    }
+
+    private formatCycleReason(reason: DELIBERATION_CYCLE_REASON): string {
+        switch (reason) {
+            case DELIBERATION_CYCLE_REASON.AGENT_STARTED:
+                return "Agent started";
+            case DELIBERATION_CYCLE_REASON.BELIEFS_CHANGED:
+                return "Beliefs changed";
+            case DELIBERATION_CYCLE_REASON.MOVEMENT_SAFETY_REPLAN:
+                return "Movement safety required replanning";
+            case DELIBERATION_CYCLE_REASON.ACTION_FAILED:
+                return "An action failed";
+            case DELIBERATION_CYCLE_REASON.OPTION_SEGMENT_COMPLETED:
+                return "The previous objective segment completed";
+            case DELIBERATION_CYCLE_REASON.PLAN_COMPLETED:
+                return "The previous plan completed";
+            case DELIBERATION_CYCLE_REASON.TRANSIENT_BLOCKAGE_RETRY:
+                return "Retrying after a temporary blockage";
+        }
+    }
+
+    private formatPlanStatus(outcome: OptionSearchOutcome): string {
+        switch (outcome) {
+            case "planned":
+                return "EXECUTABLE";
+            case "satisfied":
+                return "ALREADY SATISFIED";
+            case "transiently-blocked":
+                return "WAITING FOR TEMPORARY BLOCKAGE";
+            case "infeasible":
+                return "NO EXECUTABLE PLAN";
+        }
+    }
+
+    private formatPlanMethod(method: OptionPlanMethod): string {
+        switch (method) {
+            case "already-at-target":
+                return "ALREADY AT TARGET";
+            case "astar":
+                return "A*";
+            case "pddl":
+                return "PDDL";
+            case "astar-then-pddl":
+                return "A*, THEN PDDL";
+        }
+    }
+
+    private formatObjective(objective: PlanningObjectiveDescription): string {
+        switch (objective.type) {
+            case "pick-up":
+                return `PICK ${objective.parcelId} at `
+                    + `(${objective.target.x}, ${objective.target.y})`;
+            case "deliver":
+                return `DROP at (${objective.target.x}, ${objective.target.y})`;
+            case "search":
+                return objective.target
+                    ? `EXPLORE pickup cells toward `
+                        + `(${objective.target.x}, ${objective.target.y})`
+                    : "EXPLORE pickup cells";
+        }
     }
 
     private formatSelectedSequence(graph: OptionEvaluationGraph): string {

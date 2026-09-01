@@ -2,6 +2,6 @@ export interface IOParcel {
     id: string;
     x: number;
     y: number;
-    carriedBy?: string;
+    carriedBy?: string | null;
     reward: number;
 }

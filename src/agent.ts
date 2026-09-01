@@ -5,6 +5,7 @@ import {
     type OptionPlanAttemptLog,
     type OptionPlanMethod,
     type OptionSearchOutcome,
+    PLAN_SEGMENT_EVENT,
 } from "./_logging.js";
 import type { BasePathfinder } from "./astar.js";
 import {
@@ -254,6 +255,9 @@ export class Agent {
                 return AGENT_EXIT_REASON.NO_FEASIBLE_PLAN;
             }
 
+            if (!this.plan.isEmpty()) {
+                this.logCurrentPlanSegment(PLAN_SEGMENT_EVENT.STARTED);
+            }
 
             let planInterrupted = false;
             let planMoved = false;
@@ -323,6 +327,10 @@ export class Agent {
                     planMoved = true;
                 }
 
+                if (this.plan.isEmpty()) {
+                    this.logCurrentPlanSegment(PLAN_SEGMENT_EVENT.COMPLETED);
+                }
+
                 if (
                     this.plan.isEmpty()
                     && this.selectedDesireSequence.length > 0
@@ -342,6 +350,10 @@ export class Agent {
             }
 
             if (planInterrupted) {
+                this.logCurrentPlanSegment(
+                    PLAN_SEGMENT_EVENT.INTERRUPTED,
+                    nextCycleReason,
+                );
                 this.planOwner = undefined;
             }
             if (!planInterrupted && this.plan.isEmpty()) {
@@ -437,8 +449,46 @@ export class Agent {
             outcome: this.optionSearchOutcome(planStatus),
             planSource: this.optionPlanSource(trace, planStatus),
             plannedActions: this.plan.size(),
+            currentObjective: this.currentIntention.describe(),
         };
         this.logger.logBranchAndBound(log);
+    }
+
+    private logCurrentPlanSegment(
+        event:
+            | PLAN_SEGMENT_EVENT.STARTED
+            | PLAN_SEGMENT_EVENT.COMPLETED,
+    ): void;
+    private logCurrentPlanSegment(
+        event: PLAN_SEGMENT_EVENT.INTERRUPTED,
+        interruptionReason: DELIBERATION_CYCLE_REASON,
+    ): void;
+    private logCurrentPlanSegment(
+        event: PLAN_SEGMENT_EVENT,
+        interruptionReason?: DELIBERATION_CYCLE_REASON,
+    ): void {
+        const sharedLog = {
+            cycle: this.deliberationCycle,
+            objective: this.planOwner?.describe()
+                ?? this.currentIntention.describe(),
+            remainingActions: this.plan.size(),
+        };
+        if (event === PLAN_SEGMENT_EVENT.INTERRUPTED) {
+            if (interruptionReason === undefined) {
+                throw new Error("Interrupted plan segments require a reason");
+            }
+            this.logger.logPlanSegment({
+                ...sharedLog,
+                event,
+                interruptionReason,
+            });
+            return;
+        }
+
+        this.logger.logPlanSegment({
+            ...sharedLog,
+            event,
+        });
     }
 
     private optionSearchOutcome(
@@ -529,6 +579,7 @@ export class Agent {
         const intention = new CommittedDesireIntention(nextDesire);
         this.currentIntention = intention;
         this.replacePlan(actionBuild.actions, intention);
+        this.logCurrentPlanSegment(PLAN_SEGMENT_EVENT.STARTED);
         return true;
     }
 
