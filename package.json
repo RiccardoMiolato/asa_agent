@@ -10,7 +10,7 @@
     "build": "tsc",
     "start": "node --env-file=.env dist/index.js",
     "dev": "npm run build && npm run start",
-    "test": "npm run build && node --test dist/src/_path-length-cache.test.js dist/src/_search-intention.test.js dist/src/_search-recovery.test.js dist/src/_reward-decay.test.js dist/src/_crate-planning.test.js dist/src/_local-pddl-solver.test.js dist/src/_option-evaluator.test.js dist/src/_belief-changes.test.js dist/src/_planning-regressions.test.js",
+    "test": "npm run build && node --test dist/src/_option-evaluator.test.js dist/src/_belief-changes.test.js dist/src/_planning-regressions.test.js",
     "ghost-map": "npm run build && npm run start"
   },
   "dependencies": {

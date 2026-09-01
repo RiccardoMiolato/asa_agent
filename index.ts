@@ -5,7 +5,7 @@ import { ConsoleAgentLogger } from './src/_logging.js';
 import { Agent, AGENT_EXIT_REASON } from './src/agent.js';
 import { AStarPathfinder } from './src/astar.js';
 import { Beliefs } from './src/beliefs.js';
-import { IntentionGenerator } from './src/desires.js';
+import { DesireGenerator } from './src/desires.js';
 import { ActionFactory } from './src/move.js';
 import type { IOAgent } from './types/IOAgent.js';
 import type { IOConfig } from './types/IOConfig.js';
@@ -21,10 +21,9 @@ const socket: DjsClientSocket = DjsConnect(host, token, agent_name);
 const beliefs = new Beliefs();
 const actionFactory = new ActionFactory(socket, beliefs);
 const pathfinder = new AStarPathfinder(actionFactory);
-const intentionGenerator = new IntentionGenerator(beliefs);
 const agent = new Agent(
     beliefs,
-    intentionGenerator,
+    new DesireGenerator(),
     pathfinder,
     actionFactory,
     new ConsoleAgentLogger(),

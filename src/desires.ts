@@ -1,66 +1,254 @@
-import type { Beliefs } from "./beliefs.js";
 import {
-    DeliverParcelIntention,
-    type Intention,
-    PickUpParcelIntention,
-    type PickupClusterSnapshot,
-    SearchIntention,
-} from "./intentions.js";
+    PlanningObjective,
+    type PlanningContext,
+    type PlanningObjectiveDescription,
+} from "./planning.js";
 import { Position } from "./position.js";
 
-export interface AgentState {
-    readonly id: string;
-    readonly position: Position;
+/** Goal categories that can be considered by branch-and-bound. */
+export enum DESIRE_TYPE {
+    PICK_UP = "pick",
+    DELIVER = "drop",
 }
 
-/** Generates the intentions available from the current agent and world state. */
-export class IntentionGenerator {
-    private readonly searchIntention: SearchIntention;
+/** A possible reward-bearing goal derived from the agent's beliefs. */
+export abstract class Desire extends PlanningObjective {
+    abstract readonly type: DESIRE_TYPE;
+    abstract readonly parcelId: string | undefined;
 
-    constructor(private readonly beliefs: Beliefs) {
-        this.searchIntention = new SearchIntention();
+    constructor(readonly targetCell: Position) {
+        super();
     }
 
-    generate(agentState: AgentState): Intention[] {
-        const intentions: Intention[] = [];
-        const freeParcelIds = new Set<string>();
-        let carriesParcel = false;
+    /** Stable identity used to exclude a failed root during the same deliberation. */
+    abstract identity(): string;
+    abstract describe(): PlanningObjectiveDescription;
+}
 
-        for (const parcel of this.beliefs.parcels.values()) {
-            if (!parcel.carriedBy) {
-                freeParcelIds.add(parcel.id);
-                intentions.push(
-                    new PickUpParcelIntention(
-                        parcel,
-                        new Position(parcel.x, parcel.y),
-                    ),
-                );
+/** Desire to collect one known free parcel. */
+export class PickUpParcelDesire extends Desire {
+    readonly type = DESIRE_TYPE.PICK_UP;
+
+    constructor(
+        readonly parcelId: string,
+        targetCell: Position,
+    ) {
+        super(targetCell);
+    }
+
+    identity(): string {
+        return `pick:${this.parcelId}`;
+    }
+
+    describe(): PlanningObjectiveDescription {
+        return {
+            type: "pick-up",
+            parcelId: this.parcelId,
+            target: this.targetCell,
+        };
+    }
+}
+
+/** Desire to deliver every parcel currently carried by the agent. */
+export class DeliverParcelsDesire extends Desire {
+    readonly type = DESIRE_TYPE.DELIVER;
+    readonly parcelId = undefined;
+
+    identity(): string {
+        return `drop:${this.targetCell.x},${this.targetCell.y}`;
+    }
+
+    describe(): PlanningObjectiveDescription {
+        return {
+            type: "deliver",
+            target: this.targetCell,
+        };
+    }
+}
+
+/** Typed snapshot of the desires generated for one deliberation. */
+export interface DesireGeneration {
+    readonly rootDesires: ReadonlySet<Desire>;
+    readonly carriedParcelIds: readonly string[];
+    readonly deliveryCellCandidates: readonly Position[];
+}
+
+/** Derives possible goals from beliefs while limiting delivery-cell fan-out. */
+export class DesireGenerator {
+    generate(
+        context: PlanningContext,
+        excludedRootDesireIdentities?: ReadonlySet<string>,
+    ): DesireGeneration {
+        const rootDesires = new Set<Desire>();
+        const carriedParcelIds: string[] = [];
+        const deliveryCellCandidates = this.selectDeliveryCellCandidates(context);
+
+        for (const parcel of context.parcels.values()) {
+            if (parcel.carriedBy === context.agentId) {
+                carriedParcelIds.push(parcel.id);
+                continue;
+            }
+            if (parcel.carriedBy) {
                 continue;
             }
 
-            if (parcel.carriedBy === agentState.id) {
-                carriesParcel = true;
-            }
+            this.addRootDesire(
+                rootDesires,
+                new PickUpParcelDesire(
+                    parcel.id,
+                    new Position(parcel.x, parcel.y),
+                ),
+                excludedRootDesireIdentities,
+            );
         }
 
-        if (carriesParcel) {
-            for (const deliveryCell of this.beliefs.delivering_cells) {
-                intentions.push(
-                    new DeliverParcelIntention(deliveryCell, freeParcelIds),
+        if (carriedParcelIds.length > 0) {
+            for (const deliveryCell of this.selectDeliveryCellCandidates(
+                context,
+                excludedRootDesireIdentities,
+            )) {
+                this.addRootDesire(
+                    rootDesires,
+                    new DeliverParcelsDesire(deliveryCell),
+                    excludedRootDesireIdentities,
                 );
             }
         }
 
-        intentions.push(this.searchIntention);
-
-        return intentions;
+        return {
+            rootDesires,
+            carriedParcelIds,
+            deliveryCellCandidates,
+        };
     }
 
-    /** Returns the exploration history maintained by the persistent search intention. */
-    pickupClusterSnapshots(): readonly PickupClusterSnapshot[] {
-        return this.searchIntention.clusterSnapshots(
-            this.beliefs.pickup_cells,
-            this.beliefs.pickupCellObservationTimes(),
+    private addRootDesire(
+        desires: Set<Desire>,
+        desire: Desire,
+        excludedRootDesireIdentities: ReadonlySet<string> | undefined,
+    ): void {
+        if (excludedRootDesireIdentities?.has(desire.identity())) {
+            return;
+        }
+        desires.add(desire);
+    }
+
+    /**
+     * Keeps the nearest delivery cell and the cheapest delivery detour from the
+     * present cell toward every known free parcel.
+     */
+    private selectDeliveryCellCandidates(
+        context: PlanningContext,
+        excludedRootDesireIdentities?: ReadonlySet<string>,
+    ): readonly Position[] {
+        const distancesFromPresent = new Map<Position, number>();
+        for (const deliveryCell of context.deliveringCells) {
+            if (
+                excludedRootDesireIdentities?.has(
+                    `drop:${deliveryCell.x},${deliveryCell.y}`,
+                )
+            ) {
+                continue;
+            }
+
+            const distance = this.pathLengthAllowingCrateMoves(
+                context,
+                context.agentPosition,
+                deliveryCell,
+            );
+            if (distance !== undefined) {
+                distancesFromPresent.set(deliveryCell, distance);
+            }
+        }
+
+        const nearestDeliveryCell = this.minimumDistanceCell(
+            distancesFromPresent,
+        );
+        if (nearestDeliveryCell === undefined) {
+            return [];
+        }
+
+        const candidates = new Map<string, Position>();
+        this.addDeliveryCellCandidate(candidates, nearestDeliveryCell);
+
+        for (const parcel of context.parcels.values()) {
+            if (parcel.carriedBy) {
+                continue;
+            }
+
+            const pickupPosition = new Position(parcel.x, parcel.y);
+            let bestDeliveryCell: Position | undefined;
+            let bestDetourDistance = Infinity;
+            for (const [deliveryCell, distanceFromPresent]
+                of distancesFromPresent) {
+                const deliveryToPickup = this.pathLengthAllowingCrateMoves(
+                    context,
+                    deliveryCell,
+                    pickupPosition,
+                );
+                if (deliveryToPickup === undefined) {
+                    continue;
+                }
+
+                const detourDistance = distanceFromPresent + deliveryToPickup;
+                if (detourDistance < bestDetourDistance) {
+                    bestDeliveryCell = deliveryCell;
+                    bestDetourDistance = detourDistance;
+                }
+            }
+
+            if (bestDeliveryCell !== undefined) {
+                this.addDeliveryCellCandidate(candidates, bestDeliveryCell);
+            }
+        }
+
+        return [...candidates.values()];
+    }
+
+    private pathLengthAllowingCrateMoves(
+        context: PlanningContext,
+        startingPosition: Position,
+        targetPosition: Position,
+    ): number | undefined {
+        const directDistance = context.pathfinder.pathLength(
+            context.gameMap,
+            startingPosition,
+            targetPosition,
+            context.crates,
+        );
+        if (directDistance !== undefined || context.crates.size === 0) {
+            return directDistance;
+        }
+
+        return context.pathfinder.pathLength(
+            context.gameMap,
+            startingPosition,
+            targetPosition,
+            new Map<string, Position>(),
+        );
+    }
+
+    private minimumDistanceCell(
+        distances: ReadonlyMap<Position, number>,
+    ): Position | undefined {
+        let closestCell: Position | undefined;
+        let closestDistance = Infinity;
+        for (const [cell, distance] of distances) {
+            if (distance < closestDistance) {
+                closestCell = cell;
+                closestDistance = distance;
+            }
+        }
+        return closestCell;
+    }
+
+    private addDeliveryCellCandidate(
+        candidates: Map<string, Position>,
+        deliveryCell: Position,
+    ): void {
+        candidates.set(
+            `${deliveryCell.x},${deliveryCell.y}`,
+            deliveryCell,
         );
     }
 }

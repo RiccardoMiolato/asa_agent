@@ -520,14 +520,4 @@ export class Beliefs {
         this.movement_duration = duration;
     }
 
-    // Count the number of free parcels
-    freeParcelsCount(): number {
-        let count = 0;
-
-        this.parcels.forEach(
-            parcel => count += parcel.carriedBy ? 0 : 1
-        );
-
-        return count;
-    }
 }

@@ -1,4 +1,3 @@
-import type { IntentionDescription } from "./intentions.js";
 import {
     BELIEF_CHANGE_TYPE,
     type BeliefChange,
@@ -7,42 +6,13 @@ import {
     OPTION_TRAVERSABILITY,
     type OptionEvaluationGraph,
     type OptionEvaluationNode,
-    type OptionType,
 } from "./option_evaluator.js";
+import type { DESIRE_TYPE } from "./desires.js";
 import type { Position } from "./position.js";
 import {
     BaseBranchAndBoundGraphWriter,
     BranchAndBoundSvgWriter,
 } from "./_branch-and-bound-svg.js";
-
-/** One available intention and its score in the current deliberation. */
-export interface IntentionLogEntry {
-    readonly description: IntentionDescription;
-    readonly score: number;
-    readonly distance: number | undefined;
-    readonly selected: boolean;
-}
-
-/** Belief summary used to explain the state behind a decision. */
-export interface BeliefLogSummary {
-    readonly knownParcels: number;
-    readonly freeParcels: number;
-    readonly carriedByAgent: number;
-    readonly carriedByOthers: number;
-    readonly knownCrates: number;
-    readonly temporaryWalls: readonly Position[];
-}
-
-/** Complete, structured record of one deliberation cycle. */
-export interface DeliberationLog {
-    readonly cycle: number;
-    readonly agentId: string;
-    readonly agentScore: number | undefined;
-    readonly position: Position;
-    readonly beliefs: BeliefLogSummary;
-    readonly options: readonly IntentionLogEntry[];
-    readonly plannedActions: number;
-}
 
 /** Authoritative score increase reported by the server after a delivery. */
 export interface DeliveryGainLog {
@@ -65,14 +35,14 @@ export type OptionPlanMethod =
 /** One attempt to turn an evaluator-selected root into executable actions. */
 export interface OptionPlanAttemptLog {
     readonly optionIdentity: string;
-    readonly optionType: OptionType;
+    readonly optionType: DESIRE_TYPE;
     readonly parcelId: string | undefined;
     readonly targetPosition: Position;
     readonly estimatedTraversability: OPTION_TRAVERSABILITY | undefined;
     readonly result: "planned" | "rejected";
     readonly planner: OptionPlanMethod;
     readonly plannedActions: number;
-    readonly reason: "route-found" | "no-executable-route" | "missing-parcel-id";
+    readonly reason: "route-found" | "no-executable-route";
 }
 
 export type OptionSearchOutcome =
@@ -140,7 +110,6 @@ export interface MovementSafetyLog {
 
 /** Output contract for agent decisions. */
 export abstract class BaseAgentLogger {
-    abstract logDeliberation(deliberation: DeliberationLog): void;
     abstract logDeliveryGain(delivery: DeliveryGainLog): void;
 
     /** Optional so existing non-console loggers remain source-compatible. */
@@ -160,69 +129,6 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
             BaseBranchAndBoundGraphWriter = new BranchAndBoundSvgWriter(),
     ) {
         super();
-    }
-
-    logDeliberation(deliberation: DeliberationLog): void {
-        const { x, y } = deliberation.position;
-        const { beliefs } = deliberation;
-        const rankedOptions = [...deliberation.options].sort(
-            (first: IntentionLogEntry, second: IntentionLogEntry): number => {
-                const scoreDifference = second.score - first.score;
-                if (scoreDifference !== 0) {
-                    return scoreDifference;
-                }
-                return (first.distance ?? Number.POSITIVE_INFINITY)
-                    - (second.distance ?? Number.POSITIVE_INFINITY);
-            },
-        );
-
-        console.log("\n============================================================");
-        console.log(
-            `DELIBERATION ${deliberation.cycle}`
-            + ` | agent=${deliberation.agentId || "unknown"}`
-            + ` | position=(${x}, ${y})`
-            + ` | score=${deliberation.agentScore ?? "unknown"}`,
-        );
-        console.log(
-            `BELIEFS | parcels=${beliefs.knownParcels}`
-            + ` free=${beliefs.freeParcels}`
-            + ` carried-by-me=${beliefs.carriedByAgent}`
-            + ` carried-by-others=${beliefs.carriedByOthers}`
-            + ` crates=${beliefs.knownCrates}`
-            + ` temporary-walls=${beliefs.temporaryWalls.length > 0
-                ? beliefs.temporaryWalls.map(
-                    (wall: Position): string => `(${wall.x}, ${wall.y})`,
-                ).join(",")
-                : "none"}`,
-        );
-        console.log(`OPTIONS | ${rankedOptions.length} available (highest score first)`);
-
-        rankedOptions.forEach((option: IntentionLogEntry, index: number): void => {
-            const marker = option.selected ? ">" : " ";
-            const state = option.selected
-                ? "SELECTED"
-                : option.score < 0
-                    ? "NOT VIABLE"
-                    : "CANDIDATE";
-            console.log(
-                `${marker} #${index + 1} [${state}]`
-                + ` score=${option.score.toFixed(3)}`
-                + ` distance=${option.distance ?? "unknown"}`
-                + ` | ${this.formatDescription(option.description)}`,
-            );
-        });
-
-        const selectedOption = rankedOptions.find(
-            (option: IntentionLogEntry): boolean => option.selected,
-        );
-        console.log(
-            `DECISION | ${selectedOption
-                ? this.formatDescription(selectedOption.description)
-                : "none"}`
-            + `${selectedOption ? ` | score=${selectedOption.score.toFixed(3)}` : ""}`
-            + ` | planned actions=${deliberation.plannedActions}`,
-        );
-        console.log("============================================================");
     }
 
     logDeliveryGain(delivery: DeliveryGainLog): void {
@@ -431,20 +337,4 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
         }
     }
 
-    private formatDescription(description: IntentionDescription): string {
-        switch (description.type) {
-            case "search":
-                return description.target
-                    ? `SEARCH target=(${description.target.x}, ${description.target.y})`
-                    : "SEARCH target=chosen only if selected";
-            case "pick-up":
-                return `PICK-UP parcel=${description.parcelId}`
-                    + ` target=(${description.target.x}, ${description.target.y})`
-                    + ` current-reward=${description.reward}`;
-            case "deliver":
-                return `DELIVER target=(${description.target.x}, ${description.target.y})`
-                    + ` parcels=${description.parcelCount}`
-                    + ` estimated-delivery-gain=${description.estimatedGain.toFixed(3)}`;
-        }
-    }
 }

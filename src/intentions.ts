@@ -1,48 +1,11 @@
-import type { BasePathfinder } from "./astar.js";
-import type { Parcel } from "./beliefs.js";
-import type { Action, ActionFactory } from "./move.js";
-import { PDDLGoal } from "./pddl/pddlPlanner.js";
+import type { Action } from "./move.js";
+import type { Desire } from "./desires.js";
+import {
+    PlanningObjective,
+    type PlanningContext,
+    type PlanningObjectiveDescription,
+} from "./planning.js";
 import { Position } from "./position.js";
-import { RewardDecayEstimator } from "./_reward-decay.js";
-
-/** Current world state and services available to an intention. */
-export interface IntentionContext {
-    readonly gameMap: string[][];
-    readonly agentPosition: Position;
-    readonly crates: ReadonlyMap<string, Position>;
-    readonly pickupCells: readonly Position[];
-    readonly pickupCellLastObservedAt: ReadonlyMap<string, number>;
-    readonly deliveringCells: readonly Position[];
-    readonly parcels: ReadonlyMap<string, Parcel>;
-    readonly movementDuration: number;
-    readonly frameDuration: number;
-    readonly observationDistance: number;
-    readonly rewardDecayInterval: number | undefined;
-    readonly millisecondsUntilNextRewardDecay: number | undefined;
-    readonly freeParcelsCount: number;
-    readonly agentId: string;
-    readonly pathfinder: BasePathfinder;
-    readonly actionFactory: ActionFactory;
-}
-
-/** Structured description used to log an intention without recomputing its score. */
-export type IntentionDescription =
-    | {
-        readonly type: "search";
-        readonly target: Position | undefined;
-    }
-    | {
-        readonly type: "pick-up";
-        readonly parcelId: string;
-        readonly target: Position;
-        readonly reward: number;
-    }
-    | {
-        readonly type: "deliver";
-        readonly target: Position;
-        readonly parcelCount: number;
-        readonly estimatedGain: number;
-    };
 
 interface PickupCluster {
     readonly id: string;
@@ -92,63 +55,20 @@ interface RankedCoverageCandidate {
     readonly estimatedUtility: number;
 }
 
-export abstract class Intention {
-    abstract score(context: IntentionContext): number;
-    abstract buildActions(context: IntentionContext): Action[];
-    abstract toPddlGoal(context: IntentionContext): PDDLGoal | undefined;
-    abstract describe(): IntentionDescription;
-
-    /** Whether an empty action list means the intention is already fulfilled. */
-    isSatisfied(_context: IntentionContext): boolean {
-        return false;
-    }
-
-    /** Adds intention-specific actions after PDDL has reached the target. */
-    buildPddlCompletionActions(_context: IntentionContext): Action[] {
-        return [];
-    }
-
-    /** Manhattan distance used to prefer the closest option when scores are equal. */
-    selectionDistance(_context: IntentionContext): number | undefined {
-        return undefined;
-    }
-
-    shouldInterrupt(_context: IntentionContext): boolean {
-        return false;
-    }
-
-    /** Records state that is valid only after every planned action was executed. */
-    onPlanCompleted(_context: IntentionContext): void { }
+/** A goal to which the agent has committed. */
+export abstract class Intention extends PlanningObjective {
+    /** Records state that is valid only after the complete plan was executed. */
+    onPlanCompleted(): void { }
 }
 
-/** Base for intentions whose score depends on reward decay during execution. */
-export abstract class RewardIntention extends Intention {
-    /**
-     * Predicts the integer reward remaining after the real action-loop delays.
-     * Each move incurs a client wait, server movement, and frame synchronization.
-     */
-    protected estimateReward(
-        reward: number,
-        movementCount: number,
-        extraWaitCount: number,
-        movementDuration: number,
-        frameDuration: number,
-        rewardDecayInterval: number | undefined,
-        millisecondsUntilNextDecay: number | undefined,
-    ): number {
-        const executionMilliseconds =
-            RewardDecayEstimator.actionSequenceDurationMilliseconds(
-                movementCount,
-                extraWaitCount,
-                movementDuration,
-                frameDuration,
-            );
-        return RewardDecayEstimator.remainingReward(
-            reward,
-            executionMilliseconds,
-            rewardDecayInterval,
-            millisecondsUntilNextDecay,
-        );
+/** Commits one evaluator-selected desire without duplicating its goal data. */
+export class CommittedDesireIntention extends Intention {
+    constructor(readonly desire: Desire) {
+        super();
+    }
+
+    describe(): PlanningObjectiveDescription {
+        return this.desire.describe();
     }
 }
 
@@ -159,7 +79,6 @@ export class SearchIntention extends Intention {
     private targetLocation: Position | undefined;
     private clusters: PickupCluster[];
     private pickupCellsSignature: string;
-    private readonly knownFreeParcelIdsAtPlanning: Set<string>;
     private plannedCluster: PickupCluster | undefined;
     private plannedCoverageComplete: boolean;
     private planningSatisfied: boolean;
@@ -169,18 +88,12 @@ export class SearchIntention extends Intention {
         this.targetLocation = undefined;
         this.clusters = [];
         this.pickupCellsSignature = "";
-        this.knownFreeParcelIdsAtPlanning = new Set<string>();
         this.plannedCluster = undefined;
         this.plannedCoverageComplete = false;
         this.planningSatisfied = false;
     }
 
-    score(_context: IntentionContext): number {
-        return 0;
-    }
-
-    buildActions(context: IntentionContext): Action[] {
-        this.rememberKnownFreeParcels(context.parcels);
+    buildActions(context: PlanningContext): Action[] {
         this.synchronizeClusters(context.pickupCells);
         this.targetLocation = undefined;
         this.plannedCluster = undefined;
@@ -279,23 +192,11 @@ export class SearchIntention extends Intention {
         return [];
     }
 
-    override isSatisfied(_context: IntentionContext): boolean {
+    isSatisfied(): boolean {
         return this.planningSatisfied;
     }
 
-    shouldInterrupt(context: IntentionContext): boolean {
-        for (const parcel of context.parcels.values()) {
-            if (
-                !parcel.carriedBy
-                && !this.knownFreeParcelIdsAtPlanning.has(parcel.id)
-            ) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    override onPlanCompleted(_context: IntentionContext): void {
+    onPlanCompleted(): void {
         if (!this.plannedCoverageComplete || !this.plannedCluster) {
             return;
         }
@@ -306,7 +207,7 @@ export class SearchIntention extends Intention {
         this.plannedCoverageComplete = false;
     }
 
-    describe(): IntentionDescription {
+    describe(): PlanningObjectiveDescription {
         return {
             type: "search",
             target: this.targetLocation,
@@ -364,15 +265,8 @@ export class SearchIntention extends Intention {
         );
     }
 
-    toPddlGoal(context: IntentionContext): PDDLGoal | undefined {
-        if (!this.targetLocation) {
-            return undefined;
-        }
-
-        return {
-            agentId: context.agentId,
-            finalTargetPosition: this.targetLocation
-        }
+    target(): Position | undefined {
+        return this.targetLocation;
     }
 
     private clusterCellsSeenDuringCurrentScan(
@@ -450,17 +344,6 @@ export class SearchIntention extends Intention {
         this.pickupCellsSignature = signature;
     }
 
-    private rememberKnownFreeParcels(
-        parcels: ReadonlyMap<string, Parcel>,
-    ): void {
-        this.knownFreeParcelIdsAtPlanning.clear();
-        for (const parcel of parcels.values()) {
-            if (!parcel.carriedBy) {
-                this.knownFreeParcelIdsAtPlanning.add(parcel.id);
-            }
-        }
-    }
-
     private makeClusters(pickupCells: readonly Position[]): PickupCluster[] {
         const cellsByKey = new Map<string, Position>(
             pickupCells.map((cell: Position): [string, Position] => [
@@ -528,7 +411,7 @@ export class SearchIntention extends Intention {
     }
 
     private makeClusterCheckpoint(
-        context: IntentionContext,
+        context: PlanningContext,
         cluster: PickupCluster,
     ): ClusterCheckpoint {
         const scanStartedAt = cluster.scanStartedAt ?? Date.now();
@@ -570,7 +453,7 @@ export class SearchIntention extends Intention {
     }
 
     private buildCoveragePlan(
-        context: IntentionContext,
+        context: PlanningContext,
         cluster: PickupCluster,
         requiredCellKeys: ReadonlySet<string>,
         crates: ReadonlyMap<string, Position> = context.crates,
@@ -676,7 +559,7 @@ export class SearchIntention extends Intention {
     }
 
     private makeCoverageCandidates(
-        context: IntentionContext,
+        context: PlanningContext,
         cluster: PickupCluster,
     ): Position[] {
         const candidates: Position[] = [];
@@ -766,287 +649,5 @@ export class SearchIntention extends Intention {
 
     private positionKey(position: Position): string {
         return `${position.x},${position.y}`;
-    }
-}
-
-/** Picks up a known parcel when its expected reward is positive. */
-export class PickUpParcelIntention extends RewardIntention {
-    constructor(
-        readonly parcel: Parcel,
-        readonly parcelPosition: Position,
-    ) {
-        super();
-    }
-
-    score(context: IntentionContext): number {
-        const pickupDistance = context.pathfinder.pathLengthAllowingCrateMoves(
-            context,
-            context.agentPosition,
-            this.parcelPosition,
-        );
-        if (pickupDistance === undefined) {
-            return -1;
-        }
-
-        let shortestDeliveryDistance: number | undefined;
-        for (const deliveryCell of context.deliveringCells) {
-            const deliveryDistance = context.pathfinder.pathLengthAllowingCrateMoves(
-                context,
-                this.parcelPosition,
-                deliveryCell,
-            );
-            if (deliveryDistance === undefined) {
-                continue;
-            }
-            if (
-                shortestDeliveryDistance === undefined
-                || deliveryDistance < shortestDeliveryDistance
-            ) {
-                shortestDeliveryDistance = deliveryDistance;
-            }
-        }
-
-        if (shortestDeliveryDistance === undefined) {
-            return -1;
-        }
-
-        const totalMovementCount = pickupDistance + shortestDeliveryDistance;
-        const candidateReward = this.estimateReward(
-            this.parcel.reward,
-            totalMovementCount,
-            3,
-            context.movementDuration,
-            context.frameDuration,
-            context.rewardDecayInterval,
-            context.millisecondsUntilNextRewardDecay,
-        );
-        if (candidateReward === 0) {
-            return -1;
-        }
-
-        let totalReward = candidateReward;
-        for (const parcel of context.parcels.values()) {
-            if (parcel.carriedBy === context.agentId) {
-                totalReward += this.estimateReward(
-                    parcel.reward,
-                    totalMovementCount,
-                    3,
-                    context.movementDuration,
-                    context.frameDuration,
-                    context.rewardDecayInterval,
-                    context.millisecondsUntilNextRewardDecay,
-                );
-            }
-        }
-        return totalReward;
-    }
-
-    selectionDistance(context: IntentionContext): number | undefined {
-        return context.pathfinder.pathLengthAllowingCrateMoves(
-            context,
-            context.agentPosition,
-            this.parcelPosition,
-        );
-    }
-
-    buildActions(context: IntentionContext): Action[] {
-        const actions = context.pathfinder.findPath(
-            context.gameMap,
-            context.agentPosition,
-            this.parcelPosition,
-            context.crates,
-        );
-
-        if (actions.length > 0 || context.agentPosition.isEqual(this.parcelPosition))
-            actions.push(context.actionFactory.pickUp(this.parcel.id, context.agentId));
-
-        return actions;
-    }
-
-    toPddlGoal(context: IntentionContext): PDDLGoal {
-        return {
-            agentId: context.agentId,
-            finalTargetPosition: this.parcelPosition
-        }
-    }
-
-    override buildPddlCompletionActions(context: IntentionContext): Action[] {
-        return [context.actionFactory.pickUp(this.parcel.id, context.agentId)];
-    }
-
-    describe(): IntentionDescription {
-        return {
-            type: "pick-up",
-            parcelId: this.parcel.id,
-            target: this.parcelPosition,
-            reward: this.parcel.reward,
-        };
-    }
-}
-
-/** Delivers all parcels currently carried by the agent. */
-export class DeliverParcelIntention extends RewardIntention {
-    private readonly knownFreeParcelIds: ReadonlySet<string>;
-    private carriedParcelCount: number;
-    private estimatedDeliveryGain: number;
-
-    constructor(
-        readonly deliveryCell: Position,
-        knownFreeParcelIds: ReadonlySet<string>,
-    ) {
-        super();
-        this.knownFreeParcelIds = new Set(knownFreeParcelIds);
-        this.carriedParcelCount = 0;
-        this.estimatedDeliveryGain = 0;
-    }
-
-    score(context: IntentionContext): number {
-        this.carriedParcelCount = 0;
-        this.estimatedDeliveryGain = 0;
-        for (const parcel of context.parcels.values()) {
-            if (parcel.carriedBy === context.agentId) {
-                this.carriedParcelCount += 1;
-            }
-        }
-
-        const firstDeliveryDistance = context.pathfinder.pathLengthAllowingCrateMoves(
-            context,
-            context.agentPosition,
-            this.deliveryCell,
-        );
-        if (firstDeliveryDistance === undefined) {
-            return -1;
-        }
-
-        let carriedReward = 0;
-        for (const parcel of context.parcels.values()) {
-            if (parcel.carriedBy === context.agentId) {
-                carriedReward += this.estimateReward(
-                    parcel.reward,
-                    firstDeliveryDistance,
-                    1,
-                    context.movementDuration,
-                    context.frameDuration,
-                    context.rewardDecayInterval,
-                    context.millisecondsUntilNextRewardDecay,
-                );
-            }
-        }
-        this.estimatedDeliveryGain = carriedReward;
-        if (carriedReward === 0) {
-            return -1;
-        }
-
-        let bestContinuationReward = 0;
-        for (const parcel of context.parcels.values()) {
-            if (parcel.carriedBy) {
-                continue;
-            }
-
-            const parcelPosition = new Position(parcel.x, parcel.y);
-            const pickupDistance = context.pathfinder.pathLengthAllowingCrateMoves(
-                context,
-                this.deliveryCell,
-                parcelPosition,
-            );
-            if (pickupDistance === undefined) {
-                continue;
-            }
-
-            let shortestDeliveryDistance: number | undefined;
-            for (const finalDeliveryCell of context.deliveringCells) {
-                const deliveryDistance = context.pathfinder.pathLengthAllowingCrateMoves(
-                    context,
-                    parcelPosition,
-                    finalDeliveryCell,
-                );
-                if (deliveryDistance === undefined) {
-                    continue;
-                }
-                if (
-                    shortestDeliveryDistance === undefined
-                    || deliveryDistance < shortestDeliveryDistance
-                ) {
-                    shortestDeliveryDistance = deliveryDistance;
-                }
-            }
-
-            if (shortestDeliveryDistance === undefined) {
-                continue;
-            }
-
-            const totalMovementCount = firstDeliveryDistance
-                + pickupDistance
-                + shortestDeliveryDistance;
-            bestContinuationReward = Math.max(
-                bestContinuationReward,
-                this.estimateReward(
-                    parcel.reward,
-                    totalMovementCount,
-                    5,
-                    context.movementDuration,
-                    context.frameDuration,
-                    context.rewardDecayInterval,
-                    context.millisecondsUntilNextRewardDecay,
-                ),
-            );
-        }
-
-        return carriedReward + bestContinuationReward;
-    }
-
-    selectionDistance(context: IntentionContext): number | undefined {
-        return context.pathfinder.pathLengthAllowingCrateMoves(
-            context,
-            context.agentPosition,
-            this.deliveryCell,
-        );
-    }
-
-    buildActions(context: IntentionContext): Action[] {
-        const actions = context.pathfinder.findPath(
-            context.gameMap,
-            context.agentPosition,
-            this.deliveryCell,
-            context.crates,
-        );
-
-        if (actions.length > 0 || context.agentPosition.isEqual(this.deliveryCell))
-            actions.push(context.actionFactory.drop(context.agentId));
-        return actions;
-    }
-
-    shouldInterrupt(context: IntentionContext): boolean {
-        let freeParcelCount = 0;
-        for (const parcel of context.parcels.values()) {
-            if (parcel.carriedBy) {
-                continue;
-            }
-            freeParcelCount += 1;
-            if (!this.knownFreeParcelIds.has(parcel.id)) {
-                return true;
-            }
-        }
-        return freeParcelCount !== this.knownFreeParcelIds.size;
-    }
-
-    toPddlGoal(context: IntentionContext): PDDLGoal {
-        return {
-            agentId: context.agentId,
-            finalTargetPosition: this.deliveryCell
-        }
-    }
-
-    override buildPddlCompletionActions(context: IntentionContext): Action[] {
-        return [context.actionFactory.drop(context.agentId)];
-    }
-
-    describe(): IntentionDescription {
-        return {
-            type: "deliver",
-            target: this.deliveryCell,
-            parcelCount: this.carriedParcelCount,
-            estimatedGain: this.estimatedDeliveryGain,
-        };
     }
 }

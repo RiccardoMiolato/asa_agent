@@ -1,5 +1,4 @@
 import { Heap } from "heap-js";
-import { IntentionContext } from "./intentions.js";
 import { CoordinateOffset, Direction } from "./map.js";
 import type { Action, ActionFactory } from "./move.js";
 import { Position } from "./position.js";
@@ -50,36 +49,6 @@ export abstract class BasePathfinder {
             return { actions, positions: [startingPosition] };
         }
         return { actions, positions: [startingPosition, targetPosition] };
-    }
-
-    /**
-     * Estimates a route while treating known crates as movable obstacles.
-     *
-     * A direct A* route is preferred. If crates are the only thing blocking it,
-     * the crate-free distance keeps the intention eligible so PDDL can plan the
-     * required crate moves.
-     */
-    pathLengthAllowingCrateMoves(
-        context: IntentionContext,
-        startingPosition: Position,
-        targetPosition: Position,
-    ): number | undefined {
-        const directDistance = this.pathLength(
-            context.gameMap,
-            startingPosition,
-            targetPosition,
-            context.crates,
-        );
-        if (directDistance !== undefined || context.crates.size === 0) {
-            return directDistance;
-        }
-
-        return this.pathLength(
-            context.gameMap,
-            startingPosition,
-            targetPosition,
-            new Map<string, Position>(),
-        );
     }
 
     /** Returns the route length, or `undefined` when the target is unreachable. */

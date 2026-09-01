@@ -1,9 +1,7 @@
 import {
     type BaseAgentLogger,
-    type BeliefLogSummary,
     type BranchAndBoundLog,
     DELIBERATION_CYCLE_REASON,
-    type IntentionLogEntry,
     type OptionPlanAttemptLog,
     type OptionPlanMethod,
     type OptionSearchOutcome,
@@ -15,14 +13,17 @@ import {
     type BeliefRevision,
     type Beliefs,
 } from "./beliefs.js";
-import type { IntentionGenerator } from "./desires.js";
 import {
+    CommittedDesireIntention,
     Intention,
-    SearchIntention,
-    type IntentionContext,
-    type IntentionDescription,
     type PickupClusterSnapshot,
+    SearchIntention,
 } from "./intentions.js";
+import {
+    Desire,
+    DesireGenerator,
+    PickUpParcelDesire,
+} from "./desires.js";
 import { GameMap } from "./map.js";
 import {
     Action,
@@ -33,19 +34,16 @@ import {
 import { ConservativeMovementGuard } from "./movement-safety.js";
 import {
     OPTION_TRAVERSABILITY,
-    Option,
     OptionEvaluator,
     type OptionEvaluationGraph,
 } from "./option_evaluator.js";
+import {
+    type PlanningContext,
+    type PlanningObjectiveDescription,
+} from "./planning.js";
 import { PDDLPlanner } from "./pddl/pddlPlanner.js";
 import { Plan } from "./plan.js";
 import { Position } from "./position.js";
-
-interface ScoredIntention {
-    readonly intention: Intention;
-    readonly score: number;
-    readonly distance: number | undefined;
-}
 
 interface TemporaryBlockedCell {
     readonly position: Position;
@@ -62,7 +60,7 @@ interface NavigationBuildResult {
     readonly planner: OptionPlanMethod;
 }
 
-type OptionActionBuildResult =
+type DesireActionBuildResult =
     | {
         readonly result: "planned";
         readonly actions: Action[];
@@ -70,7 +68,7 @@ type OptionActionBuildResult =
     }
     | {
         readonly result: "rejected";
-        readonly reason: "no-executable-route" | "missing-parcel-id";
+        readonly reason: "no-executable-route";
         readonly planner: OptionPlanMethod;
     };
 
@@ -79,7 +77,7 @@ export enum AGENT_EXIT_REASON {
     NO_FEASIBLE_PLAN = "no-feasible-plan",
 }
 
-/** Outcome of one complete planning pass across the available intentions. */
+/** Outcome of one complete planning pass across options and search fallback. */
 export enum PLAN_BUILD_STATUS {
     PLANNED = "planned",
     SATISFIED = "satisfied",
@@ -87,18 +85,18 @@ export enum PLAN_BUILD_STATUS {
     INFEASIBLE = "infeasible",
 }
 
-/** Coordinates intention generation, selection, planning, and execution. */
+/** Coordinates option evaluation, exploration fallback, planning, and execution. */
 export class Agent {
     id: string;
     readonly position: Position;
 
     private score: number | undefined;
-    private intentions: Intention[];
     private currentIntention: Intention;
-    private currentOptionsList: Option[];
+    private selectedDesireSequence: Desire[];
     private isBeliefChanged: boolean;
     private pendingBeliefChanges: BeliefChange[];
     private readonly optionEvaluator: OptionEvaluator;
+    private readonly searchIntention: SearchIntention;
     private readonly plan: Plan;
     private planOwner: Intention | undefined;
     private readonly movementGuard: ConservativeMovementGuard;
@@ -111,7 +109,7 @@ export class Agent {
 
     constructor(
         private readonly beliefs: Beliefs,
-        private readonly intentionGenerator: IntentionGenerator,
+        desireGenerator: DesireGenerator,
         private readonly pathfinder: BasePathfinder,
         private readonly actionFactory: ActionFactory,
         private readonly logger: BaseAgentLogger,
@@ -120,11 +118,11 @@ export class Agent {
         this.id = "";
         this.position = new Position(0, 0);
         this.score = undefined;
-        this.intentions = [];
         this.isBeliefChanged = false;
         this.pendingBeliefChanges = [];
-        this.currentOptionsList = [];
-        this.currentIntention = new SearchIntention();
+        this.selectedDesireSequence = [];
+        this.searchIntention = new SearchIntention();
+        this.currentIntention = this.searchIntention;
         this.plan = new Plan();
         this.planOwner = undefined;
         this.movementGuard = new ConservativeMovementGuard(
@@ -136,7 +134,7 @@ export class Agent {
         this.hasAuthoritativePosition = false;
         this.deliberationCycle = 0;
         this.pddlPlanner = pddlPlanner ?? new PDDLPlanner(this.actionFactory);
-        this.optionEvaluator = new OptionEvaluator();
+        this.optionEvaluator = new OptionEvaluator(desireGenerator);
     }
 
     updatePosition(x: number, y: number): void {
@@ -168,7 +166,7 @@ export class Agent {
     }
 
     /** Exposes the selected decision to read-only observers. */
-    currentDecision(): IntentionDescription {
+    currentDecision(): PlanningObjectiveDescription {
         return this.currentIntention.describe();
     }
 
@@ -185,7 +183,10 @@ export class Agent {
 
     /** Exposes the search intention's persistent cluster visit history. */
     pickupClusterSnapshots(): readonly PickupClusterSnapshot[] {
-        return this.intentionGenerator.pickupClusterSnapshots();
+        return this.searchIntention.clusterSnapshots(
+            this.beliefs.pickup_cells,
+            this.beliefs.pickupCellObservationTimes(),
+        );
     }
 
     currentScore(): number | undefined {
@@ -222,17 +223,16 @@ export class Agent {
             this.refreshTemporaryBlockedCells();
             this.beliefs.updateParcelRewards();
             this.pathfinder.clearPathLengthCache();
-            const context = this.getIntentionContext();
+            const context = this.getPlanningContext();
 
             const initialOptionEvaluation =
                 this.optionEvaluator.evaluateWithGraph(context);
-            this.currentOptionsList = initialOptionEvaluation.bestSequence;
+            this.selectedDesireSequence = initialOptionEvaluation.bestSequence;
             const optionSearchTrace: OptionSearchTrace = {
                 evaluationPasses: [initialOptionEvaluation.graph],
                 planningAttempts: [],
             };
 
-            // const evaluatedOptions = this.filterOptions(context);
             const planStatus = await this.buildPlanWithTrace(
                 context,
                 optionSearchTrace,
@@ -244,31 +244,6 @@ export class Agent {
                 cycleReason,
                 cycleBeliefChanges,
             );
-
-            /**
-             * const options = this.intentionGenerator.generate({
-             *      id: this.id,
-             *      position: context.agentPosition,
-             *  });
-             *  this.addIntentions(options);
-             *  this.pathfinder.clearPathLengthCache();
-             *
-             * const plannedCrateRevision = this.beliefs.currentCrateRevision();
-             *
-             * this.logger.logDeliberation({
-             *     cycle: this.deliberationCycle,
-             *     agentId: this.id,
-             *     agentScore: this.score,
-             *     position: context.agentPosition,
-             *     beliefs: this.makeBeliefLogSummary(),
-             *     options: this.makeOptionLogEntries(
-             *         evaluatedOptions,
-             *         planStatus === PLAN_BUILD_STATUS.PLANNED
-             *         || planStatus === PLAN_BUILD_STATUS.SATISFIED,
-             *     ),
-             *     plannedActions: this.plan.size(),
-             * });
-             */
 
             if (planStatus === PLAN_BUILD_STATUS.TRANSIENTLY_BLOCKED) {
                 nextCycleReason =
@@ -348,15 +323,18 @@ export class Agent {
                     planMoved = true;
                 }
 
-                if (this.plan.isEmpty() && this.currentOptionsList.length > 0) {
+                if (
+                    this.plan.isEmpty()
+                    && this.selectedDesireSequence.length > 0
+                ) {
                     if (
                         nextAction instanceof PickUp
                         && !this.isBeliefChanged
-                        && await this.continueSelectedOptionSequence()
+                        && await this.continueSelectedDesireSequence()
                     ) {
                         continue;
                     }
-                    this.currentOptionsList = [];
+                    this.selectedDesireSequence = [];
                     deliberateImmediately = true;
                     nextCycleReason =
                         DELIBERATION_CYCLE_REASON.OPTION_SEGMENT_COMPLETED;
@@ -367,7 +345,7 @@ export class Agent {
                 this.planOwner = undefined;
             }
             if (!planInterrupted && this.plan.isEmpty()) {
-                this.completePlan(this.getIntentionContext());
+                this.completePlan();
                 if (planMoved) {
                     this.temporarilyBlockedCells.clear();
                 }
@@ -375,119 +353,23 @@ export class Agent {
         }
     }
 
-    getIntentions(): readonly Intention[] {
-        return this.intentions;
-    }
-
-    addIntention(intention: Intention): void {
-        this.intentions.push(intention);
-    }
-
-    addIntentions(intentions: Intention[]): void {
-        this.intentions = intentions;
-    }
-
-    clearIntentions(): void {
-        this.intentions = [];
-    }
-
-    /** Scores each option once and ranks them by score, then distance. */
-    filterOptions(context: IntentionContext = this.getIntentionContext()): ScoredIntention[] {
-        const fallback = this.intentions.find(
-            (intention: Intention): boolean => intention instanceof SearchIntention,
-        ) ?? new SearchIntention();
-        let bestOption: Intention = fallback;
-        let bestScore = fallback.score(context);
-        let bestDistance = fallback.selectionDistance(context);
-        const scoredIntentions: ScoredIntention[] = [{
-            intention: fallback,
-            score: bestScore,
-            distance: bestDistance,
-        }];
-
-        for (const intention of this.intentions) {
-            if (intention === fallback) {
-                continue;
-            }
-            const score = intention.score(context);
-            const distance = intention.selectionDistance(context);
-            scoredIntentions.push({ intention, score, distance });
-            const closerEqualScore = score === bestScore
-                && (distance ?? Number.POSITIVE_INFINITY)
-                < (bestDistance ?? Number.POSITIVE_INFINITY);
-            if (score > bestScore || closerEqualScore) {
-                bestScore = score;
-                bestDistance = distance;
-                bestOption = intention;
-            }
-        }
-
-        this.currentIntention = bestOption;
-        return scoredIntentions.sort(
-            (first: ScoredIntention, second: ScoredIntention): number => {
-                const scoreDifference = second.score - first.score;
-                if (scoreDifference !== 0) {
-                    return scoreDifference;
-                }
-                return (first.distance ?? Number.POSITIVE_INFINITY)
-                    - (second.distance ?? Number.POSITIVE_INFINITY);
-            },
-        );
-    }
-
-    /** Tries every ranked option for a plan and preserves all-satisfied idling. */
-    private async buildBestAvailablePlan(
-        rankedIntentions: readonly ScoredIntention[],
-        context: IntentionContext,
-    ): Promise<PLAN_BUILD_STATUS> {
-        let satisfiedIntention: Intention | undefined;
-        let infeasibleIntentionFound = false;
-
-        for (const { intention } of rankedIntentions) {
-            this.currentIntention = intention;
-            const planStatus = await this.buildPlan(context);
-            if (planStatus === PLAN_BUILD_STATUS.PLANNED) {
-                return PLAN_BUILD_STATUS.PLANNED;
-            }
-            if (planStatus === PLAN_BUILD_STATUS.SATISFIED) {
-                satisfiedIntention ??= intention;
-                continue;
-            }
-            infeasibleIntentionFound = true;
-        }
-
-        this.replacePlan([]);
-        if (this.temporarilyBlockedCells.size > 0) {
-            if (satisfiedIntention) {
-                this.currentIntention = satisfiedIntention;
-            }
-            return PLAN_BUILD_STATUS.TRANSIENTLY_BLOCKED;
-        }
-        if (infeasibleIntentionFound || !satisfiedIntention) {
-            return PLAN_BUILD_STATUS.INFEASIBLE;
-        }
-
-        this.currentIntention = satisfiedIntention;
-        return PLAN_BUILD_STATUS.SATISFIED;
-    }
-
     async buildPlan(
-        context: IntentionContext = this.getIntentionContext(),
+        context: PlanningContext = this.getPlanningContext(),
     ): Promise<PLAN_BUILD_STATUS> {
         return this.buildPlanWithTrace(context);
     }
 
     /** Builds a plan and optionally records each evaluator and planner decision. */
     private async buildPlanWithTrace(
-        context: IntentionContext,
+        context: PlanningContext,
         optionSearchTrace?: OptionSearchTrace,
     ): Promise<PLAN_BUILD_STATUS> {
         const rejectedRootOptionIdentities = new Set<string>();
 
-        while (this.currentOptionsList.length > 0) {
-            const bestOption = this.currentOptionsList[0];
-            const actionBuild = await this.buildOptionActionResult(
-                bestOption,
+        while (this.selectedDesireSequence.length > 0) {
+            const bestDesire = this.selectedDesireSequence[0];
+            const actionBuild = await this.buildDesireActionResult(
+                bestDesire,
                 context,
             );
             const estimatedTraversability = optionSearchTrace
@@ -495,14 +377,14 @@ export class Agent {
                     optionSearchTrace.evaluationPasses[
                         optionSearchTrace.evaluationPasses.length - 1
                     ],
-                    bestOption.identity(),
+                    bestDesire.identity(),
                 )
                 : undefined;
             optionSearchTrace?.planningAttempts.push({
-                optionIdentity: bestOption.identity(),
-                optionType: bestOption.getType(),
-                parcelId: bestOption.getParcelId(),
-                targetPosition: bestOption.getTargetCell(),
+                optionIdentity: bestDesire.identity(),
+                optionType: bestDesire.type,
+                parcelId: bestDesire.parcelId,
+                targetPosition: bestDesire.targetCell,
                 estimatedTraversability,
                 result: actionBuild.result,
                 planner: actionBuild.planner,
@@ -515,17 +397,19 @@ export class Agent {
             });
 
             if (actionBuild.result === "planned") {
-                this.currentOptionsList.shift();
-                this.replacePlan(actionBuild.actions);
+                this.selectedDesireSequence.shift();
+                const intention = new CommittedDesireIntention(bestDesire);
+                this.currentIntention = intention;
+                this.replacePlan(actionBuild.actions, intention);
                 return PLAN_BUILD_STATUS.PLANNED;
             }
 
-            rejectedRootOptionIdentities.add(bestOption.identity());
+            rejectedRootOptionIdentities.add(bestDesire.identity());
             const fallbackEvaluation = this.optionEvaluator.evaluateWithGraph(
                 context,
                 rejectedRootOptionIdentities,
             );
-            this.currentOptionsList = fallbackEvaluation.bestSequence;
+            this.selectedDesireSequence = fallbackEvaluation.bestSequence;
             optionSearchTrace?.evaluationPasses.push(fallbackEvaluation.graph);
         }
 
@@ -536,7 +420,7 @@ export class Agent {
 
     /** Emits the evaluator graph together with real A-star/PDDL validation outcomes. */
     private logOptionSearch(
-        context: IntentionContext,
+        context: PlanningContext,
         trace: OptionSearchTrace,
         planStatus: PLAN_BUILD_STATUS,
         cycleReason: DELIBERATION_CYCLE_REASON,
@@ -615,43 +499,45 @@ export class Agent {
         return PLAN_BUILD_STATUS.TRANSIENTLY_BLOCKED;
     }
 
-    private async buildActionsFromOption(
-        option: Option,
-        context: IntentionContext,
+    private async buildActionsFromDesire(
+        desire: Desire,
+        context: PlanningContext,
     ): Promise<Action[] | undefined> {
-        const result = await this.buildOptionActionResult(option, context);
+        const result = await this.buildDesireActionResult(desire, context);
         return result.result === "planned" ? result.actions : undefined;
     }
 
     /** Continues the evaluated route after a pickup without rerunning the evaluator. */
-    private async continueSelectedOptionSequence(
-        context: IntentionContext = this.getIntentionContext(),
+    private async continueSelectedDesireSequence(
+        context: PlanningContext = this.getPlanningContext(),
     ): Promise<boolean> {
-        const nextOption = this.currentOptionsList[0];
-        if (nextOption === undefined) {
+        const nextDesire = this.selectedDesireSequence[0];
+        if (nextDesire === undefined) {
             return false;
         }
 
         this.pathfinder.clearPathLengthCache();
-        const actionBuild = await this.buildOptionActionResult(
-            nextOption,
+        const actionBuild = await this.buildDesireActionResult(
+            nextDesire,
             context,
         );
         if (actionBuild.result !== "planned") {
             return false;
         }
 
-        this.currentOptionsList.shift();
-        this.replacePlan(actionBuild.actions);
+        this.selectedDesireSequence.shift();
+        const intention = new CommittedDesireIntention(nextDesire);
+        this.currentIntention = intention;
+        this.replacePlan(actionBuild.actions, intention);
         return true;
     }
 
-    /** Builds an option while retaining planner metadata for explainability. */
-    private async buildOptionActionResult(
-        option: Option,
-        context: IntentionContext,
-    ): Promise<OptionActionBuildResult> {
-        const targetCell = option.getTargetCell();
+    /** Builds a desire while retaining planner metadata for explainability. */
+    private async buildDesireActionResult(
+        desire: Desire,
+        context: PlanningContext,
+    ): Promise<DesireActionBuildResult> {
+        const targetCell = desire.targetCell;
         const navigation = await this.buildNavigationActions(
             targetCell,
             context,
@@ -664,20 +550,12 @@ export class Agent {
             };
         }
 
-        if (option.getType() === "pick") {
-            const parcelId = option.getParcelId();
-            if (parcelId === undefined) {
-                return {
-                    result: "rejected",
-                    reason: "missing-parcel-id",
-                    planner: navigation.planner,
-                };
-            }
+        if (desire instanceof PickUpParcelDesire) {
             return {
                 result: "planned",
                 actions: [
                     ...navigation.actions,
-                    context.actionFactory.pickUp(parcelId, context.agentId),
+                    context.actionFactory.pickUp(desire.parcelId, context.agentId),
                 ],
                 planner: navigation.planner,
             };
@@ -694,37 +572,26 @@ export class Agent {
     }
 
     private async buildSearchPlan(
-        context: IntentionContext,
+        context: PlanningContext,
     ): Promise<PLAN_BUILD_STATUS> {
-        const searchIntention = this.intentionGenerator.generate({
-            id: context.agentId,
-            position: context.agentPosition,
-        }).find(
-            (intention: Intention): boolean => intention instanceof SearchIntention,
-        );
-        if (!searchIntention) {
-            this.replacePlan([]);
-            return PLAN_BUILD_STATUS.INFEASIBLE;
-        }
-
-        this.currentIntention = searchIntention;
-        const searchActions = searchIntention.buildActions(context);
+        this.currentIntention = this.searchIntention;
+        const searchActions = this.searchIntention.buildActions(context);
         if (searchActions.length > 0) {
-            this.replacePlan(searchActions, searchIntention);
+            this.replacePlan(searchActions, this.searchIntention);
             return PLAN_BUILD_STATUS.PLANNED;
         }
-        if (searchIntention.isSatisfied(context)) {
-            this.replacePlan([], searchIntention);
+        if (this.searchIntention.isSatisfied()) {
+            this.replacePlan([], this.searchIntention);
             return PLAN_BUILD_STATUS.SATISFIED;
         }
 
-        const pddlGoal = searchIntention.toPddlGoal(context);
-        if (!pddlGoal) {
+        const searchTarget = this.searchIntention.target();
+        if (!searchTarget) {
             this.replacePlan([]);
             return PLAN_BUILD_STATUS.INFEASIBLE;
         }
         const navigationActions = await this.buildPddlNavigationActions(
-            pddlGoal.finalTargetPosition,
+            searchTarget,
             context,
         );
         if (navigationActions === undefined) {
@@ -732,13 +599,7 @@ export class Agent {
             return PLAN_BUILD_STATUS.INFEASIBLE;
         }
 
-        this.replacePlan(
-            [
-                ...navigationActions,
-                ...searchIntention.buildPddlCompletionActions(context),
-            ],
-            searchIntention,
-        );
+        this.replacePlan(navigationActions, this.searchIntention);
         return PLAN_BUILD_STATUS.PLANNED;
     }
 
@@ -749,15 +610,15 @@ export class Agent {
     }
 
     /** Notifies only the intention that created the successfully executed plan. */
-    private completePlan(context: IntentionContext): void {
+    private completePlan(): void {
         const completedPlanOwner = this.planOwner;
         this.planOwner = undefined;
-        completedPlanOwner?.onPlanCompleted(context);
+        completedPlanOwner?.onPlanCompleted();
     }
 
     private async buildNavigationActions(
         targetLocation: Position,
-        context: IntentionContext,
+        context: PlanningContext,
     ): Promise<NavigationBuildResult | undefined> {
         const directActions = context.pathfinder.findPath(
             context.gameMap,
@@ -792,7 +653,7 @@ export class Agent {
 
     private async buildPddlNavigationActions(
         targetLocation: Position,
-        context: IntentionContext,
+        context: PlanningContext,
     ): Promise<Action[] | undefined> {
         this.pddlPlanner.resetPDDL();
         this.pddlPlanner.buildPDDLProblem(
@@ -820,47 +681,7 @@ export class Agent {
         return navigationActions;
     }
 
-    private makeOptionLogEntries(
-        evaluatedOptions: readonly ScoredIntention[],
-        planFound: boolean,
-    ): IntentionLogEntry[] {
-        return evaluatedOptions.map(
-            ({ intention, score, distance }: ScoredIntention): IntentionLogEntry => ({
-                description: intention.describe(),
-                score,
-                distance,
-                selected: planFound && intention === this.currentIntention,
-            }),
-        );
-    }
-
-    private makeBeliefLogSummary(): BeliefLogSummary {
-        let freeParcels = 0;
-        let carriedByAgent = 0;
-        let carriedByOthers = 0;
-        for (const parcel of this.beliefs.parcels.values()) {
-            if (!parcel.carriedBy) {
-                freeParcels += 1;
-            } else if (parcel.carriedBy === this.id) {
-                carriedByAgent += 1;
-            } else {
-                carriedByOthers += 1;
-            }
-        }
-        return {
-            knownParcels: this.beliefs.parcels.size,
-            freeParcels,
-            carriedByAgent,
-            carriedByOthers,
-            knownCrates: this.beliefs.crates.size,
-            temporaryWalls: [...this.temporarilyBlockedCells.values()].map(
-                (blockedCell: TemporaryBlockedCell): Position =>
-                    blockedCell.position,
-            ),
-        };
-    }
-
-    private getIntentionContext(): IntentionContext {
+    private getPlanningContext(): PlanningContext {
         return {
             gameMap: this.gameMapWithTemporaryWalls(),
             agentPosition: new Position(this.position.x, this.position.y),
@@ -876,7 +697,6 @@ export class Agent {
                 this.beliefs.rewardDecayIntervalMilliseconds(),
             millisecondsUntilNextRewardDecay:
                 this.beliefs.millisecondsUntilNextRewardDecay(),
-            freeParcelsCount: this.beliefs.freeParcelsCount(),
             agentId: this.id,
             pathfinder: this.pathfinder,
             actionFactory: this.actionFactory,

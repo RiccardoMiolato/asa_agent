@@ -1,11 +1,12 @@
 import type { Agent } from "./agent.js";
 import type { Beliefs } from "./beliefs.js";
-import type { IntentionDescription, PickupClusterSnapshot } from "./intentions.js";
+import type { PickupClusterSnapshot } from "./intentions.js";
+import type { PlanningObjectiveDescription } from "./planning.js";
 import { Position } from "./position.js";
 
 export interface GhostMapTarget {
     readonly position: Position;
-    readonly intention: IntentionDescription["type"];
+    readonly intention: PlanningObjectiveDescription["type"];
 }
 
 export interface GhostMapAgentState {

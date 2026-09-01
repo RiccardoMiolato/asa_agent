@@ -1,9 +1,15 @@
-import { Parcel } from "./beliefs.js";
-import { IntentionContext } from "./intentions.js";
+import {
+    DeliverParcelsDesire,
+    Desire,
+    DesireGenerator,
+    type DESIRE_TYPE,
+    PickUpParcelDesire,
+} from "./desires.js";
+import {
+    type PlanningContext,
+} from "./planning.js";
 import { Position } from "./position.js";
 import { RewardDecayEstimator } from "./_reward-decay.js";
-
-export type OptionType = "pick" | "drop";
 
 /** How the evaluator believes an option edge can be crossed. */
 export enum OPTION_TRAVERSABILITY {
@@ -36,7 +42,7 @@ export interface OptionEvaluationEdge {
     readonly sourceNodeId: string;
     readonly targetNodeId: string | undefined;
     readonly optionIdentity: string;
-    readonly optionType: OptionType;
+    readonly optionType: DESIRE_TYPE;
     readonly parcelId: string | undefined;
     readonly targetPosition: Position;
     readonly traversability: OPTION_TRAVERSABILITY;
@@ -59,58 +65,14 @@ export interface OptionEvaluationGraph {
 
 /** Winning sequence plus the graph that explains how it was selected. */
 export interface OptionEvaluation {
-    readonly bestSequence: Option[];
+    readonly bestSequence: Desire[];
     readonly graph: OptionEvaluationGraph;
 }
 
-export class Option {
-    private optionType: OptionType;
-    private parcelId: string | undefined;
-    private targetCell: Position;
-    private score: number;
-
-    constructor(optionType: OptionType, targetCell: Position, parcelId: string | undefined = undefined) {
-        this.optionType = optionType;
-        this.targetCell = targetCell;
-        this.score = -Infinity;
-
-        if(this.optionType === "pick")
-            this.parcelId = parcelId;
-    }
-
-    getType (): OptionType {
-        return this.optionType;
-    }
-
-    getTargetCell (): Position {
-        return this.targetCell;
-    }
-
-    getParcelId (): string | undefined {
-        return this.parcelId;
-    }
-
-    /** Stable identity used to reject only a failed root choice during replanning. */
-    identity(): string {
-        if (this.optionType === "pick") {
-            return `pick:${this.parcelId ?? "missing"}`;
-        }
-        return `drop:${this.targetCell.x},${this.targetCell.y}`;
-    }
-
-    getScore(): number {
-        return this.score;
-    }
-
-    setScore(score: number) {
-        this.score = score;
-    }
-}
-
 interface EvaluationResult {
-    bestSequence: Option[];
-    totalScore: number;
-    completionMilliseconds: number;
+    readonly bestSequence: Desire[];
+    readonly totalScore: number;
+    readonly completionMilliseconds: number;
 }
 
 interface TraversabilityAssessment {
@@ -120,7 +82,7 @@ interface TraversabilityAssessment {
 
 interface EvaluatedCandidate {
     readonly order: number;
-    readonly option: Option;
+    readonly desire: Desire;
     readonly targetNodeId: string;
     readonly traversability: OPTION_TRAVERSABILITY;
     readonly distance: number;
@@ -130,10 +92,12 @@ interface EvaluatedCandidate {
 }
 
 export class OptionEvaluator {
+    constructor(private readonly desireGenerator: DesireGenerator) { }
+
     evaluate(
-        context: IntentionContext,
+        context: PlanningContext,
         excludedRootOptionIdentities?: ReadonlySet<string>,
-    ): Option[] {
+    ): Desire[] {
         return this.evaluateWithGraph(
             context,
             excludedRootOptionIdentities,
@@ -142,46 +106,13 @@ export class OptionEvaluator {
 
     /** Evaluates options while retaining every visited node and considered edge. */
     evaluateWithGraph(
-        context: IntentionContext,
+        context: PlanningContext,
         excludedRootOptionIdentities?: ReadonlySet<string>,
     ): OptionEvaluation {
-        const optionSet: Set<Option> = new Set();
-        const carriedParcelIds: string[] = [];
-        const deliveryCellCandidates = this.selectDeliveryCellCandidates(
+        const generation = this.desireGenerator.generate(
             context,
+            excludedRootOptionIdentities,
         );
-
-        context.parcels.forEach((parcel: Parcel) => {
-            if(parcel.carriedBy === context.agentId) {
-                carriedParcelIds.push(parcel.id);
-            } else if (!parcel.carriedBy) {
-                const parcelOption = new Option(
-                    "pick",
-                    new Position(parcel.x, parcel.y),
-                    parcel.id
-                );
-                this.addRootOption(
-                    optionSet,
-                    parcelOption,
-                    excludedRootOptionIdentities,
-                );
-            }
-        });
-
-        if(carriedParcelIds.length > 0){
-            const rootDeliveryCellCandidates =
-                this.selectDeliveryCellCandidates(
-                    context,
-                    excludedRootOptionIdentities,
-                );
-            for (const deliveryCell of rootDeliveryCellCandidates) {
-                this.addRootOption(
-                    optionSet,
-                    new Option("drop", deliveryCell),
-                    excludedRootOptionIdentities,
-                );
-            }
-        }
 
         const nodes: OptionEvaluationNode[] = [];
         const edges: OptionEvaluationEdge[] = [];
@@ -189,14 +120,14 @@ export class OptionEvaluator {
         const result = this.evaluateRec(
             context,
             context.agentPosition,
-            optionSet,
-            carriedParcelIds,
+            generation.rootDesires,
+            generation.carriedParcelIds,
             0,
             rootNodeId,
             0,
             nodes,
             edges,
-            deliveryCellCandidates,
+            generation.deliveryCellCandidates,
         );
 
         return {
@@ -214,22 +145,11 @@ export class OptionEvaluator {
         };
     }
 
-    private addRootOption(
-        optionSet: Set<Option>,
-        option: Option,
-        excludedRootOptionIdentities: ReadonlySet<string> | undefined,
-    ): void {
-        if (excludedRootOptionIdentities?.has(option.identity())) {
-            return;
-        }
-        optionSet.add(option);
-    }
-
     private evaluateRec(
-        context: IntentionContext,
+        context: PlanningContext,
         agentPosition: Position,
-        optionSet: Set<Option>,
-        carriedParcelIds: string[],
+        desires: ReadonlySet<Desire>,
+        carriedParcelIds: readonly string[],
         elapsedMilliseconds: number,
         nodeId: string,
         depth: number,
@@ -246,13 +166,13 @@ export class OptionEvaluator {
         const evaluatedCandidates: EvaluatedCandidate[] = [];
         let optionOrder = 0;
 
-        optionSet.forEach((option: Option) => {
+        for (const desire of desires) {
             const currentOptionOrder = optionOrder;
             optionOrder += 1;
             const assessment = this.assessTraversability(
                 context,
                 agentPosition,
-                option.getTargetCell(),
+                desire.targetCell,
             );
 
             if (assessment.distance === undefined) {
@@ -260,10 +180,10 @@ export class OptionEvaluator {
                     order: currentOptionOrder,
                     sourceNodeId: nodeId,
                     targetNodeId: undefined,
-                    optionIdentity: option.identity(),
-                    optionType: option.getType(),
-                    parcelId: option.getParcelId(),
-                    targetPosition: option.getTargetCell(),
+                    optionIdentity: desire.identity(),
+                    optionType: desire.type,
+                    parcelId: desire.parcelId,
+                    targetPosition: desire.targetCell,
                     traversability: OPTION_TRAVERSABILITY.UNREACHABLE,
                     estimatedDistance: undefined,
                     estimatedArrivalMilliseconds: undefined,
@@ -271,7 +191,7 @@ export class OptionEvaluator {
                     branchScore: undefined,
                     decision: OPTION_BRANCH_DECISION.UNREACHABLE,
                 });
-                return;
+                continue;
             }
 
             const newElapsedMilliseconds = elapsedMilliseconds
@@ -281,21 +201,24 @@ export class OptionEvaluator {
                     context.movementDuration,
                     context.frameDuration,
                 );
-            const newOptionSet: Set<Option> = new Set(optionSet);
-            newOptionSet.delete(option);
+            const remainingDesires = new Set(desires);
+            remainingDesires.delete(desire);
 
             let newCarriedIds = [...carriedParcelIds];
             let scoreForThisOption = 0;
 
-            if (option.getType() === "pick") {
-                newCarriedIds.push(option.getParcelId()!);
+            if (desire instanceof PickUpParcelDesire) {
+                newCarriedIds.push(desire.parcelId);
 
-                const hasDropOption = [...newOptionSet].some(
-                    (candidate: Option): boolean => candidate.getType() === "drop",
+                const hasDeliveryDesire = [...remainingDesires].some(
+                    (candidate: Desire): boolean =>
+                        candidate instanceof DeliverParcelsDesire,
                 );
-                if (!hasDropOption) {
+                if (!hasDeliveryDesire) {
                     for (const deliveryCell of deliveryCellCandidates) {
-                        newOptionSet.add(new Option("drop", deliveryCell));
+                        remainingDesires.add(
+                            new DeliverParcelsDesire(deliveryCell),
+                        );
                     }
                 }
             } else {
@@ -305,18 +228,18 @@ export class OptionEvaluator {
                     newElapsedMilliseconds,
                 );
                 newCarriedIds = [];
-                for (const candidate of newOptionSet) {
-                    if (candidate.getType() === "drop") {
-                        newOptionSet.delete(candidate);
+                for (const candidate of remainingDesires) {
+                    if (candidate instanceof DeliverParcelsDesire) {
+                        remainingDesires.delete(candidate);
                     }
                 }
             }
 
-            const targetNodeId = `${nodeId}/${option.identity()}`;
+            const targetNodeId = `${nodeId}/${desire.identity()}`;
             const nextResult = this.evaluateRec(
                 context,
-                option.getTargetCell(),
-                newOptionSet,
+                desire.targetCell,
+                remainingDesires,
                 newCarriedIds,
                 newElapsedMilliseconds,
                 targetNodeId,
@@ -327,16 +250,14 @@ export class OptionEvaluator {
             );
 
             const totalScore = scoreForThisOption + nextResult.totalScore;
-            option.setScore(totalScore);
-
             const candidateResult: EvaluationResult = {
-                bestSequence: [option, ...nextResult.bestSequence],
+                bestSequence: [desire, ...nextResult.bestSequence],
                 totalScore,
                 completionMilliseconds: nextResult.completionMilliseconds,
             };
             const evaluatedCandidate: EvaluatedCandidate = {
                 order: currentOptionOrder,
-                option,
+                desire,
                 targetNodeId,
                 traversability: assessment.traversability,
                 distance: assessment.distance,
@@ -349,17 +270,17 @@ export class OptionEvaluator {
                 bestResult = candidateResult;
                 selectedCandidate = evaluatedCandidate;
             }
-        });
+        }
 
         for (const candidate of evaluatedCandidates) {
             edges.push({
                 order: candidate.order,
                 sourceNodeId: nodeId,
                 targetNodeId: candidate.targetNodeId,
-                optionIdentity: candidate.option.identity(),
-                optionType: candidate.option.getType(),
-                parcelId: candidate.option.getParcelId(),
-                targetPosition: candidate.option.getTargetCell(),
+                optionIdentity: candidate.desire.identity(),
+                optionType: candidate.desire.type,
+                parcelId: candidate.desire.parcelId,
+                targetPosition: candidate.desire.targetCell,
                 traversability: candidate.traversability,
                 estimatedDistance: candidate.distance,
                 estimatedArrivalMilliseconds: candidate.arrivalMilliseconds,
@@ -376,111 +297,15 @@ export class OptionEvaluator {
             position: agentPosition,
             carriedParcelIds: [...carriedParcelIds],
             elapsedMilliseconds,
-            selectedOptionIdentity: selectedCandidate?.option.identity(),
+            selectedOptionIdentity: selectedCandidate?.desire.identity(),
         });
 
         return bestResult;
     }
 
-    /**
-     * Keeps the nearest terminal cell and the cheapest delivery detour from the
-     * present cell toward every known free parcel.
-     */
-    private selectDeliveryCellCandidates(
-        context: IntentionContext,
-        excludedRootOptionIdentities?: ReadonlySet<string>,
-    ): readonly Position[] {
-        const distancesFromPresent = new Map<Position, number>();
-        for (const deliveryCell of context.deliveringCells) {
-            if (
-                excludedRootOptionIdentities?.has(
-                    `drop:${deliveryCell.x},${deliveryCell.y}`,
-                )
-            ) {
-                continue;
-            }
-
-            const assessment = this.assessTraversability(
-                context,
-                context.agentPosition,
-                deliveryCell,
-            );
-            if (assessment.distance !== undefined) {
-                distancesFromPresent.set(deliveryCell, assessment.distance);
-            }
-        }
-
-        const nearestDeliveryCell = this.minimumDistanceCell(
-            distancesFromPresent,
-        );
-        if (nearestDeliveryCell === undefined) {
-            return [];
-        }
-
-        const candidates = new Map<string, Position>();
-        this.addDeliveryCellCandidate(candidates, nearestDeliveryCell);
-
-        for (const parcel of context.parcels.values()) {
-            if (parcel.carriedBy) {
-                continue;
-            }
-
-            const pickupPosition = new Position(parcel.x, parcel.y);
-            let bestDeliveryCell: Position | undefined;
-            let bestDetourDistance = Infinity;
-            for (const [deliveryCell, distanceFromPresent]
-                of distancesFromPresent) {
-                const deliveryToPickup = this.assessTraversability(
-                    context,
-                    deliveryCell,
-                    pickupPosition,
-                ).distance;
-                if (deliveryToPickup === undefined) {
-                    continue;
-                }
-
-                const detourDistance = distanceFromPresent + deliveryToPickup;
-                if (detourDistance < bestDetourDistance) {
-                    bestDeliveryCell = deliveryCell;
-                    bestDetourDistance = detourDistance;
-                }
-            }
-
-            if (bestDeliveryCell !== undefined) {
-                this.addDeliveryCellCandidate(candidates, bestDeliveryCell);
-            }
-        }
-
-        return [...candidates.values()];
-    }
-
-    private minimumDistanceCell(
-        distances: ReadonlyMap<Position, number>,
-    ): Position | undefined {
-        let closestCell: Position | undefined;
-        let closestDistance = Infinity;
-        for (const [cell, distance] of distances) {
-            if (distance < closestDistance) {
-                closestCell = cell;
-                closestDistance = distance;
-            }
-        }
-        return closestCell;
-    }
-
-    private addDeliveryCellCandidate(
-        candidates: Map<string, Position>,
-        deliveryCell: Position,
-    ): void {
-        candidates.set(
-            `${deliveryCell.x},${deliveryCell.y}`,
-            deliveryCell,
-        );
-    }
-
     /** Separates guaranteed A* reachability from optimistic crate-relaxed reachability. */
     private assessTraversability(
-        context: IntentionContext,
+        context: PlanningContext,
         startingPosition: Position,
         targetPosition: Position,
     ): TraversabilityAssessment {
@@ -534,25 +359,25 @@ export class OptionEvaluator {
     }
 
     private computeDeliveryScore(
-        context: IntentionContext,
-        carriedParcelIds: string[],
+        context: PlanningContext,
+        carriedParcelIds: readonly string[],
         elapsedMilliseconds: number,
     ): number {
         let deliveryScore = 0;
 
-        carriedParcelIds.forEach((parcelId: string) => {
+        for (const parcelId of carriedParcelIds) {
             const parcel = context.parcels.get(parcelId);
-
-            if(parcel) {
-                const remainingReward = RewardDecayEstimator.remainingReward(
-                    parcel.reward,
-                    elapsedMilliseconds,
-                    context.rewardDecayInterval,
-                    context.millisecondsUntilNextRewardDecay,
-                );
-                deliveryScore += remainingReward;
+            if (!parcel) {
+                continue;
             }
-        });
+
+            deliveryScore += RewardDecayEstimator.remainingReward(
+                parcel.reward,
+                elapsedMilliseconds,
+                context.rewardDecayInterval,
+                context.millisecondsUntilNextRewardDecay,
+            );
+        }
 
         return deliveryScore;
     }
