@@ -1,6 +1,7 @@
-import type { Agent } from "./bdi/agent.js";
+import type { Agent } from "./agent.js";
 import type { Beliefs } from "./bdi/beliefs.js";
-import type { IntentionDescription, PickupClusterSnapshot } from "./intentions.js";
+import { IntentionDescription, PickupClusterSnapshot } from "./bdi/intentions.js";
+
 import { Position } from "./utils/position.js";
 
 export interface GhostMapTarget {

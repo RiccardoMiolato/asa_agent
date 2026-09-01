@@ -1,12 +1,9 @@
-import {
-    Intention,
-    SearchIntention,
-    type IntentionContext,
-    type IntentionDescription,
-    type PickupClusterSnapshot,
-} from "../intentions.js";
-import { PDDLPlanner } from "../pddl/pddlPlanner.js";
-import { Plan } from "../plan.js";
+import type { Beliefs } from "./bdi/beliefs.js";
+import type { IntentionGenerator } from "./bdi/desires.js";
+import { Intention, IntentionContext, IntentionDescription, PickupClusterSnapshot, SearchIntention } from "./bdi/intentions.js";
+import { Option, OPTION_TRAVERSABILITY, OptionEvaluationGraph, OptionEvaluator } from "./bdi/option_evaluator.js";
+import { MissionHandler } from "./llm/MissionHandler.js";
+import { PDDLPlanner } from "./pddl/pddlPlanner.js";
 import {
     type BaseAgentLogger,
     type BeliefLogSummary,
@@ -15,15 +12,13 @@ import {
     type OptionPlanAttemptLog,
     type OptionPlanMethod,
     type OptionSearchOutcome,
-} from "../utils/_logging.js";
-import type { BasePathfinder } from "../utils/astar.js";
-import { GameMap } from "../utils/map.js";
-import { Action, ActionFactory, MovementAction } from "../utils/move.js";
-import { ConservativeMovementGuard } from "../utils/movement-safety.js";
-import { Position } from "../utils/position.js";
-import type { Beliefs } from "./beliefs.js";
-import type { IntentionGenerator } from "./desires.js";
-import { Option, OPTION_TRAVERSABILITY, OptionEvaluationGraph, OptionEvaluator } from "./option_evaluator.js";
+} from "./utils/_logging.js";
+import type { BasePathfinder } from "./utils/astar.js";
+import { GameMap } from "./utils/map.js";
+import { Action, ActionFactory, MovementAction } from "./utils/move.js";
+import { ConservativeMovementGuard } from "./utils/movement-safety.js";
+import { Plan } from "./utils/plan.js";
+import { Position } from "./utils/position.js";
 
 interface ScoredIntention {
     readonly intention: Intention;
@@ -76,6 +71,10 @@ export class Agent {
     id: string;
     readonly position: Position;
 
+    // LLM local variables
+    private readonly useLLM: boolean;
+    private readonly missionHandler: MissionHandler | undefined;
+
     private score: number | undefined;
     private intentions: Intention[];
     private currentIntention: Intention;
@@ -98,10 +97,13 @@ export class Agent {
         private readonly pathfinder: BasePathfinder,
         private readonly actionFactory: ActionFactory,
         private readonly logger: BaseAgentLogger,
-        pddlPlanner?: PDDLPlanner,
+        useLLM: boolean = false,
+        llmMissionHandler: MissionHandler | undefined = undefined,
     ) {
         this.id = "";
         this.position = new Position(0, 0);
+        this.useLLM = useLLM;
+        this.missionHandler = llmMissionHandler;
         this.score = undefined;
         this.intentions = [];
         this.isBeliefChanged = false;
@@ -117,7 +119,7 @@ export class Agent {
         this.gridPositionWaiters = new Set<() => void>();
         this.hasAuthoritativePosition = false;
         this.deliberationCycle = 0;
-        this.pddlPlanner = pddlPlanner ?? new PDDLPlanner(this.actionFactory);
+        this.pddlPlanner = new PDDLPlanner(this.actionFactory);
         this.optionEvaluator = new OptionEvaluator();
     }
 
@@ -178,6 +180,17 @@ export class Agent {
         return this.deliberationCycle;
     }
 
+    usesLLM(): boolean {
+        return this.useLLM;
+    }
+
+    handleMsgFromChat(msg: string): void {
+        if(!this.useLLM)
+            return;
+
+        this.missionHandler?.addPendingMission(msg);
+    }
+
     /** Continuously selects and executes the most valuable available intention. */
     async agent_loop(): Promise<AGENT_EXIT_REASON> {
         await new Promise<void>((resolve) => setTimeout(resolve, 1000));
@@ -192,6 +205,10 @@ export class Agent {
             deliberateImmediately = false;
 
             await this.waitForGridPosition();
+
+            if(this.useLLM && this.missionHandler?.isMissionWaiting()){
+                const newMission = await this.missionHandler?.evaluateMission();
+            }
 
             this.deliberationCycle += 1;
             this.refreshTemporaryBlockedCells();

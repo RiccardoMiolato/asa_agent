@@ -1,5 +1,3 @@
-import { LLMMessage } from "./LLMMemory.js";
-
 /**
  * The client is responsible to be the interface between the
  * LLM-Agent and the LLM model
