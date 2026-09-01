@@ -207,7 +207,7 @@ export class Agent {
             await this.waitForGridPosition();
 
             if(this.useLLM && this.missionHandler?.isMissionWaiting()){
-                const newMission = await this.missionHandler?.evaluateMission();
+                const newMission = await this.missionHandler?.evaluateMission(this.getIntentionContext());
             }
 
             this.deliberationCycle += 1;

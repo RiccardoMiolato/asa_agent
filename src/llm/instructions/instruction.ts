@@ -98,7 +98,7 @@ CLASSIFICATION RULES
 
 OUTPUT RULES
 
-Return ONLY valid JSON. Do not include markdown, code fences, or additional text.
+Return ONLY valid JSON. Do NOT any explanation or anything, just return the pure JSON code.
 
 Use exactly this structure:
 {
@@ -113,6 +113,28 @@ false when it provides no benefit or imposes a penalty.
 
 The "motivation" must contain at most 10 words and briefly justify the classification
 `
+const MISSION_CLASSIFIER_RESULT_STRUCTURE =  {
+  format: {
+      type: "json_schema",
+      schema: {
+          type: "object",
+          properties: {
+              level: {
+                  type: "integer",
+                  enum: [1, 2, 3]
+              },
+              worth: {
+                  type: "boolean"
+              },
+              motivation: {
+                  type: "string"
+              }
+          },
+          required: ["level", "worth", "motivation"],
+          additionalProperties: false
+      }
+  }
+};
 
 const LEVEL_1_EVALUATION_INSTRUCTIONS: string = `
 You are an evaluator for atomic missions at the dependency of DeliverooJs Agent.
@@ -124,19 +146,17 @@ Your task is to produce an execution plan for the mission.
 You do not have access to the tools and must not assume their results.
 The returned tools will be executed by another system.
 
-AVAILABLE TOOLS
+AVAILABLE TOOLS:
 ${Array.from(TOOLS.entries()).map(([name, description]) => `- ${name}: ${description}`).join("\n")}
 
-TOOL FUNCTIONS DEFINITIONS
+TOOL FUNCTIONS DEFINITIONS:
 ${Array.from(TOOLS_FUNCTION_DEFINITION.entries()).map(([name, definition]) => `- ${name}:\n${definition}`).join("\n")}
 
-OUTPUT
-
-Return ONLY valid JSON. Do not include markdown, code fences, explanations,
-or additional text.
+OUTPUT:
+Return ONLY valid JSON.
+Do not include markdown, code fences, explanations,or additional text.
 
 The output must have this structure:
-
 {
   "tools": [
     {
@@ -146,7 +166,7 @@ The output must have this structure:
   ]
 }
 
-Rules:
+RULES:
 
 1. Include a tool only when it is necessary to complete the mission.
 2. Tools must appear in execution order.
@@ -162,41 +182,50 @@ Rules:
    {"tools":[]}
 10. Include all tool calls required by the mission, even when they are
 independent of one another. Preserve the logical order implied by the mission.
+11. Do not include any additional text, explanations, or comments in the output.
+12. All mathematical function, not related to different variables, must be evaluated as a single formula
 
 EXAMPLES:
 mission: "Calculate 5*5"
 output: {
-    "tools": [
-        { "name": "math_eval", "params": [ "5*5" ] }
-    ]
+  "tools": [
+      { "name": "math_eval", "params": [ "5*5" ] }
+  ]
 }
 
 mission: "Compute 10-2"
 output: {
-    "tools": [
-        { "name": "math_eval", "params": [ "10-2" ] }
-    ]
+  "tools": [
+      { "name": "math_eval", "params": [ "10-2" ] }
+  ]
+}
+
+mission: "Compute 10*4+3 and subtract 2 to it"
+output: {
+  "tools": [
+      { "name": "math_eval", "params": [ "(10*4+3)-2" ] }
+  ]
 }
 
 mission: "What is the capital of Italy?"
 output: {
-    "tools": [
-        { "name": "answer_trivia",  "params": [ "What is the capital of Italy?" ] }
-    ]
+  "tools": [
+      { "name": "answer_trivia",  "params": [ "What is the capital of Italy?" ] }
+  ]
 }
 
 mission: "Tell me the name of the owner of Tesla"
 output: {
-    "tools": [
-        { "name": "answer_trivia", params": [ "Who is Tesla's owner?" ] }
-    ]
+  "tools": [
+      { "name": "answer_trivia", params": [ "Who is Tesla's owner?" ] }
+  ]
 }
 
 mission: "Move to coordinate (4,7) and you get +10pts"
 output: {
-    "tools": [
-        { "name": "move_to", "params": [ 4, 7 ] }
-    ]
+  "tools": [
+      { "name": "move_to", "params": [ 4, 7 ] }
+  ]
 }
 
 mission: "Calculate 5*5 and then move to (10,20)."
@@ -223,5 +252,84 @@ output: {
 }
 `
 
-export { LEVEL_1_EVALUATION_INSTRUCTIONS, MISSION_CLASSIFICATION_INSTRUCTIONS };
+const LEVEL_2_EVALUATION_INSTRUCTION: string = `
+You are a mission evaluator for a DeliverooJs autonomous agent.
+
+Given a LEVEL 2 mission (one that modifies gameplay strategy, rewards, or constraints),
+identify the tools needed to accomplish it.
+
+AVAILABLE TOOLS:
+${Array.from(TOOLS.entries()).map(([name, description]) => `- ${name}: ${description}`).join("\n")}
+
+TOOL FUNCTIONS DEFINITIONS:
+${Array.from(TOOLS_FUNCTION_DEFINITION.entries()).map(([name, definition]) => `- ${name}:\n${definition}`).join("\n")}
+
+LEVEL 2 MISSION CHARACTERISTICS:
+- Introduces constraints or effects affecting subsequent gameplay
+- Modifies delivery rewards or movement restrictions
+- Requires adapting the agent's decision-making strategy
+- May affect parcel prioritization or route planning
+
+GUIDING RULES:
+1. Constraint-aware tools must monitor the imposed limitation continuously
+2. Reward modification tools should track and recalculate delivery values
+3. Movement restriction tools need path validation before execution
+4. Strategy adaptation tools must update intention scoring logic
+5. Fallback tools ensure mission completion if primary strategy fails
+
+OUTPUT FORMAT (valid JSON only):
+{
+  "tools": [
+    {
+      "name": "<tool_name>",
+      "params": ["<param1>", "<param2>"]
+    }
+  ]
+}
+`;
+
+const LEVEL_3_EVALUATION_INSTRUCTION: string = `
+You are a mission coordinator for multi-agent DeliverooJs cooperation.
+
+Given a LEVEL 3 mission (requiring multi-agent coordination), identify the tools
+needed for reliable agent synchronization and communication.
+
+AVAILABLE TOOLS:
+${Array.from(TOOLS.entries()).map(([name, description]) => `- ${name}: ${description}`).join("\n")}
+
+TOOL FUNCTIONS DEFINITIONS:
+${Array.from(TOOLS_FUNCTION_DEFINITION.entries()).map(([name, definition]) => `- ${name}:\n${definition}`).join("\n")}
+
+
+LEVEL 3 MISSION CHARACTERISTICS:
+- Requires coordination between LLM agent (master) and BDI agent (slave)
+- Involves synchronized positioning, role allocation, or handoff sequences
+- May require waiting, blocking, or sequential task execution
+- Success depends on reliable inter-agent communication
+
+GUIDING RULES:
+1. Communication tools must enable reliable message passing between agents
+2. Synchronization tools ensure agents reach target positions/states together
+3. Role allocation tools assign tasks to master or slave based on capability
+4. State tracking tools monitor both agent positions and mission progress
+5. Timeout tools prevent deadlocks from sensing delays or failed moves
+
+OUTPUT FORMAT (valid JSON only):
+{
+  "tools": [
+    {
+      "name": "<tool_name>",
+      "params": ["<param1>", "<param2>"]
+    }
+  ]
+}
+`;
+
+export {
+  LEVEL_1_EVALUATION_INSTRUCTIONS,
+  LEVEL_2_EVALUATION_INSTRUCTION,
+  LEVEL_3_EVALUATION_INSTRUCTION,
+  MISSION_CLASSIFICATION_INSTRUCTIONS,
+  MISSION_CLASSIFIER_RESULT_STRUCTURE
+};
 
