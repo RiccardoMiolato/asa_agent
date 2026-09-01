@@ -11,6 +11,7 @@
     "start": "node --env-file=.env dist/index.js",
     "dev": "npm run build && npm run start",
     "test": "npm run build && node --test dist/src/_option-evaluator.test.js dist/src/_belief-changes.test.js dist/src/_planning-regressions.test.js",
+    "test:pruning": "npm run build && node --test dist/src/_option-pruning.spec.js",
     "ghost-map": "npm run build && npm run start"
   },
   "dependencies": {

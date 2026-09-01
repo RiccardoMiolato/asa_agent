@@ -3,6 +3,7 @@ import {
     type PlanningContext,
     type PlanningObjectiveDescription,
 } from "./planning.js";
+import { OptimisticPathLengthEstimator } from "./_path-estimation.js";
 import { Position } from "./position.js";
 
 /** Goal categories that can be considered by branch-and-bound. */
@@ -210,21 +211,10 @@ export class DesireGenerator {
         startingPosition: Position,
         targetPosition: Position,
     ): number | undefined {
-        const directDistance = context.pathfinder.pathLength(
-            context.gameMap,
+        return OptimisticPathLengthEstimator.estimate(
+            context,
             startingPosition,
             targetPosition,
-            context.crates,
-        );
-        if (directDistance !== undefined || context.crates.size === 0) {
-            return directDistance;
-        }
-
-        return context.pathfinder.pathLength(
-            context.gameMap,
-            startingPosition,
-            targetPosition,
-            new Map<string, Position>(),
         );
     }
 

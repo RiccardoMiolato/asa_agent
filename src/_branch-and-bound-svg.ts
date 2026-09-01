@@ -88,6 +88,7 @@ export class BranchAndBoundSvgRenderer {
             "    <marker id=\"arrow-gray\" markerWidth=\"9\" markerHeight=\"9\" refX=\"8\" refY=\"4.5\" orient=\"auto\"><path d=\"M0,0 L9,4.5 L0,9 z\" fill=\"#64748b\"/></marker>",
             "    <marker id=\"arrow-green\" markerWidth=\"9\" markerHeight=\"9\" refX=\"8\" refY=\"4.5\" orient=\"auto\"><path d=\"M0,0 L9,4.5 L0,9 z\" fill=\"#16a34a\"/></marker>",
             "    <marker id=\"arrow-blue\" markerWidth=\"9\" markerHeight=\"9\" refX=\"8\" refY=\"4.5\" orient=\"auto\"><path d=\"M0,0 L9,4.5 L0,9 z\" fill=\"#2563eb\"/></marker>",
+            "    <marker id=\"arrow-purple\" markerWidth=\"9\" markerHeight=\"9\" refX=\"8\" refY=\"4.5\" orient=\"auto\"><path d=\"M0,0 L9,4.5 L0,9 z\" fill=\"#7c3aed\"/></marker>",
             "    <marker id=\"arrow-amber\" markerWidth=\"9\" markerHeight=\"9\" refX=\"8\" refY=\"4.5\" orient=\"auto\"><path d=\"M0,0 L9,4.5 L0,9 z\" fill=\"#d97706\"/></marker>",
             "    <marker id=\"arrow-red\" markerWidth=\"9\" markerHeight=\"9\" refX=\"8\" refY=\"4.5\" orient=\"auto\"><path d=\"M0,0 L9,4.5 L0,9 z\" fill=\"#dc2626\"/></marker>",
             "    <style>",
@@ -197,7 +198,7 @@ export class BranchAndBoundSvgRenderer {
 
         return {
             width: Math.max(
-                1100,
+                1280,
                 BranchAndBoundSvgRenderer.PADDING * 2
                     + (maximumDepth + 1) * BranchAndBoundSvgRenderer.NODE_WIDTH
                     + maximumDepth * BranchAndBoundSvgRenderer.HORIZONTAL_GAP,
@@ -302,28 +303,46 @@ export class BranchAndBoundSvgRenderer {
         const action = edge.optionType === "pick"
             ? `PICK ${edge.parcelId ?? "missing"}`
             : "DROP carried parcels";
-        const decision = globallySelected
-            ? "SELECTED"
-            : edge.decision === OPTION_BRANCH_DECISION.UNREACHABLE
-                ? "UNREACHABLE"
-                : edge.decision === OPTION_BRANCH_DECISION.SELECTED
-                    ? "LOCAL BEST"
-                    : "ALTERNATIVE";
+        const decision = this.edgeDecisionLabel(edge, globallySelected);
         const score = edge.branchScore === undefined
             ? "n/a"
             : edge.branchScore.toFixed(3);
+        const upperBound = edge.branchUpperBound === undefined
+            ? "n/a"
+            : edge.branchUpperBound.toFixed(3);
         return [
             `${action} → (${edge.targetPosition.x}, ${edge.targetPosition.y}) · ${decision}`,
             `${this.traversabilityLabel(edge.traversability)} · distance ${edge.estimatedDistance ?? "n/a"} · ETA ${edge.estimatedArrivalMilliseconds ?? "n/a"}ms`,
-            `branch score ${score} · immediate ${edge.immediateDeliveryScore.toFixed(3)}`,
+            `branch score ${score} · upper bound ${upperBound}`,
             node
                 ? `state carried ${this.carriedLabel(node)} · next ${node.selectedOptionIdentity ?? "STOP"}`
-                : "branch rejected before creating a state",
+                : edge.decision === OPTION_BRANCH_DECISION.PRUNED_BY_BOUND
+                    ? "bound cannot improve the local incumbent"
+                    : "branch rejected before creating a state",
         ];
     }
 
+    private edgeDecisionLabel(
+        edge: OptionEvaluationEdge,
+        globallySelected: boolean,
+    ): string {
+        if (globallySelected) {
+            return "SELECTED";
+        }
+        switch (edge.decision) {
+            case OPTION_BRANCH_DECISION.UNREACHABLE:
+                return "UNREACHABLE";
+            case OPTION_BRANCH_DECISION.PRUNED_BY_BOUND:
+                return "PRUNED";
+            case OPTION_BRANCH_DECISION.SELECTED:
+                return "LOCAL BEST";
+            case OPTION_BRANCH_DECISION.LOWER_VALUE:
+                return "ALTERNATIVE";
+        }
+    }
+
     private edgeTooltip(edge: OptionEvaluationEdge): string {
-        return `${edge.optionIdentity}; traversability=${edge.traversability}; decision=${edge.decision}; distance=${edge.estimatedDistance ?? "n/a"}; arrival=${edge.estimatedArrivalMilliseconds ?? "n/a"}ms; immediate-score=${edge.immediateDeliveryScore}; branch-score=${edge.branchScore ?? "n/a"}`;
+        return `${edge.optionIdentity}; traversability=${edge.traversability}; decision=${edge.decision}; distance=${edge.estimatedDistance ?? "n/a"}; arrival=${edge.estimatedArrivalMilliseconds ?? "n/a"}ms; realized-delivery-score=${edge.realizedDeliveryScore}; estimated-action-score=${edge.estimatedActionScore ?? "n/a"}; remaining-parcel-score=${edge.remainingParcelScore ?? "n/a"}; upper-bound=${edge.branchUpperBound ?? "n/a"}; branch-score=${edge.branchScore ?? "n/a"}`;
     }
 
     private carriedLabel(node: OptionEvaluationNode): string {
@@ -358,6 +377,15 @@ export class BranchAndBoundSvgRenderer {
                 width: 2,
                 dash: " stroke-dasharray=\"7 5\"",
                 marker: "arrow-red",
+            };
+        }
+        if (edge.decision === OPTION_BRANCH_DECISION.PRUNED_BY_BOUND) {
+            return {
+                color: "#7c3aed",
+                fill: "#f5f3ff",
+                width: 2,
+                dash: " stroke-dasharray=\"4 4\"",
+                marker: "arrow-purple",
             };
         }
         if (edge.traversability === OPTION_TRAVERSABILITY.REQUIRES_CRATE_PLANNING) {
@@ -437,7 +465,8 @@ export class BranchAndBoundSvgRenderer {
             "  <line x1=\"48\" y1=\"116\" x2=\"78\" y2=\"116\" stroke=\"#16a34a\" stroke-width=\"4\"/><text x=\"86\" y=\"120\" class=\"legend\">final selected path</text>",
             "  <line x1=\"240\" y1=\"116\" x2=\"270\" y2=\"116\" stroke=\"#2563eb\" stroke-width=\"2\"/><text x=\"278\" y=\"120\" class=\"legend\">local best in alternative subtree</text>",
             "  <line x1=\"520\" y1=\"116\" x2=\"550\" y2=\"116\" stroke=\"#d97706\" stroke-width=\"2\" stroke-dasharray=\"7 5\"/><text x=\"558\" y=\"120\" class=\"legend\">crate-relaxed; requires PDDL</text>",
-            "  <line x1=\"790\" y1=\"116\" x2=\"820\" y2=\"116\" stroke=\"#dc2626\" stroke-width=\"2\" stroke-dasharray=\"7 5\"/><text x=\"828\" y=\"120\" class=\"legend\">unreachable</text>",
+            "  <line x1=\"790\" y1=\"116\" x2=\"820\" y2=\"116\" stroke=\"#7c3aed\" stroke-width=\"2\" stroke-dasharray=\"4 4\"/><text x=\"828\" y=\"120\" class=\"legend\">pruned by bound</text>",
+            "  <line x1=\"980\" y1=\"116\" x2=\"1010\" y2=\"116\" stroke=\"#dc2626\" stroke-width=\"2\" stroke-dasharray=\"7 5\"/><text x=\"1018\" y=\"120\" class=\"legend\">unreachable</text>",
         ];
     }
 

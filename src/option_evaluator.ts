@@ -9,7 +9,19 @@ import {
     type PlanningContext,
 } from "./planning.js";
 import { Position } from "./position.js";
+import {
+    BaseOptionBranchBoundEstimator,
+    ConservativeRewardBranchBoundEstimator,
+    type OptionBranchBound,
+} from "./_option-pruning.js";
 import { RewardDecayEstimator } from "./_reward-decay.js";
+
+export {
+    BaseOptionBranchBoundEstimator,
+    ConservativeRewardBranchBoundEstimator,
+    type OptionBranchBound,
+    type OptionBranchCandidate,
+} from "./_option-pruning.js";
 
 /** How the evaluator believes an option edge can be crossed. */
 export enum OPTION_TRAVERSABILITY {
@@ -22,6 +34,7 @@ export enum OPTION_TRAVERSABILITY {
 export enum OPTION_BRANCH_DECISION {
     SELECTED = "selected",
     LOWER_VALUE = "lower-value",
+    PRUNED_BY_BOUND = "pruned-by-bound",
     UNREACHABLE = "unreachable",
 }
 
@@ -48,7 +61,13 @@ export interface OptionEvaluationEdge {
     readonly traversability: OPTION_TRAVERSABILITY;
     readonly estimatedDistance: number | undefined;
     readonly estimatedArrivalMilliseconds: number | undefined;
-    readonly immediateDeliveryScore: number;
+    /** Reward realized on this edge; nonzero only when the action is a drop. */
+    readonly realizedDeliveryScore: number;
+    /** Path-aware delivery estimate for parcels associated with this action. */
+    readonly estimatedActionScore: number | undefined;
+    /** Immediate optimistic value of parcels still available for pickup. */
+    readonly remainingParcelScore: number | undefined;
+    readonly branchUpperBound: number | undefined;
     readonly branchScore: number | undefined;
     readonly decision: OPTION_BRANCH_DECISION;
 }
@@ -87,12 +106,18 @@ interface EvaluatedCandidate {
     readonly traversability: OPTION_TRAVERSABILITY;
     readonly distance: number;
     readonly arrivalMilliseconds: number;
-    readonly immediateDeliveryScore: number;
+    readonly realizedDeliveryScore: number;
+    readonly bound: OptionBranchBound;
     readonly result: EvaluationResult;
 }
 
 export class OptionEvaluator {
-    constructor(private readonly desireGenerator: DesireGenerator) { }
+    constructor(
+        private readonly desireGenerator: DesireGenerator,
+        private readonly branchBoundEstimator:
+            BaseOptionBranchBoundEstimator =
+                new ConservativeRewardBranchBoundEstimator(),
+    ) { }
 
     evaluate(
         context: PlanningContext,
@@ -187,7 +212,10 @@ export class OptionEvaluator {
                     traversability: OPTION_TRAVERSABILITY.UNREACHABLE,
                     estimatedDistance: undefined,
                     estimatedArrivalMilliseconds: undefined,
-                    immediateDeliveryScore: 0,
+                    realizedDeliveryScore: 0,
+                    estimatedActionScore: undefined,
+                    remainingParcelScore: undefined,
+                    branchUpperBound: undefined,
                     branchScore: undefined,
                     decision: OPTION_BRANCH_DECISION.UNREACHABLE,
                 });
@@ -236,6 +264,51 @@ export class OptionEvaluator {
             }
 
             const targetNodeId = `${nodeId}/${desire.identity()}`;
+            const remainingParcelIds = [...remainingDesires]
+                .filter(
+                    (candidate: Desire): candidate is PickUpParcelDesire =>
+                        candidate instanceof PickUpParcelDesire,
+                )
+                .map((candidate: PickUpParcelDesire): string =>
+                    candidate.parcelId,
+                );
+            const bound = this.branchBoundEstimator.estimate(context, {
+                actionType: desire.type,
+                positionAfterAction: desire.targetCell,
+                carriedParcelIdsAfterAction: newCarriedIds,
+                remainingParcelIds,
+                elapsedMillisecondsAfterAction: newElapsedMilliseconds,
+                realizedDeliveryScore: scoreForThisOption,
+                deliveryCellCandidates,
+            });
+            if (
+                this.shouldPrune(
+                    bound,
+                    newElapsedMilliseconds,
+                    bestResult,
+                )
+            ) {
+                edges.push({
+                    order: currentOptionOrder,
+                    sourceNodeId: nodeId,
+                    targetNodeId: undefined,
+                    optionIdentity: desire.identity(),
+                    optionType: desire.type,
+                    parcelId: desire.parcelId,
+                    targetPosition: desire.targetCell,
+                    traversability: assessment.traversability,
+                    estimatedDistance: assessment.distance,
+                    estimatedArrivalMilliseconds: newElapsedMilliseconds,
+                    realizedDeliveryScore: scoreForThisOption,
+                    estimatedActionScore: bound.estimatedActionScore,
+                    remainingParcelScore: bound.remainingParcelScore,
+                    branchUpperBound: bound.totalScore,
+                    branchScore: undefined,
+                    decision: OPTION_BRANCH_DECISION.PRUNED_BY_BOUND,
+                });
+                continue;
+            }
+
             const nextResult = this.evaluateRec(
                 context,
                 desire.targetCell,
@@ -262,7 +335,8 @@ export class OptionEvaluator {
                 traversability: assessment.traversability,
                 distance: assessment.distance,
                 arrivalMilliseconds: newElapsedMilliseconds,
-                immediateDeliveryScore: scoreForThisOption,
+                realizedDeliveryScore: scoreForThisOption,
+                bound,
                 result: candidateResult,
             };
             evaluatedCandidates.push(evaluatedCandidate);
@@ -284,7 +358,10 @@ export class OptionEvaluator {
                 traversability: candidate.traversability,
                 estimatedDistance: candidate.distance,
                 estimatedArrivalMilliseconds: candidate.arrivalMilliseconds,
-                immediateDeliveryScore: candidate.immediateDeliveryScore,
+                realizedDeliveryScore: candidate.realizedDeliveryScore,
+                estimatedActionScore: candidate.bound.estimatedActionScore,
+                remainingParcelScore: candidate.bound.remainingParcelScore,
+                branchUpperBound: candidate.bound.totalScore,
                 branchScore: candidate.result.totalScore,
                 decision: candidate === selectedCandidate
                     ? OPTION_BRANCH_DECISION.SELECTED
@@ -301,6 +378,18 @@ export class OptionEvaluator {
         });
 
         return bestResult;
+    }
+
+    private shouldPrune(
+        bound: OptionBranchBound,
+        earliestCompletionMilliseconds: number,
+        incumbent: EvaluationResult,
+    ): boolean {
+        if (bound.totalScore !== incumbent.totalScore) {
+            return bound.totalScore < incumbent.totalScore;
+        }
+        return earliestCompletionMilliseconds
+            >= incumbent.completionMilliseconds;
     }
 
     /** Separates guaranteed A* reachability from optimistic crate-relaxed reachability. */
