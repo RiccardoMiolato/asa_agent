@@ -1,8 +1,10 @@
 import { IntentionContext } from "../bdi/intentions.js";
 import { GameClient } from "../utils/move.js";
+import { Position } from "../utils/position.js";
 import { LEVEL_1_EVALUATION_INSTRUCTIONS, LEVEL_2_EVALUATION_INSTRUCTION, LEVEL_3_EVALUATION_INSTRUCTION, MISSION_CLASSIFICATION_INSTRUCTIONS } from "./instructions/instruction.js";
 import { LLMClient, LLMMessage } from "./LLMClient.js";
-import { answer_trivia, get_agent_position, math_eval, move_to } from "./tools/tools.js";
+import { BonusType, Mission, MissionLevel, MissionType } from "./mission.js";
+import { answer_trivia, drop_at, get_agent_position, math_eval, move_to, MoveToResponse } from "./tools/tools.js";
 
 /**
  * This is the main agent, responsible for keeping track
@@ -17,9 +19,15 @@ interface MsgEvaluationResult {
     requires_answer: boolean
 }
 
+interface Bonus {
+    type: "points" | "multiplier",
+    value: number
+}
+
 interface ITool{
     name: string,
-    params: any[]
+    params: any[],
+    bonus?: Bonus
 }
 
 interface ToolPlanningResult {
@@ -38,6 +46,8 @@ export class MissionHandler {
     private readonly client: GameClient;
     private LLMClient: LLMClient;
     private pendingChatMessages: ChatMessage[];
+
+    private activeMissions: Mission[];
 
     constructor(client: GameClient) {
         const LLM_API_URL = process.env.LITELLM_BASE_URL;
@@ -59,11 +69,21 @@ export class MissionHandler {
         this.toolToFunctionMap = new Map<string, Function>([
             ["math_eval", math_eval],
             ["move_to", move_to],
+            ["drop_at", drop_at],
             ["get_agent_position", get_agent_position],
             ["answer_trivia", answer_trivia],
         ]);
 
         this.client = client;
+        this.activeMissions = [];
+    }
+
+    areActiveMissionsPresent(): boolean {
+        return this.activeMissions.length > 0;
+    }
+
+    getActiveMission(): Mission[] {
+        return this.activeMissions;
     }
 
     isMissionWaiting(): boolean {
@@ -96,53 +116,65 @@ export class MissionHandler {
         if(levelEvaluationRes === "")
             return;
 
-        const evaluationResult: MsgEvaluationResult = JSON.parse(levelEvaluationRes);
+        const evaluationResult = this.parseClassificationJson(levelEvaluationRes);
 
-        let handleRes: string = "";
+        if(!evaluationResult)
+            return;
+
         if(evaluationResult.level == 1) {
-            handleRes = await this.handleFirstLevelMissions(message);
+            await this.handleFirstLevelMissions(context, mission, message, evaluationResult.requires_answer);
         } else if(evaluationResult.level == 2) {
-            handleRes = await this.handleSecondLevelMissions(message);
+            await this.handleSecondLevelMissions(message);
         } else if(evaluationResult.level == 3) {
-            handleRes = await this.handleThirdLevelMissions(message);
+            await this.handleThirdLevelMissions(message);
         }
-
-        if(handleRes === "")
-            return;
-
-        let toolsChain: ToolPlanningResult;
-        try{
-            toolsChain = JSON.parse(handleRes)
-        } catch(e) {
-            console.log("Error parsing tools chain");
-            return;
-        }
-
-        await this.ExecuteTools(context, toolsChain, mission, evaluationResult.requires_answer);
     }
 
-    private async handleFirstLevelMissions(message: LLMMessage): Promise<string> {
+    private async handleFirstLevelMissions(context: IntentionContext, mission: ChatMessage, message: LLMMessage, answer_trivia: boolean): Promise<void> {
         console.log("Evaluating level 1 mission...");
         const evaluationRes: string = await this.sendMessage([message], LEVEL_1_EVALUATION_INSTRUCTIONS);
 
-        return evaluationRes;
+        if(evaluationRes === "")
+            return;
+
+        console.log(evaluationRes);
+        const toolsChain = this.parsePlanningJson(evaluationRes);
+
+        if(!toolsChain)
+            return;
+
+        const results: any[] = await this.ExecuteTools(
+            context,
+            1,
+            toolsChain,
+            mission,
+            answer_trivia
+        );
+
+        const last_tool: ITool = toolsChain.tools[toolsChain.tools.length - 1];
+        if(last_tool.name === "move_to"){
+            const lastRes: MoveToResponse = results[results.length - 1] as MoveToResponse;
+            console.log(lastRes);
+            this.createMoveToMission(lastRes.targetPos, 1, last_tool.bonus);
+        } else if (last_tool.name === "drop_at"){
+            const lastRes: MoveToResponse = results[results.length - 1] as MoveToResponse;
+            this.createDropAtMission(lastRes.targetPos, 1, last_tool.bonus);
+        }
     }
 
-    private async handleSecondLevelMissions(message: LLMMessage): Promise<string> {
+    private async handleSecondLevelMissions(message: LLMMessage): Promise<void> {
         console.log("Evaluating level 2 mission...");
         const evaluationRes: string = await this.sendMessage([message], LEVEL_2_EVALUATION_INSTRUCTION);
 
-        return evaluationRes;
     }
 
-    private async handleThirdLevelMissions(message: LLMMessage): Promise<string> {
+    private async handleThirdLevelMissions(message: LLMMessage): Promise<void> {
         console.log("Evaluating level 3 mission...");
         const evaluationRes: string = await this.sendMessage([message], LEVEL_3_EVALUATION_INSTRUCTION);
 
-        return evaluationRes;
     }
 
-    private async ExecuteTools(context: IntentionContext, toolsChain: ToolPlanningResult, mission: ChatMessage, requires_answer: boolean): Promise<any[]> {
+    private async ExecuteTools(context: IntentionContext, level: number, toolsChain: ToolPlanningResult, mission: ChatMessage, requires_answer: boolean): Promise<any[]> {
         const results: any[] = [];
 
         for (let i = 0; i < (toolsChain.tools ?? []).length; i++) {
@@ -160,11 +192,11 @@ export class MissionHandler {
                     return param;
                 });
                 console.log(`Executing tool ${tool.name} with resolved params:`, resolvedParams);
-                results.push(await this.callTool(context, { name: tool.name, params: resolvedParams }));
+                results.push(await this.callTool(context, level, { name: tool.name, params: resolvedParams }));
             } else {
                 // No references, execute normally
                 console.log(`Executing tool ${tool.name} with params:`, tool.params);
-                results.push(await this.callTool(context, tool));
+                results.push(await this.callTool(context, level, tool));
             }
 
             if (requires_answer && results[i] !== undefined && (tool.name === "answer_trivia" || tool.name === "math_eval")) {
@@ -175,8 +207,90 @@ export class MissionHandler {
         return results;
     }
 
-    private async callTool(context: IntentionContext, tool: ITool): Promise<any> {
-        const toolFunction = this.toolToFunctionMap.get(tool.name);
+    private parsePlanningJson(jsonString: string): ToolPlanningResult | undefined {
+        let toolsChain: ToolPlanningResult;
+        try{
+            toolsChain = JSON.parse(jsonString);
+
+            return toolsChain;
+        } catch(e) {
+            console.log("Error parsing tools chain");
+            return;
+        }
+    }
+
+
+    private parseClassificationJson(jsonString: string): MsgEvaluationResult | undefined {
+        let toolsChain: MsgEvaluationResult;
+        try{
+            toolsChain = JSON.parse(jsonString);
+
+            return toolsChain;
+        } catch(e) {
+            console.log("Error parsing tools chain");
+            return;
+        }
+    }
+
+    private createMoveToMission(cell: Position, level: MissionLevel, bonus: Bonus | undefined): void {
+        if(!bonus)
+            return;
+
+        const missionType: MissionType = "move-to";
+
+        let bonusType: BonusType;
+
+        if(bonus.type === "points") {
+            bonusType = bonus.value < 0 ? "penalty" : "reward";
+        } else {
+            bonusType = "multiplier";
+        }
+
+        const bonusValue = Math.abs(bonus.value);
+
+
+        const new_mission = new Mission(
+            level,
+            missionType,
+            bonusType,
+            bonusValue,
+            cell
+        );
+
+        this.activeMissions.push(new_mission);
+    }
+
+    private createDropAtMission(cell: Position, level: MissionLevel, bonus: Bonus | undefined): void {
+        if(!bonus)
+            return;
+
+        const missionType: MissionType = "drop-at";
+
+        let bonusType: BonusType;
+
+        if(bonus.type === "points") {
+            bonusType = bonus.value < 0 ? "penalty" : "reward";
+        } else {
+            bonusType = "multiplier";
+        }
+
+        const bonusValue = Math.abs(bonus.value);
+
+
+        const new_mission = new Mission(
+            level,
+            missionType,
+            bonusType,
+            bonusValue,
+            cell
+        );
+
+        this.activeMissions.push(new_mission);
+    }
+
+
+    private async callTool(context: IntentionContext, level: number, tool: ITool): Promise<any> {
+        const toolFunction: Function | undefined = this.toolToFunctionMap.get(tool.name);
 
         if(!toolFunction) {
             console.log(`Tool ${tool.name} not found`);
@@ -186,12 +300,16 @@ export class MissionHandler {
         try {
             let result: any;
 
-            if(tool.name === "answer_trivia"){
-                result = await toolFunction(this.LLMClient, ...tool.params);
-            } else if(tool.name === "math_eval"){
-                result = toolFunction(...tool.params);
-            } else{
-                result = toolFunction(context, ...tool.params);
+            switch(tool.name) {
+                case "answer_trivia":
+                    result =  await toolFunction(this.LLMClient, ...tool.params);
+                    break;
+                case "math_eval":
+                    result =  await toolFunction(...tool.params);
+                    break;
+                default:
+                    result =  await toolFunction(context, ...tool.params);
+                    break;
             }
 
             console.log(`Tool ${tool.name} executed with result: `, result);

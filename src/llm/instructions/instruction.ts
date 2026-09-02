@@ -1,6 +1,7 @@
 const TOOLS: Map<string, string> = new Map([
     ["math_eval", "Evaluate arithmetic expressions and return the result."],
     ["move_to", "Tells the agent to go to a specific location in the map."],
+    ["drop_at", "Tells the agent to drop parcels in a specific location of the map."],
     ["answer_trivia", "Given a trivia question, return the answer."],
     ["get_agent_position", "Returns the current position of the agent in the map."]
 ]);
@@ -16,10 +17,17 @@ TOOLS_FUNCTION_DEFINITION.set("math_eval", `
 
 TOOLS_FUNCTION_DEFINITION.set("move_to", `
 {
-  "params": [x: number, y: number],
+  "params": [x: number, y: number, bonus: number],
   "returns": string
 }
 `);
+
+TOOLS_FUNCTION_DEFINITION.set("drop_at", `
+  {
+    "params": [x: number, y: number, bonus: number],
+    "returns": string
+  }
+  `);
 
 TOOLS_FUNCTION_DEFINITION.set("answer_trivia", `
 {
@@ -62,6 +70,8 @@ Examples:
 - Move to x=4*2 y=(1+3)*3 to get -10pts
 - Drop a package in the leftmost tile to get 5pt
 - Drop a package in the leftmost tile to get -10pt
+- Where are you?
+- Current position?
 - What is the capital of Italy?
 - Calculate 5*5
 
@@ -131,6 +141,8 @@ Examples of missions that DO REQUIRE an answer back are:
 - "Who painted the Mona Lisa?"
 - "What is the capital of France?"
 - "Who wrote Romeo and Juliet?"
+- "Where are you?"
+- "Current position"
 - "Compute 10-2"
 - "Calculate 5-3-2"
 - "Which is the result of 4*5?"
@@ -167,10 +179,20 @@ The output must have this structure:
   "tools": [
     {
       "name": "<tool_name>",
-      "params": [ ... ]
+      "params": [ ... ],
+      "bonus": {
+        "type": <string: 'points' | 'multiplier' >,
+        "value": <number>
+      }
     }
   ]
 }
+
+The "bonus" field is optional and must be included anytime the mission message explicitly mentions the presence of bonus or malus.
+The "type" field refers to the type of the bonus or malus, and can be either a fixed number of points or a multiplier to the standard reward.
+- type "points" examples: "you get +10pts", "you get -7pts", "you lose 20 points", "you receive 5 points"
+- type "multiplier" examples: "you get 5x pts", "you get 0.3 of the standard reward", "you get double the reward", "you lose half the reward"
+The "value" field refers to the numeric value of the bonus or malus, and must be a number.
 
 RULES:
 
@@ -227,10 +249,46 @@ output: {
   ]
 }
 
+mission: "Where are you?"
+output: {
+  "tools": [
+    { "name": "get_agent_position", params: [] }
+  ]
+}
+
+
+mission: "Current agent position"
+output: {
+  "tools": [
+    { "name": "get_agent_position", params: [] }
+  ]
+}
+
 mission: "Move to coordinate (4,7) and you get +10pts"
 output: {
   "tools": [
-      { "name": "move_to", "params": [ 4, 7 ] }
+      { "name": "move_to", "params": [ 4, 7, 10 ], "bonus": { "type": "points", "value": 10 } }
+  ]
+}
+
+mission: "Navigate to coordinate x=4, y=7 and you get -5pts"
+output: {
+  "tools": [
+      { "name": "move_to", "params": [ 4, 7, -5 ], "bonus": { "type": "points", "value": -5 } }
+  ]
+}
+
+mission: "Drop at coordinate (11, 16) and you get +10pts"
+output: {
+  "tools": [
+      { "name": "drop_at", "params": [ 11, 16, 10 ], "bonus": { "type": "points", "value": 10 } }
+  ]
+}
+
+mission: "Move to (10, 5) and release packets to get -20pts"
+output: {
+  "tools": [
+      { "name": "drop_at", "params": [ 10, 5, -20 ], "bonus": { "type": "points", "value": -20 } }
   ]
 }
 
@@ -238,7 +296,7 @@ mission: "Calculate 5*5 and then move to (10,20)."
 output: {
   "tools": [
     {"name": "math_eval", "params": ["5*5"]},
-    {"name": "move_to", "params": [10, 20]}
+    {"name": "move_to", "params": [10, 20, 0]}
   ]
 }
 
@@ -251,8 +309,27 @@ output: {
       "name": "move_to",
       "params": [
         {"$ref": 0},
-        {"$ref": 1}
-      ]
+        {"$ref": 1},
+        5
+      ],
+      "bonus": { "type": "points", "value": 5 }
+    }
+  ]
+}
+
+mission: "Drop at x=10-6 y=5*(1+2) to get -15pts"
+output: {
+  "tools": [
+    { "name": "math_eval", "params": ["10-6"] },
+    { "name": "math_eval", "params": ["5*(1+2)"] },
+    {
+      "name": "drop_at",
+      "params": [
+        {"$ref": 0},
+        {"$ref": 1},
+        -15
+      ],
+      "bonus": { "type": "points", "value": -15 }
     }
   ]
 }

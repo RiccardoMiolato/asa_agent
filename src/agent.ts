@@ -2,6 +2,7 @@ import type { Beliefs } from "./bdi/beliefs.js";
 import type { IntentionGenerator } from "./bdi/desires.js";
 import { Intention, IntentionContext, IntentionDescription, PickupClusterSnapshot, SearchIntention } from "./bdi/intentions.js";
 import { Option, OPTION_TRAVERSABILITY, OptionEvaluationGraph, OptionEvaluator } from "./bdi/option_evaluator.js";
+import { Mission } from "./llm/mission.js";
 import { MissionHandler } from "./llm/MissionHandler.js";
 import { PDDLPlanner } from "./pddl/pddlPlanner.js";
 import {
@@ -206,9 +207,18 @@ export class Agent {
 
             await this.waitForGridPosition();
 
-            if(this.useLLM && this.missionHandler?.isMissionWaiting()){
-                const newMission = await this.missionHandler?.evaluateMission(this.getIntentionContext());
+            if(this.useLLM) {
+                if (this.missionHandler?.isMissionWaiting()){
+                    await this.missionHandler?.evaluateMission(this.getIntentionContext());
+                }
+
+                if(this.missionHandler?.areActiveMissionsPresent()) {
+                    this.missionHandler?.getActiveMission().forEach((mission: Mission) => {
+                        mission.log();
+                    });
+                }
             }
+
 
             this.deliberationCycle += 1;
             this.refreshTemporaryBlockedCells();
