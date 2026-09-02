@@ -3,11 +3,18 @@ import { Position } from "./position.js";
 
 export type MoveDirection = "up" | "right" | "left" | "down";
 
+/** Stable parcel identity returned by action acknowledgements. */
+export interface ParcelActionAcknowledgement {
+    readonly id: string;
+}
+
 /** Minimal game-client contract required by executable actions. */
 export interface GameClient {
     emitMove(direction: MoveDirection): Promise<{ x: number; y: number } | false>;
-    emitPickup(): Promise<{ id: string }[]>;
-    emitPutdown(selected?: string[] | null): Promise<{ id: string }[]>;
+    emitPickup(): Promise<readonly ParcelActionAcknowledgement[]>;
+    emitPutdown(
+        selected?: string[] | null,
+    ): Promise<readonly ParcelActionAcknowledgement[]>;
 }
 
 export abstract class Action {
@@ -86,45 +93,37 @@ export class PickUp extends Action {
     }
 
     async execute(): Promise<boolean> {
-        if (this.confirmCarriedBelief()) {
+        if (this.beliefs.isParcelCarriedBy(this.parcelId, this.agentId)) {
             return true;
         }
 
-        const sensingRevisionBeforePickup =
-            this.beliefs.currentSensingRevision();
-        const pickedParcels = await this.client.emitPickup();
-        const pickedTarget = pickedParcels.some(
-            (parcel: { id: string }): boolean => parcel.id === this.parcelId,
-        );
-        if (pickedTarget) {
-            this.beliefs.markParcelCarried(this.parcelId, this.agentId);
+        this.beliefs.beginPickupAttempt(this.parcelId, this.agentId);
+        let pickupCompleted = false;
+        try {
+            const pickedParcels = await this.client.emitPickup();
+            for (const parcel of pickedParcels) {
+                this.beliefs.markParcelCarried(parcel.id, this.agentId);
+            }
+
+            // Missing target acknowledgement is inconclusive: continue the
+            // plan with correctable ownership instead of failing the action.
+            if (!pickedParcels.some(
+                (parcel: ParcelActionAcknowledgement): boolean =>
+                    parcel.id === this.parcelId,
+            )) {
+                this.beliefs.markParcelProvisionallyCarried(
+                    this.parcelId,
+                    this.agentId,
+                );
+            }
+            pickupCompleted = true;
             return true;
+        } finally {
+            this.beliefs.endPickupAttempt(
+                this.parcelId,
+                pickupCompleted,
+            );
         }
-
-        if (this.confirmCarriedBelief()) {
-            return true;
-        }
-
-        await this.beliefs.waitForSensingAfterOrTimeout(
-            sensingRevisionBeforePickup,
-            Math.max(50, this.beliefs.frame_duration * 2),
-        );
-        if (this.confirmCarriedBelief()) {
-            return true;
-        }
-
-        return this.beliefs.confirmUnresolvedPickup(
-            this.parcelId,
-            this.agentId,
-        );
-    }
-
-    private confirmCarriedBelief(): boolean {
-        if (!this.beliefs.isParcelCarriedBy(this.parcelId, this.agentId)) {
-            return false;
-        }
-        this.beliefs.markParcelCarried(this.parcelId, this.agentId);
-        return true;
     }
 }
 
@@ -138,8 +137,22 @@ export class Drop extends Action {
     }
 
     async execute(): Promise<boolean> {
-        this.beliefs.clearDeliveredParcels(this.agentId);
-        await this.client.emitPutdown();
+        const expectedParcelIds = this.beliefs.carriedParcelIds(this.agentId);
+        if (expectedParcelIds.length === 0) {
+            return true;
+        }
+
+        await this.client.emitPutdown(
+            [...expectedParcelIds],
+        );
+
+        // Delivery-cell validation belongs to planning. Once putdown has
+        // completed, a missing or partial acknowledgement must not make the
+        // agent retry an already executed delivery.
+        this.beliefs.markParcelsDelivered(
+            this.agentId,
+            new Set<string>(expectedParcelIds),
+        );
         return true;
     }
 }

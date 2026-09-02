@@ -12,6 +12,7 @@ import { Position } from "./position.js";
 import {
     BaseOptionBranchBoundEstimator,
     ConservativeRewardBranchBoundEstimator,
+    EarliestDeliveryRewardBranchBoundEstimator,
     type OptionBranchBound,
 } from "./_option-pruning.js";
 import { RewardDecayEstimator } from "./_reward-decay.js";
@@ -19,6 +20,7 @@ import { RewardDecayEstimator } from "./_reward-decay.js";
 export {
     BaseOptionBranchBoundEstimator,
     ConservativeRewardBranchBoundEstimator,
+    EarliestDeliveryRewardBranchBoundEstimator,
     type OptionBranchBound,
     type OptionBranchCandidate,
 } from "./_option-pruning.js";
@@ -65,7 +67,7 @@ export interface OptionEvaluationEdge {
     readonly realizedDeliveryScore: number;
     /** Path-aware delivery estimate for parcels associated with this action. */
     readonly estimatedActionScore: number | undefined;
-    /** Immediate optimistic value of parcels still available for pickup. */
+    /** Optimistic value of parcels still available for pickup. */
     readonly remainingParcelScore: number | undefined;
     readonly branchUpperBound: number | undefined;
     readonly branchScore: number | undefined;
@@ -116,7 +118,7 @@ export class OptionEvaluator {
         private readonly desireGenerator: DesireGenerator,
         private readonly branchBoundEstimator:
             BaseOptionBranchBoundEstimator =
-                new ConservativeRewardBranchBoundEstimator(),
+                new EarliestDeliveryRewardBranchBoundEstimator(),
     ) { }
 
     evaluate(

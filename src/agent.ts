@@ -32,7 +32,6 @@ import {
     PickUp,
     type ActionFactory,
 } from "./move.js";
-import { ConservativeMovementGuard } from "./movement-safety.js";
 import {
     OPTION_TRAVERSABILITY,
     OptionEvaluator,
@@ -100,7 +99,6 @@ export class Agent {
     private readonly searchIntention: SearchIntention;
     private readonly plan: Plan;
     private planOwner: Intention | undefined;
-    private readonly movementGuard: ConservativeMovementGuard;
     private readonly temporarilyBlockedCells: Map<string, TemporaryBlockedCell>;
     private readonly gridPositionWaiters: Set<() => void>;
     private hasAuthoritativePosition: boolean;
@@ -126,10 +124,6 @@ export class Agent {
         this.currentIntention = this.searchIntention;
         this.plan = new Plan();
         this.planOwner = undefined;
-        this.movementGuard = new ConservativeMovementGuard(
-            this.beliefs,
-            this.logger,
-        );
         this.temporarilyBlockedCells = new Map<string, TemporaryBlockedCell>();
         this.gridPositionWaiters = new Set<() => void>();
         this.hasAuthoritativePosition = false;
@@ -294,20 +288,6 @@ export class Agent {
                 const movementDestination = nextAction instanceof MovementAction
                     ? nextAction.destinationFrom(this.position)
                     : undefined;
-                if (movementDestination) {
-                    const clearance = await this.movementGuard.waitUntilSafe(
-                        movementDestination,
-                    );
-                    if (clearance.decision === "replan") {
-                        this.addTemporaryBlockedCell(clearance.blockedCell);
-                        deliberateImmediately = true;
-                        planInterrupted = true;
-                        nextCycleReason =
-                            DELIBERATION_CYCLE_REASON.MOVEMENT_SAFETY_REPLAN;
-                        break;
-                    }
-                }
-
                 const actionSucceeded = await nextAction.execute();
                 if (!actionSucceeded) {
                     if (movementDestination) {
@@ -846,10 +826,9 @@ export class Agent {
         this.signalBeliefChanged();
     }
 
-    /** Reward decay and expiration are already forecast by the evaluator. */
+    /** Reward changes are forecast; disappearance immediately invalidates plans. */
     private isPlanningRelevantBeliefChange(change: BeliefChange): boolean {
-        return change.type !== BELIEF_CHANGE_TYPE.PARCEL_REWARD_CHANGED
-            && change.type !== BELIEF_CHANGE_TYPE.PARCEL_DISAPPEARED;
+        return change.type !== BELIEF_CHANGE_TYPE.PARCEL_REWARD_CHANGED;
     }
 
     private consumePendingBeliefChanges(): BeliefChange[] {

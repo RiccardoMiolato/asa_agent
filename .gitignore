@@ -40,3 +40,4 @@ Thumbs.db
 AGENTS.md
 report.tex
 *.test.ts
+*.spec.ts

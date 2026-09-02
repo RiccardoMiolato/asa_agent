@@ -19,7 +19,7 @@ export interface OptionBranchCandidate {
 export interface OptionBranchBound {
     /** Path-aware delivery estimate for parcels associated with the action. */
     readonly estimatedActionScore: number;
-    /** Immediate optimistic value of parcels still available for pickup. */
+    /** Optimistic value of parcels still available for pickup. */
     readonly remainingParcelScore: number;
     readonly totalScore: number;
 }
@@ -32,11 +32,8 @@ export abstract class BaseOptionBranchBoundEstimator {
     ): OptionBranchBound;
 }
 
-/**
- * Bounds a branch using a path-aware action score and immediate remaining
- * parcel rewards. Each parcel contributes to exactly one component.
- */
-export class ConservativeRewardBranchBoundEstimator
+/** Shared scoring architecture for reward-based branch bounds. */
+abstract class BaseRewardBranchBoundEstimator
     extends BaseOptionBranchBoundEstimator {
     override estimate(
         context: PlanningContext,
@@ -55,6 +52,36 @@ export class ConservativeRewardBranchBoundEstimator
             remainingParcelScore,
             totalScore: estimatedActionScore + remainingParcelScore,
         };
+    }
+
+    protected abstract estimateRemainingParcelScore(
+        context: PlanningContext,
+        candidate: OptionBranchCandidate,
+    ): number;
+
+    protected scoreParcelsAt(
+        context: PlanningContext,
+        parcelIds: readonly string[],
+        elapsedMilliseconds: number,
+    ): number {
+        let score = 0;
+        for (const parcelId of parcelIds) {
+            const parcel = context.parcels.get(parcelId);
+            if (parcel === undefined) {
+                continue;
+            }
+
+            score += Math.max(
+                0,
+                RewardDecayEstimator.remainingReward(
+                    parcel.reward,
+                    elapsedMilliseconds,
+                    context.rewardDecayInterval,
+                    context.millisecondsUntilNextRewardDecay,
+                ),
+            );
+        }
+        return score;
     }
 
     private estimatePickedParcelDeliveryScore(
@@ -91,8 +118,15 @@ export class ConservativeRewardBranchBoundEstimator
         }
         return bestScore;
     }
+}
 
-    private estimateRemainingParcelScore(
+/**
+ * Bounds a branch using a path-aware action score and immediate remaining
+ * parcel rewards. Each parcel contributes to exactly one component.
+ */
+export class ConservativeRewardBranchBoundEstimator
+    extends BaseRewardBranchBoundEstimator {
+    protected override estimateRemainingParcelScore(
         context: PlanningContext,
         candidate: OptionBranchCandidate,
     ): number {
@@ -102,29 +136,84 @@ export class ConservativeRewardBranchBoundEstimator
             candidate.elapsedMillisecondsAfterAction,
         );
     }
+}
 
-    private scoreParcelsAt(
+/**
+ * Bounds every uncollected parcel at its independently earliest delivery.
+ *
+ * Independent routes can overlap impossibly, so their sum remains optimistic,
+ * while unavoidable pickup, travel, and delivery time make the bound tighter
+ * than valuing every parcel immediately after the candidate action.
+ */
+export class EarliestDeliveryRewardBranchBoundEstimator
+    extends BaseRewardBranchBoundEstimator {
+    protected override estimateRemainingParcelScore(
         context: PlanningContext,
-        parcelIds: readonly string[],
-        elapsedMilliseconds: number,
+        candidate: OptionBranchCandidate,
     ): number {
         let score = 0;
-        for (const parcelId of parcelIds) {
+        for (const parcelId of candidate.remainingParcelIds) {
             const parcel = context.parcels.get(parcelId);
             if (parcel === undefined) {
                 continue;
             }
 
-            score += Math.max(
-                0,
-                RewardDecayEstimator.remainingReward(
-                    parcel.reward,
-                    elapsedMilliseconds,
-                    context.rewardDecayInterval,
-                    context.millisecondsUntilNextRewardDecay,
-                ),
+            const pickupPosition = new Position(parcel.x, parcel.y);
+            const pickupDistance = OptimisticPathLengthEstimator.estimate(
+                context,
+                candidate.positionAfterAction,
+                pickupPosition,
+            );
+            if (pickupDistance === undefined) {
+                continue;
+            }
+
+            const deliveryDistance = this.estimateNearestDeliveryDistance(
+                context,
+                pickupPosition,
+                candidate.deliveryCellCandidates,
+            );
+            if (deliveryDistance === undefined) {
+                continue;
+            }
+
+            const earliestDeliveryElapsedMilliseconds =
+                candidate.elapsedMillisecondsAfterAction
+                + RewardDecayEstimator.actionSequenceDurationMilliseconds(
+                    pickupDistance + deliveryDistance,
+                    2,
+                    context.movementDuration,
+                    context.frameDuration,
+                );
+            score += RewardDecayEstimator.remainingReward(
+                parcel.reward,
+                earliestDeliveryElapsedMilliseconds,
+                context.rewardDecayInterval,
+                context.millisecondsUntilNextRewardDecay,
             );
         }
         return score;
+    }
+
+    private estimateNearestDeliveryDistance(
+        context: PlanningContext,
+        pickupPosition: Position,
+        deliveryCellCandidates: readonly Position[],
+    ): number | undefined {
+        let nearestDistance: number | undefined;
+        for (const deliveryCell of deliveryCellCandidates) {
+            const distance = OptimisticPathLengthEstimator.estimate(
+                context,
+                pickupPosition,
+                deliveryCell,
+            );
+            if (
+                distance !== undefined
+                && (nearestDistance === undefined || distance < nearestDistance)
+            ) {
+                nearestDistance = distance;
+            }
+        }
+        return nearestDistance;
     }
 }

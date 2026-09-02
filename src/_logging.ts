@@ -102,7 +102,6 @@ export type OptionSearchOutcome =
 export enum DELIBERATION_CYCLE_REASON {
     AGENT_STARTED = "agent-started",
     BELIEFS_CHANGED = "beliefs-changed",
-    MOVEMENT_SAFETY_REPLAN = "movement-safety-replan",
     ACTION_FAILED = "action-failed",
     OPTION_SEGMENT_COMPLETED = "option-segment-completed",
     PLAN_COMPLETED = "plan-completed",
@@ -152,45 +151,9 @@ export type PlanSegmentLog = PlanSegmentLogBase & (
     }
 );
 
-export type MovementSafetyEvent =
-    | "encountered"
-    | "observed"
-    | "cleared"
-    | "replanned";
-
-export type MovementSafetyReason =
-    | "agent-on-next-cell"
-    | "agent-moving-to-next-cell"
-    | "agent-moving-from-next-cell"
-    | "departure-completed"
-    | "agent-returning-to-next-cell"
-    | "agent-left-observation-range"
-    | "agent-not-visible"
-    | "movement-uncertain"
-    | "movement-uncertain-replan"
-    | "next-move-is-safe"
-    | "agent-stationary-replan"
-    | "agent-oscillating-replan";
-
-/** One relevant observation made while avoiding another agent. */
-export interface MovementSafetyLog {
-    readonly event: MovementSafetyEvent;
-    readonly agentId: string;
-    readonly agentName: string;
-    readonly nextCell: Position;
-    readonly observedPosition: Position | undefined;
-    readonly movementSource: Position | undefined;
-    readonly movementDestination: Position | undefined;
-    readonly decision: "wait" | "move" | "replan";
-    readonly reason: MovementSafetyReason;
-}
-
 /** Output contract for agent decisions. */
 export abstract class BaseAgentLogger {
     abstract logDeliveryGain(delivery: DeliveryGainLog): void;
-
-    /** Optional so existing non-console loggers remain source-compatible. */
-    logMovementSafety(_movement: MovementSafetyLog): void { }
 
     /** Optional so existing non-console loggers remain source-compatible. */
     logMoveFailure(_failure: MoveFailureLog): void { }
@@ -202,15 +165,26 @@ export abstract class BaseAgentLogger {
     logPlanSegment(_segment: PlanSegmentLog): void { }
 }
 
+/** Optional features and dependencies for terminal decision logging. */
+export interface ConsoleAgentLoggerOptions {
+    /** Whether to render and persist branch-and-bound evaluation trees. */
+    readonly branchAndBoundSvgEnabled?: boolean;
+    /** Injectable graph writer used when SVG output is enabled. */
+    readonly branchAndBoundGraphWriter?: BaseBranchAndBoundGraphWriter;
+}
+
 /** Human-readable terminal logger for complete agent decisions. */
 export class ConsoleAgentLogger extends BaseAgentLogger {
     private readonly theme: TerminalTheme = new TerminalTheme();
+    private readonly branchAndBoundGraphWriter:
+        BaseBranchAndBoundGraphWriter | undefined;
 
-    constructor(
-        private readonly branchAndBoundGraphWriter:
-            BaseBranchAndBoundGraphWriter = new BranchAndBoundSvgWriter(),
-    ) {
+    constructor(options: ConsoleAgentLoggerOptions = {}) {
         super();
+        this.branchAndBoundGraphWriter = options.branchAndBoundSvgEnabled
+            ? options.branchAndBoundGraphWriter
+                ?? new BranchAndBoundSvgWriter()
+            : undefined;
     }
 
     logDeliveryGain(delivery: DeliveryGainLog): void {
@@ -219,34 +193,6 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
             + `  ${this.theme.success(`+${delivery.pointsGained} points`)}`
             + `  ${this.theme.muted("·")}`
             + `  total ${delivery.totalScore}`,
-        );
-    }
-
-    override logMovementSafety(movement: MovementSafetyLog): void {
-        const label = movement.event === "encountered"
-            ? "AGENT ENCOUNTER"
-            : movement.event === "cleared"
-                ? "AGENT CLEAR"
-                : movement.event === "replanned"
-                    ? "AGENT REPLAN"
-                    : "AGENT MOVEMENT";
-        const observedPosition = movement.observedPosition
-            ? `(${movement.observedPosition.x}, ${movement.observedPosition.y})`
-            : "not-visible";
-        const trajectory = movement.movementSource
-            && movement.movementDestination
-            ? `(${movement.movementSource.x}, ${movement.movementSource.y})`
-                + `->(${movement.movementDestination.x}, ${movement.movementDestination.y})`
-            : "stationary-or-unknown";
-
-        console.log(
-            `\n${label}`
-            + ` | agent=${movement.agentName}(${movement.agentId})`
-            + ` | observed=${observedPosition}`
-            + ` | move=${trajectory}`
-            + ` | our-next=(${movement.nextCell.x}, ${movement.nextCell.y})`
-            + ` | decision=${movement.decision.toUpperCase()}`
-            + ` | reason=${movement.reason}`,
         );
     }
 
@@ -264,11 +210,12 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
             (attempt: OptionPlanAttemptLog): boolean =>
                 attempt.result === "planned",
         );
-        const graphPaths = this.branchAndBoundGraphWriter.outputPaths(
+        const graphWriter = this.branchAndBoundGraphWriter;
+        const graphPaths = graphWriter?.outputPaths(
             search.agentId,
             search.cycle,
             search.evaluationPasses.length,
-        );
+        ) ?? [];
         const lines: string[] = [
             "",
             "",
@@ -391,15 +338,20 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
             );
         }
 
-        lines.push(this.formatSection("DECISION GRAPH"));
-        graphPaths.forEach((path: string): void => {
-            lines.push(this.formatDetail("FILE", path));
-        });
+        if (graphWriter) {
+            lines.push(this.formatSection("DECISION GRAPH"));
+            graphPaths.forEach((path: string): void => {
+                lines.push(this.formatDetail("FILE", path));
+            });
+        }
         lines.push(this.theme.heading(
             "╰───────────────────────────────────────────────────────────────────────────────",
         ));
         console.log(lines.join("\n"));
-        void this.branchAndBoundGraphWriter.writeGraphs(
+        if (!graphWriter) {
+            return;
+        }
+        void graphWriter.writeGraphs(
             search.agentId,
             search.cycle,
             search.evaluationPasses,
@@ -482,8 +434,6 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
                 return "Agent started";
             case DELIBERATION_CYCLE_REASON.BELIEFS_CHANGED:
                 return "Beliefs changed";
-            case DELIBERATION_CYCLE_REASON.MOVEMENT_SAFETY_REPLAN:
-                return "Movement safety required replanning";
             case DELIBERATION_CYCLE_REASON.ACTION_FAILED:
                 return "An action failed";
             case DELIBERATION_CYCLE_REASON.OPTION_SEGMENT_COMPLETED:
@@ -584,6 +534,8 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
                     + `(${change.currentPosition.x}, ${change.currentPosition.y})`;
             case BELIEF_CHANGE_TYPE.PARCEL_DISAPPEARED:
                 return `parcel ${change.parcelId} disappeared`;
+            case BELIEF_CHANGE_TYPE.PARCEL_EXPIRED:
+                return `parcel ${change.parcelId} expired`;
             case BELIEF_CHANGE_TYPE.CRATE_DISCOVERED:
                 return `crate ${change.crateId} discovered at `
                     + `(${change.position.x}, ${change.position.y})`;

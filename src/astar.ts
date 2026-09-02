@@ -19,7 +19,6 @@ export abstract class BasePathfinder {
         startingPosition: Position,
         targetPosition: Position,
         crates: ReadonlyMap<string, Position>,
-        temporarilyLocked?: Position,
     ): Action[];
 
     /**
@@ -33,14 +32,12 @@ export abstract class BasePathfinder {
         startingPosition: Position,
         targetPosition: Position,
         crates: ReadonlyMap<string, Position>,
-        temporarilyLocked?: Position,
     ): MovementPath {
         const actions = this.findPath(
             gameMap,
             startingPosition,
             targetPosition,
             crates,
-            temporarilyLocked,
         );
         if (actions.length === 0 && !startingPosition.isEqual(targetPosition)) {
             return { actions, positions: [] };
@@ -57,14 +54,12 @@ export abstract class BasePathfinder {
         startingPosition: Position,
         targetPosition: Position,
         crates: ReadonlyMap<string, Position>,
-        temporarilyLocked?: Position,
     ): number | undefined {
         const cacheKey = this.pathLengthCacheKey(
             gameMap,
             startingPosition,
             targetPosition,
             crates,
-            temporarilyLocked,
         );
         if (this.pathLengthCache.has(cacheKey)) {
             return this.pathLengthCache.get(cacheKey);
@@ -75,7 +70,6 @@ export abstract class BasePathfinder {
             startingPosition,
             targetPosition,
             crates,
-            temporarilyLocked,
         );
         const pathLength = path.length === 0 && !startingPosition.isEqual(targetPosition)
             ? undefined
@@ -95,25 +89,20 @@ export abstract class BasePathfinder {
         startingPosition: Position,
         targetPosition: Position,
         crates: ReadonlyMap<string, Position>,
-        temporarilyLocked?: Position,
     ): string {
         const mapSignature = JSON.stringify(gameMap);
         const startingKey = `${startingPosition.x},${startingPosition.y}`;
         const targetKey = `${targetPosition.x},${targetPosition.y}`;
-        const symmetricPath = temporarilyLocked === undefined
-            && this.pathLengthsAreSymmetric(gameMap);
+        const symmetricPath = this.pathLengthsAreSymmetric(gameMap);
         const [firstPosition, secondPosition] = symmetricPath
             && targetKey < startingKey
             ? [targetKey, startingKey]
             : [startingKey, targetKey];
-        const lockedPosition = temporarilyLocked
-            ? `${temporarilyLocked.x},${temporarilyLocked.y}`
-            : "none";
         const cratePositions = [...crates.values()]
             .map((crate: Position): string => `${crate.x},${crate.y}`)
             .sort()
             .join("|");
-        return `${mapSignature}:${firstPosition}:${secondPosition}:${lockedPosition}:${cratePositions}`;
+        return `${mapSignature}:${firstPosition}:${secondPosition}:${cratePositions}`;
     }
 
     private pathLengthsAreSymmetric(gameMap: string[][]): boolean {
@@ -151,14 +140,12 @@ export class AStarPathfinder extends BasePathfinder {
         startingPosition: Position,
         targetPosition: Position,
         crates: ReadonlyMap<string, Position>,
-        temporarilyLocked?: Position,
     ): Action[] {
         return this.findMovementPath(
             gameMap,
             startingPosition,
             targetPosition,
             crates,
-            temporarilyLocked,
         ).actions;
     }
 
@@ -167,7 +154,6 @@ export class AStarPathfinder extends BasePathfinder {
         startingPosition: Position,
         targetPosition: Position,
         crates: ReadonlyMap<string, Position>,
-        temporarilyLocked?: Position,
     ): MovementPath {
         if (!startingPosition.isGridAligned()) {
             return { actions: [], positions: [] };
@@ -218,7 +204,6 @@ export class AStarPathfinder extends BasePathfinder {
                     gameMap,
                     directions[index],
                     crates,
-                    temporarilyLocked,
                 )) {
                     continue;
                 }
@@ -264,7 +249,6 @@ export class AStarPathfinder extends BasePathfinder {
         gameMap: string[][],
         direction: Direction,
         crates: ReadonlyMap<string, Position>,
-        temporarilyLocked?: Position,
     ): boolean {
         if (
             neighbor.x < 0 ||
@@ -286,10 +270,6 @@ export class AStarPathfinder extends BasePathfinder {
             cell === "↓" && direction === "up" ||
             cell === "←" && direction === "right"
         ) {
-            return false;
-        }
-
-        if (temporarilyLocked?.isEqual(neighbor)) {
             return false;
         }
 

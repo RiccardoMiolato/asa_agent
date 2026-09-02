@@ -454,3 +454,13 @@ GHOST_MAP_PORT=8082 npm run ghost-map
 Each agent process needs its own ghost-map port. The live JSON snapshot is also available at `/api/state` for debugging.
 
 The browser mounts the static tile grid only once and subsequently patches dynamic overlays. After the initial request it calls `/api/state?includeMap=false`, avoiding repeated transfer and serialization of the unchanged tile matrix. Foreground refreshes are fast; background tabs automatically reduce their polling rate.
+
+## Branch-and-bound SVG trees
+
+SVG construction is disabled by default. Enable one decision-tree file per evaluator pass with:
+
+```sh
+BRANCH_AND_BOUND_SVG_ENABLED=true npm run start
+```
+
+Files are written to `logs/branch-and-bound` by default. Set `BRANCH_BOUND_GRAPH_DIR` to use a different output directory.

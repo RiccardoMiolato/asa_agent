@@ -169,7 +169,12 @@ export class SearchIntention extends Intention {
             cluster.scanStartedAt = checkpoint.scanStartedAt;
             cluster.remainingCellKeys = checkpoint.remainingCellKeys;
             if (plan.actions.length === 0) {
-                cluster.lastFullyVisitedAt = Date.now();
+                if (this.clusterContainsPosition(
+                    cluster,
+                    context.agentPosition,
+                )) {
+                    this.recordClusterVisit(cluster);
+                }
                 cluster.scanStartedAt = undefined;
                 cluster.remainingCellKeys = undefined;
                 continue;
@@ -188,6 +193,14 @@ export class SearchIntention extends Intention {
             return partialFallback.coverage.actions;
         }
 
+        const revisitActions = this.buildClusterRevisitActions(
+            context,
+            oldestClusters,
+        );
+        if (revisitActions !== undefined) {
+            return revisitActions;
+        }
+
         this.planningSatisfied = !incompleteClusterFound;
         return [];
     }
@@ -200,7 +213,7 @@ export class SearchIntention extends Intention {
         if (!this.plannedCoverageComplete || !this.plannedCluster) {
             return;
         }
-        this.plannedCluster.lastFullyVisitedAt = Date.now();
+        this.recordClusterVisit(this.plannedCluster);
         this.plannedCluster.scanStartedAt = undefined;
         this.plannedCluster.remainingCellKeys = undefined;
         this.plannedCluster = undefined;
@@ -452,6 +465,75 @@ export class SearchIntention extends Intention {
         this.plannedCoverageComplete = coverageComplete;
     }
 
+    /** Plans a physical transfer when sensing already covers every cluster. */
+    private buildClusterRevisitActions(
+        context: PlanningContext,
+        oldestClusters: readonly PickupCluster[],
+    ): Action[] | undefined {
+        const remoteClusters = oldestClusters.filter(
+            (cluster: PickupCluster): boolean =>
+                !this.clusterContainsPosition(cluster, context.agentPosition),
+        );
+        const localClusters = oldestClusters.filter(
+            (cluster: PickupCluster): boolean =>
+                this.clusterContainsPosition(cluster, context.agentPosition),
+        );
+
+        for (const cluster of [...remoteClusters, ...localClusters]) {
+            const destinations = [...cluster.cells]
+                .filter(
+                    (cell: Position): boolean =>
+                        !cell.isEqual(context.agentPosition),
+                )
+                .sort(
+                    (first: Position, second: Position): number =>
+                        context.agentPosition.distanceTo(first)
+                        - context.agentPosition.distanceTo(second),
+                );
+            for (const destination of destinations) {
+                const movementPath = context.pathfinder.findMovementPath(
+                    context.gameMap,
+                    context.agentPosition,
+                    destination,
+                    context.crates,
+                );
+                if (movementPath.actions.length > 0) {
+                    this.rememberPlannedCluster(
+                        cluster,
+                        this.makeClusterCheckpoint(context, cluster),
+                        destination,
+                        true,
+                    );
+                    return movementPath.actions;
+                }
+
+                if (context.crates.size === 0) {
+                    continue;
+                }
+                const pathWithMovableCrates =
+                    context.pathfinder.findMovementPath(
+                        context.gameMap,
+                        context.agentPosition,
+                        destination,
+                        new Map<string, Position>(),
+                    );
+                if (pathWithMovableCrates.actions.length === 0) {
+                    continue;
+                }
+
+                this.rememberPlannedCluster(
+                    cluster,
+                    this.makeClusterCheckpoint(context, cluster),
+                    destination,
+                    false,
+                );
+                return [];
+            }
+        }
+
+        return undefined;
+    }
+
     private buildCoveragePlan(
         context: PlanningContext,
         cluster: PickupCluster,
@@ -645,6 +727,27 @@ export class SearchIntention extends Intention {
                 (cell: Position): number => position.distanceTo(cell),
             ),
         );
+    }
+
+    private clusterContainsPosition(
+        cluster: PickupCluster,
+        position: Position,
+    ): boolean {
+        return cluster.cells.some(
+            (cell: Position): boolean => cell.isEqual(position),
+        );
+    }
+
+    /** Preserves visit ordering even when several completions share one millisecond. */
+    private recordClusterVisit(cluster: PickupCluster): void {
+        const latestVisit = Math.max(
+            0,
+            ...this.clusters.map(
+                (candidate: PickupCluster): number =>
+                    candidate.lastFullyVisitedAt ?? 0,
+            ),
+        );
+        cluster.lastFullyVisitedAt = Math.max(Date.now(), latestVisit + 1);
     }
 
     private positionKey(position: Position): string {

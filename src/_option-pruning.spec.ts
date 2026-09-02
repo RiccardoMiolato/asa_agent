@@ -8,6 +8,7 @@ import { DESIRE_TYPE, DesireGenerator } from "./desires.js";
 import {
     BaseOptionBranchBoundEstimator,
     ConservativeRewardBranchBoundEstimator,
+    EarliestDeliveryRewardBranchBoundEstimator,
     OPTION_BRANCH_DECISION,
     type OptionBranchBound,
     type OptionBranchCandidate,
@@ -115,6 +116,26 @@ class OptionPruningFixture {
             ),
         };
     }
+
+    /** Creates a case where travel decay separates the two admissible bounds. */
+    static tighterBoundContext(): PlanningContext {
+        const context = OptionPruningFixture.context();
+        const distantParcel = context.parcels.get("distant");
+        assert.ok(distantParcel !== undefined);
+
+        return {
+            ...context,
+            parcels: new Map<string, Parcel>([
+                ...[...context.parcels.entries()].filter(
+                    ([parcelId]: readonly [string, Parcel]): boolean =>
+                        parcelId !== distantParcel.id,
+                ),
+                [distantParcel.id, { ...distantParcel, x: 2 }],
+            ]),
+            rewardDecayInterval: 400,
+            millisecondsUntilNextRewardDecay: 400,
+        };
+    }
 }
 
 test("pickup bounds combine path-aware delivery and remaining rewards", () => {
@@ -136,6 +157,28 @@ test("pickup bounds combine path-aware delivery and remaining rewards", () => {
         estimatedActionScore: 10,
         remainingParcelScore: 1,
         totalScore: 11,
+    });
+});
+
+test("earliest-delivery bounds decay uncollected parcels by unavoidable work", () => {
+    const context = OptionPruningFixture.context();
+    const bound = new EarliestDeliveryRewardBranchBoundEstimator().estimate(
+        context,
+        {
+            actionType: DESIRE_TYPE.PICK_UP,
+            positionAfterAction: new Position(1, 0),
+            carriedParcelIdsAfterAction: ["nearby"],
+            remainingParcelIds: ["distant"],
+            elapsedMillisecondsAfterAction: 300,
+            realizedDeliveryScore: 0,
+            deliveryCellCandidates: context.deliveringCells,
+        },
+    );
+
+    assert.deepEqual(bound, {
+        estimatedActionScore: 10,
+        remainingParcelScore: 0,
+        totalScore: 10,
     });
 });
 
@@ -186,8 +229,8 @@ test("the evaluator prunes a branch whose bound cannot beat the incumbent", () =
         OPTION_BRANCH_DECISION.PRUNED_BY_BOUND,
     );
     assert.equal(distantPickup?.estimatedActionScore, 0);
-    assert.equal(distantPickup?.remainingParcelScore, 6);
-    assert.equal(distantPickup?.branchUpperBound, 6);
+    assert.equal(distantPickup?.remainingParcelScore, 2);
+    assert.equal(distantPickup?.branchUpperBound, 2);
     assert.equal(distantPickup?.branchScore, undefined);
     assert.equal(distantPickup?.targetNodeId, undefined);
 
@@ -197,5 +240,35 @@ test("the evaluator prunes a branch whose bound cannot beat the incumbent", () =
         pass: 1,
     });
     assert.match(svg, /PRUNED/);
-    assert.match(svg, /upper bound 6\.000/);
+    assert.match(svg, /upper bound 2\.000/);
+});
+
+test("earliest-delivery bounds visit fewer nodes than immediate-reward bounds", () => {
+    const context = OptionPruningFixture.tighterBoundContext();
+    const evaluation = new OptionEvaluator(
+        new DesireGenerator(),
+    ).evaluateWithGraph(context);
+    const conservativeEvaluation = new OptionEvaluator(
+        new DesireGenerator(),
+        new ConservativeRewardBranchBoundEstimator(),
+    ).evaluateWithGraph(context);
+    const exhaustiveEvaluation = new OptionEvaluator(
+        new DesireGenerator(),
+        new ExhaustiveBranchBoundEstimator(),
+    ).evaluateWithGraph(context);
+
+    assert.deepEqual(
+        evaluation.bestSequence.map((desire): string => desire.identity()),
+        exhaustiveEvaluation.bestSequence.map(
+            (desire): string => desire.identity(),
+        ),
+    );
+    assert.equal(
+        evaluation.graph.bestScore,
+        exhaustiveEvaluation.graph.bestScore,
+    );
+    assert.ok(
+        evaluation.graph.nodes.length
+            < conservativeEvaluation.graph.nodes.length,
+    );
 });

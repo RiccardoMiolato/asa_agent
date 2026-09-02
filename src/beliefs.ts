@@ -14,9 +14,22 @@ export interface Parcel extends Omit<IOParcel, "carriedBy"> {
     lastUpdate: Date;
 }
 
-/** Locally acknowledged pickup that must survive stale sensing snapshots. */
-interface LocalPickupConfirmation {
+/** Confidence attached to local pickup ownership. */
+export enum PICKUP_CONFIDENCE {
+    PROVISIONAL = "provisional",
+    CONFIRMED = "confirmed",
+}
+
+/** Local ownership inferred from pickup execution or direct evidence. */
+interface LocalPickupOwnership {
     readonly agentId: string;
+    readonly confidence: PICKUP_CONFIDENCE;
+}
+
+/** In-flight pickup evidence collected from complete sensing revisions. */
+interface PendingPickupAttempt {
+    readonly agentId: string;
+    observedTargetAbsent: boolean;
 }
 
 /** Finite set of dynamic world changes reported by one sensing revision. */
@@ -26,6 +39,7 @@ export enum BELIEF_CHANGE_TYPE {
     PARCEL_CARRIER_CHANGED = "parcel-carrier-changed",
     PARCEL_MOVED = "parcel-moved",
     PARCEL_DISAPPEARED = "parcel-disappeared",
+    PARCEL_EXPIRED = "parcel-expired",
     CRATE_DISCOVERED = "crate-discovered",
     CRATE_MOVED = "crate-moved",
 }
@@ -58,6 +72,10 @@ export type BeliefChange =
         readonly parcelId: string;
     }
     | {
+        readonly type: BELIEF_CHANGE_TYPE.PARCEL_EXPIRED;
+        readonly parcelId: string;
+    }
+    | {
         readonly type:
             | BELIEF_CHANGE_TYPE.CRATE_DISCOVERED
             | BELIEF_CHANGE_TYPE.CRATE_MOVED;
@@ -81,12 +99,13 @@ export class Beliefs {
     agents: Map<string, IOSensedAgent>;
     parcels: Map<string, Parcel>;
     crates: Map<string, Position>;
-    private readonly localPickupConfirmations:
-        Map<string, LocalPickupConfirmation>;
+    private readonly pendingPickupAttempts: Map<string, PendingPickupAttempt>;
+    private readonly localPickupOwnership:
+        Map<string, LocalPickupOwnership>;
+    private readonly locallyDeliveredParcelIds: Set<string>;
     private sensingRevision: number;
     private crateRevisionNumber: number;
     private mapRevisionNumber: number;
-    private sensingWaiters: Set<(revision: number) => void>;
     private observedPositionKeys: Set<string>;
 
 
@@ -109,12 +128,13 @@ export class Beliefs {
         this.agents = new Map<string, IOSensedAgent>();
         this.parcels = new Map<string, Parcel>();
         this.crates = new Map<string, Position>();
-        this.localPickupConfirmations =
-            new Map<string, LocalPickupConfirmation>();
+        this.pendingPickupAttempts = new Map<string, PendingPickupAttempt>();
+        this.localPickupOwnership =
+            new Map<string, LocalPickupOwnership>();
+        this.locallyDeliveredParcelIds = new Set<string>();
         this.sensingRevision = 0;
         this.crateRevisionNumber = 0;
         this.mapRevisionNumber = 0;
-        this.sensingWaiters = new Set<(revision: number) => void>();
         this.observedPositionKeys = new Set<string>();
         this.delivering_cells = [];
         this.pickup_cells = [];
@@ -166,7 +186,7 @@ export class Beliefs {
             ...this.senseCrateChanges(crates),
         ];
         this.recordObservedPickupCells(observedPositions);
-        this.notifySensingWaiters();
+        this.recordSensingRevision();
 
         return new BeliefRevision(changes);
     }
@@ -174,6 +194,10 @@ export class Beliefs {
     /** Monotonically identifies the last complete sensing snapshot. */
     currentSensingRevision(): number {
         return this.sensingRevision;
+    }
+
+    private recordSensingRevision(): void {
+        this.sensingRevision += 1;
     }
 
     /** Changes whenever a crate is discovered or moves to another cell. */
@@ -189,48 +213,6 @@ export class Beliefs {
     /** Reports whether the latest complete snapshot covered a grid cell. */
     isPositionCurrentlyObserved(position: Position): boolean {
         return this.observedPositionKeys.has(this.positionKey(position));
-    }
-
-    /** Resolves after a snapshot newer than the supplied revision is available. */
-    waitForSensingAfter(revision: number): Promise<number> {
-        if (this.sensingRevision > revision) {
-            return Promise.resolve(this.sensingRevision);
-        }
-        return new Promise<number>((resolve: (nextRevision: number) => void): void => {
-            this.sensingWaiters.add(resolve);
-        });
-    }
-
-    /** Resolves with a new revision, or `undefined` when the timeout wins. */
-    waitForSensingAfterOrTimeout(
-        revision: number,
-        timeoutMilliseconds: number,
-    ): Promise<number | undefined> {
-        if (this.sensingRevision > revision) {
-            return Promise.resolve(this.sensingRevision);
-        }
-        return new Promise<number | undefined>(
-            (resolve: (nextRevision: number | undefined) => void): void => {
-                const waiter = (nextRevision: number): void => {
-                    clearTimeout(timeout);
-                    resolve(nextRevision);
-                };
-                const timeout = setTimeout((): void => {
-                    this.sensingWaiters.delete(waiter);
-                    resolve(undefined);
-                }, Math.max(0, timeoutMilliseconds));
-                this.sensingWaiters.add(waiter);
-            },
-        );
-    }
-
-    private notifySensingWaiters(): void {
-        this.sensingRevision += 1;
-        const waiters = [...this.sensingWaiters];
-        this.sensingWaiters.clear();
-        for (const resolve of waiters) {
-            resolve(this.sensingRevision);
-        }
     }
 
     configPhase(config: IOConfig): void {
@@ -295,15 +277,20 @@ export class Beliefs {
 
     private senseParcelChanges(parcels: IOParcel[]): BeliefChange[] {
         const changes: BeliefChange[] = [];
-        const sensedParcelIds = new Set<string>();
+        const sensedParcelIds = new Set<string>(
+            parcels.map((parcel: IOParcel): string => parcel.id),
+        );
 
         parcels.forEach((parcel: IOParcel) => {
             const { id, x, y, reward } = parcel;
+            if (this.locallyDeliveredParcelIds.has(id)) {
+                return;
+            }
+
             const carriedBy = this.reconcileSensedParcelCarrier(
                 id,
                 parcel.carriedBy ?? undefined,
             );
-            sensedParcelIds.add(id);
             const lastUpdate = new Date();
             const existingParcel = this.parcels.get(id);
 
@@ -312,7 +299,13 @@ export class Beliefs {
             }
             if (reward <= 0) {
                 this.parcels.delete(id);
-                this.localPickupConfirmations.delete(id);
+                this.localPickupOwnership.delete(id);
+                if (existingParcel !== undefined) {
+                    changes.push({
+                        type: BELIEF_CHANGE_TYPE.PARCEL_EXPIRED,
+                        parcelId: id,
+                    });
+                }
                 if (existingParcel && existingParcel.reward !== reward) {
                     changes.push({
                         type: BELIEF_CHANGE_TYPE.PARCEL_REWARD_CHANGED,
@@ -365,12 +358,23 @@ export class Beliefs {
         });
 
         for (const [parcelId, parcel] of this.parcels) {
+            const targetIsObserved = this.isPositionCurrentlyObserved(
+                new Position(parcel.x, parcel.y),
+            );
+            const pendingPickup = this.pendingPickupAttempts.get(parcelId);
+            if (
+                !sensedParcelIds.has(parcelId)
+                && targetIsObserved
+                && pendingPickup !== undefined
+            ) {
+                pendingPickup.observedTargetAbsent = true;
+                continue;
+            }
+
             if (
                 sensedParcelIds.has(parcelId)
-                || this.localPickupConfirmations.has(parcelId)
-                || !this.isPositionCurrentlyObserved(
-                    new Position(parcel.x, parcel.y),
-                )
+                || this.localPickupOwnership.has(parcelId)
+                || !targetIsObserved
             ) {
                 continue;
             }
@@ -381,89 +385,182 @@ export class Beliefs {
             });
         }
 
-        this.updateParcelRewards();
+        for (const parcelId of this.updateParcelRewards()) {
+            changes.push({
+                type: BELIEF_CHANGE_TYPE.PARCEL_EXPIRED,
+                parcelId,
+            });
+        }
 
         return changes;
     }
 
-    /**
-     * When I deliver parcels, I delete them from the map I am keeping
-     * To do that is necessary to remove only the parcels I am carrying
-     */
-    clearDeliveredParcels(agentId: string): void {
-        this.parcels.forEach((parcel: Parcel, parcel_id: string) => {
-            if (parcel.carriedBy === agentId) {
-                this.parcels.delete(parcel_id);
-                this.localPickupConfirmations.delete(parcel_id);
-            }
+    /** Protects a target parcel from disappearing while pickup is unresolved. */
+    beginPickupAttempt(parcelId: string, agentId: string): void {
+        this.pendingPickupAttempts.set(parcelId, {
+            agentId,
+            observedTargetAbsent: false,
         });
     }
 
+    /**
+     * Ends pickup protection and removes a target observed absent when the
+     * pickup request itself did not complete.
+     */
+    endPickupAttempt(parcelId: string, pickupCompleted: boolean): void {
+        const pendingPickup = this.pendingPickupAttempts.get(parcelId);
+        this.pendingPickupAttempts.delete(parcelId);
+        if (
+            pickupCompleted
+            || pendingPickup?.observedTargetAbsent !== true
+        ) {
+            return;
+        }
+
+        this.parcels.delete(parcelId);
+        this.localPickupOwnership.delete(parcelId);
+    }
+
+    /** Returns stable identities of parcels currently assigned to this agent. */
+    carriedParcelIds(agentId: string): readonly string[] {
+        return [...this.parcels.values()]
+            .filter((parcel: Parcel): boolean => parcel.carriedBy === agentId)
+            .map((parcel: Parcel): string => parcel.id);
+    }
+
+    /** Confirms local ownership and makes it resilient to stale sensing. */
     markParcelCarried(parcelId: string, agentId: string): void {
         const parcel = this.parcels.get(parcelId);
         if (parcel === undefined) {
             return;
         }
         parcel.carriedBy = agentId;
-        this.localPickupConfirmations.set(parcelId, { agentId });
+        this.localPickupOwnership.set(parcelId, {
+            agentId,
+            confidence: PICKUP_CONFIDENCE.CONFIRMED,
+        });
     }
 
-    /**
-     * Resolves an acknowledged pickup when current sensing still exposes the
-     * target cell and parcel as free. Missing or contrary evidence wins.
-     */
-    confirmUnresolvedPickup(parcelId: string, agentId: string): boolean {
+    /** Assumes local ownership until a later observation contradicts it. */
+    markParcelProvisionallyCarried(
+        parcelId: string,
+        agentId: string,
+    ): void {
         const parcel = this.parcels.get(parcelId);
         if (
             parcel === undefined
-            || parcel.carriedBy !== undefined
-            || !this.isPositionCurrentlyObserved(
-                new Position(parcel.x, parcel.y),
+            || (
+                parcel.carriedBy !== undefined
+                && parcel.carriedBy !== agentId
             )
         ) {
-            return false;
+            return;
         }
 
-        this.markParcelCarried(parcelId, agentId);
-        return true;
+        const existingOwnership = this.localPickupOwnership.get(parcelId);
+        parcel.carriedBy = agentId;
+        if (
+            existingOwnership?.agentId === agentId
+            && existingOwnership.confidence === PICKUP_CONFIDENCE.CONFIRMED
+        ) {
+            return;
+        }
+        this.localPickupOwnership.set(parcelId, {
+            agentId,
+            confidence: PICKUP_CONFIDENCE.PROVISIONAL,
+        });
     }
 
-    /** Whether the latest authoritative belief assigns a parcel to one agent. */
+    /** Whether the canonical belief currently assigns a parcel to one agent. */
     isParcelCarriedBy(parcelId: string, agentId: string): boolean {
         return this.parcels.get(parcelId)?.carriedBy === agentId;
     }
 
+    /** Returns this agent's local ownership confidence for one parcel. */
+    parcelPickupConfidence(
+        parcelId: string,
+        agentId: string,
+    ): PICKUP_CONFIDENCE | undefined {
+        const ownership = this.localPickupOwnership.get(parcelId);
+        return ownership?.agentId === agentId
+            ? ownership.confidence
+            : undefined;
+    }
+
     /**
-     * A free snapshot cannot undo our acknowledged pickup because this agent
-     * never puts parcels down outside the explicit delivery action.
+     * Records parcels delivered by the agent after a planned putdown and
+     * prevents stale sensing frames from resurrecting them.
      */
+    markParcelsDelivered(
+        agentId: string,
+        parcelIds: ReadonlySet<string>,
+    ): void {
+        for (const parcelId of parcelIds) {
+            const parcel = this.parcels.get(parcelId);
+            const ownership = this.localPickupOwnership.get(parcelId);
+            if (
+                parcel?.carriedBy !== agentId
+                && ownership?.agentId !== agentId
+            ) {
+                continue;
+            }
+
+            this.parcels.delete(parcelId);
+            this.localPickupOwnership.delete(parcelId);
+            this.pendingPickupAttempts.delete(parcelId);
+            this.locallyDeliveredParcelIds.add(parcelId);
+        }
+    }
+
+    /** Reconciles authoritative carrier data with confirmed local ownership. */
     private reconcileSensedParcelCarrier(
         parcelId: string,
         sensedCarrier: string | undefined,
     ): string | undefined {
-        const confirmation = this.localPickupConfirmations.get(parcelId);
-        if (confirmation === undefined) {
-            return sensedCarrier;
-        }
+        const pendingPickupAgent =
+            this.pendingPickupAttempts.get(parcelId)?.agentId;
         if (
-            sensedCarrier === undefined
-            || sensedCarrier === confirmation.agentId
+            pendingPickupAgent !== undefined
+            && sensedCarrier === pendingPickupAgent
         ) {
-            return confirmation.agentId;
+            this.localPickupOwnership.set(parcelId, {
+                agentId: pendingPickupAgent,
+                confidence: PICKUP_CONFIDENCE.CONFIRMED,
+            });
+            return pendingPickupAgent;
         }
 
-        this.localPickupConfirmations.delete(parcelId);
+        const ownership = this.localPickupOwnership.get(parcelId);
+        if (ownership === undefined) {
+            return sensedCarrier;
+        }
+        if (sensedCarrier === ownership.agentId) {
+            this.localPickupOwnership.set(parcelId, {
+                agentId: ownership.agentId,
+                confidence: PICKUP_CONFIDENCE.CONFIRMED,
+            });
+            return ownership.agentId;
+        }
+        if (
+            ownership.confidence === PICKUP_CONFIDENCE.CONFIRMED
+            && sensedCarrier === undefined
+        ) {
+            return ownership.agentId;
+        }
+
+        this.localPickupOwnership.delete(parcelId);
         return sensedCarrier;
     }
 
-    /** Applies complete configured decay ticks to stale parcel beliefs. */
-    updateParcelRewards(): void {
+    /** Applies decay ticks and returns identities that expired locally. */
+    updateParcelRewards(): readonly string[] {
         const rewardDecayInterval = this.rewardDecayInterval;
         if (rewardDecayInterval === undefined) {
-            return;
+            return [];
         }
 
         const timeNow = new Date();
+        const expiredParcelIds: string[] = [];
 
         this.parcels.forEach((parcel: Parcel, id: string) => {
             const elapsedMilliseconds = timeNow.getTime() - parcel.lastUpdate.getTime();
@@ -482,9 +579,12 @@ export class Beliefs {
 
             if (parcel.reward <= 0) {
                 this.parcels.delete(id);
-                this.localPickupConfirmations.delete(id);
+                this.localPickupOwnership.delete(id);
+                expiredParcelIds.push(id);
             }
         });
+
+        return expiredParcelIds;
     }
 
     /** Returns a latency-adjusted delay until the next server reward-decay tick. */

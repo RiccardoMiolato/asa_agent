@@ -15,6 +15,8 @@ const host = process.env.HOST || "http://localhost:8080";
 const token = process.env.TOKEN || "";
 const agent_name = process.env.NAME || "cardo";
 const ghostMapPort = Number(process.env.GHOST_MAP_PORT ?? "8081");
+const branchAndBoundSvgEnabled =
+    process.env.BRANCH_AND_BOUND_SVG_ENABLED === "true";
 
 console.log("Connecting...");
 const socket: DjsClientSocket = DjsConnect(host, token, agent_name);
@@ -26,7 +28,7 @@ const agent = new Agent(
     new DesireGenerator(),
     pathfinder,
     actionFactory,
-    new ConsoleAgentLogger(),
+    new ConsoleAgentLogger({ branchAndBoundSvgEnabled }),
 );
 const ghostMapServer = new GhostMapServer(
     new AgentGhostMapSnapshotProvider(agent, beliefs, agent_name),
