@@ -1,7 +1,10 @@
-import { IntentionContext } from "../bdi/intentions.js";
+import { PlanningContext } from "../planning.js";
 import { GameClient } from "../utils/move.js";
 import { Position } from "../utils/position.js";
 import { MISSION_CLASSIFICATION_INSTRUCTIONS } from "./instructions/instruction.js";
+import { LEVEL_1_EVALUATION_INSTRUCTIONS } from "./instructions/level_1.js";
+import { LEVEL_2_EVALUATION_INSTRUCTION } from "./instructions/level_2.js";
+import { LEVEL_3_EVALUATION_INSTRUCTION } from "./instructions/level_3.js";
 import { LLMClient, LLMMessage } from "./LLMClient.js";
 import { BonusType, Mission, MissionLevel, MissionType } from "./mission.js";
 import { answer_trivia, drop_at, get_agent_position, math_eval, move_to, MoveToResponse } from "./tools/tools.js";
@@ -99,7 +102,7 @@ export class MissionHandler {
         return this.pendingChatMessages.shift();
     }
 
-    async evaluateMission(context: IntentionContext): Promise<void> {
+    async evaluateMission(context: PlanningContext): Promise<void> {
         const mission = this.getPendingMission();
 
         if(!mission)
@@ -130,9 +133,9 @@ export class MissionHandler {
         }
     }
 
-    private async handleFirstLevelMissions(context: IntentionContext, mission: ChatMessage, message: LLMMessage, answer_trivia: boolean): Promise<void> {
+    private async handleFirstLevelMissions(context: PlanningContext, mission: ChatMessage, message: LLMMessage, answer_trivia: boolean): Promise<void> {
         console.log("Evaluating level 1 mission...");
-        const evaluationRes: string = await this.sendMessage([message], LEVEL_1_EVALUATION_INSTRUCTION);
+        const evaluationRes: string = await this.sendMessage([message], LEVEL_1_EVALUATION_INSTRUCTIONS);
 
         if(evaluationRes === "")
             return;
@@ -174,7 +177,7 @@ export class MissionHandler {
 
     }
 
-    private async ExecuteTools(context: IntentionContext, level: number, toolsChain: ToolPlanningResult, mission: ChatMessage, requires_answer: boolean): Promise<any[]> {
+    private async ExecuteTools(context: PlanningContext, level: number, toolsChain: ToolPlanningResult, mission: ChatMessage, requires_answer: boolean): Promise<any[]> {
         const results: any[] = [];
 
         for (let i = 0; i < (toolsChain.tools ?? []).length; i++) {
@@ -289,7 +292,7 @@ export class MissionHandler {
     }
 
 
-    private async callTool(context: IntentionContext, level: number, tool: ITool): Promise<any> {
+    private async callTool(context: PlanningContext, level: number, tool: ITool): Promise<any> {
         const toolFunction: Function | undefined = this.toolToFunctionMap.get(tool.name);
 
         if(!toolFunction) {

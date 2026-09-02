@@ -1,4 +1,4 @@
-import { IntentionContext } from "../../bdi/intentions.js";
+import { PlanningContext } from "../../planning.js";
 import { GameMap } from "../../utils/map.js";
 import { Position } from "../../utils/position.js";
 import { TRIVIA_ANSWERING_RULES } from "../instructions/level_1.js";
@@ -37,7 +37,7 @@ function math_eval(expression: string): number {
     }
 }
 
-function get_agent_position(context: IntentionContext): Position {
+function get_agent_position(context: PlanningContext): Position {
     return context.agentPosition;
 }
 
@@ -47,7 +47,7 @@ interface MoveToResponse {
     bonus: number,
 }
 
-function drop_at(context: IntentionContext, x: number, y: number, bonus: number): MoveToResponse {
+function drop_at(context: PlanningContext, x: number, y: number, bonus: number): MoveToResponse {
     const gameMap: GameMap = context.gameMap;
     const mapPos = new Position(x, y);
 
@@ -66,7 +66,7 @@ function drop_at(context: IntentionContext, x: number, y: number, bonus: number)
     }
 }
 
-function move_to(context: IntentionContext, x: number, y: number, bonus: number): MoveToResponse {
+function move_to(context: PlanningContext, x: number, y: number, bonus: number): MoveToResponse {
     const gameMap: GameMap = context.gameMap;
     const mapPos = new Position(x, y);
 

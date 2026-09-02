@@ -1,5 +1,5 @@
 import type { PlanningContext } from "./planning.js";
-import { Position } from "./position.js";
+import { Position } from "./utils/position.js";
 
 /** Computes optimistic route lengths shared by search heuristics. */
 export class OptimisticPathLengthEstimator {

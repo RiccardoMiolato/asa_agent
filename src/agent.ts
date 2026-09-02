@@ -227,7 +227,7 @@ export class Agent {
 
             if(this.useLLM) {
                 if (this.missionHandler?.isMissionWaiting()){
-                    // await this.missionHandler?.evaluateMission(this.getIntentionContext());
+                    await this.missionHandler?.evaluateMission(this.getPlanningContext());
                 }
 
                 if(this.missionHandler?.areActiveMissionsPresent()) {

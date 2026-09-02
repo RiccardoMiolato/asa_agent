@@ -1,22 +1,10 @@
-<<<<<<< HEAD:src/desires.ts
+import { OptimisticPathLengthEstimator } from "../_path-estimation.js";
 import {
     PlanningObjective,
     type PlanningContext,
     type PlanningObjectiveDescription,
-} from "./planning.js";
-import { OptimisticPathLengthEstimator } from "./_path-estimation.js";
-import { Position } from "./position.js";
-=======
+} from "../planning.js";
 import { Position } from "../utils/position.js";
-import type { Beliefs } from "./beliefs.js";
-import {
-    DeliverParcelIntention,
-    type Intention,
-    PickUpParcelIntention,
-    type PickupClusterSnapshot,
-    SearchIntention,
-} from "./intentions.js";
->>>>>>> llm-agent:src/bdi/desires.ts
 
 /** Goal categories that can be considered by branch-and-bound. */
 export enum DESIRE_TYPE {

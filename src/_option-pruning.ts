@@ -1,8 +1,8 @@
-import { DESIRE_TYPE } from "./desires.js";
 import { OptimisticPathLengthEstimator } from "./_path-estimation.js";
+import { DESIRE_TYPE } from "./bdi/desires.js";
 import type { PlanningContext } from "./planning.js";
-import { Position } from "./position.js";
-import { RewardDecayEstimator } from "./_reward-decay.js";
+import { RewardDecayEstimator } from "./utils/_reward-decay.js";
+import { Position } from "./utils/position.js";
 
 /** Candidate state inspected before the evaluator expands a branch. */
 export interface OptionBranchCandidate {
