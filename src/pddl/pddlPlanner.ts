@@ -1,6 +1,6 @@
-import { GameMap, NeighborCoord } from "../map.js";
-import { Action, ActionFactory } from "../move.js";
-import { Position } from "../position.js";
+import { GameMap, NeighborCoord } from "../utils/map.js";
+import { Action, ActionFactory } from "../utils/move.js";
+import { Position } from "../utils/position.js";
 import { PDDLProblem } from "./PddlProblem.js";
 import { PddlPlanStep } from "./onlineSolver.js";
 

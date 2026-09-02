@@ -1,3 +1,23 @@
+import type { Beliefs } from "./bdi/beliefs.js";
+import {
+    BELIEF_CHANGE_TYPE,
+    type BeliefChange,
+    type BeliefRevision
+} from "./bdi/beliefs.js";
+import {
+    Desire,
+    DesireGenerator,
+    PickUpParcelDesire
+} from "./bdi/desires.js";
+import { CommittedDesireIntention, Intention, PickupClusterSnapshot, SearchIntention } from "./bdi/intentions.js";
+import { OPTION_TRAVERSABILITY, OptionEvaluationGraph, OptionEvaluator } from "./bdi/option_evaluator.js";
+import { Mission } from "./llm/mission.js";
+import { MissionHandler } from "./llm/MissionHandler.js";
+import { PDDLPlanner } from "./pddl/pddlPlanner.js";
+import {
+    type PlanningContext,
+    type PlanningObjectiveDescription,
+} from "./planning.js";
 import {
     type BaseAgentLogger,
     type BranchAndBoundLog,
@@ -6,44 +26,17 @@ import {
     type OptionPlanMethod,
     type OptionSearchOutcome,
     PLAN_SEGMENT_EVENT,
-} from "./_logging.js";
-import type { BasePathfinder } from "./astar.js";
-import {
-    BELIEF_CHANGE_TYPE,
-    type BeliefChange,
-    type BeliefRevision,
-    type Beliefs,
-} from "./beliefs.js";
-import {
-    CommittedDesireIntention,
-    Intention,
-    type PickupClusterSnapshot,
-    SearchIntention,
-} from "./intentions.js";
-import {
-    Desire,
-    DesireGenerator,
-    PickUpParcelDesire,
-} from "./desires.js";
-import { GameMap } from "./map.js";
+} from "./utils/_logging.js";
+import type { BasePathfinder } from "./utils/astar.js";
+import { GameMap } from "./utils/map.js";
 import {
     Action,
+    type ActionFactory,
     MovementAction,
     PickUp,
-    type ActionFactory,
-} from "./move.js";
-import {
-    OPTION_TRAVERSABILITY,
-    OptionEvaluator,
-    type OptionEvaluationGraph,
-} from "./option_evaluator.js";
-import {
-    type PlanningContext,
-    type PlanningObjectiveDescription,
-} from "./planning.js";
-import { PDDLPlanner } from "./pddl/pddlPlanner.js";
-import { Plan } from "./plan.js";
-import { Position } from "./position.js";
+} from "./utils/move.js";
+import { Plan } from "./utils/plan.js";
+import { Position } from "./utils/position.js";
 
 interface TemporaryBlockedCell {
     readonly position: Position;
@@ -90,6 +83,10 @@ export class Agent {
     id: string;
     readonly position: Position;
 
+    // LLM local variables
+    private readonly useLLM: boolean;
+    private readonly missionHandler: MissionHandler | undefined;
+
     private score: number | undefined;
     private currentIntention: Intention;
     private selectedDesireSequence: Desire[];
@@ -112,10 +109,13 @@ export class Agent {
         private readonly pathfinder: BasePathfinder,
         private readonly actionFactory: ActionFactory,
         private readonly logger: BaseAgentLogger,
-        pddlPlanner?: PDDLPlanner,
+        useLLM: boolean = false,
+        llmMissionHandler: MissionHandler | undefined = undefined,
     ) {
         this.id = "";
         this.position = new Position(0, 0);
+        this.useLLM = useLLM;
+        this.missionHandler = llmMissionHandler;
         this.score = undefined;
         this.isBeliefChanged = false;
         this.pendingBeliefChanges = [];
@@ -128,7 +128,7 @@ export class Agent {
         this.gridPositionWaiters = new Set<() => void>();
         this.hasAuthoritativePosition = false;
         this.deliberationCycle = 0;
-        this.pddlPlanner = pddlPlanner ?? new PDDLPlanner(this.actionFactory);
+        this.pddlPlanner = new PDDLPlanner(this.actionFactory);
         this.optionEvaluator = new OptionEvaluator(desireGenerator);
     }
 
@@ -192,6 +192,17 @@ export class Agent {
         return this.deliberationCycle;
     }
 
+    usesLLM(): boolean {
+        return this.useLLM;
+    }
+
+    handleMsgFromChat(senderId: string, senderName: string, msg: string): void {
+        if(!this.useLLM)
+            return;
+
+        this.missionHandler?.addPendingMission(senderId, senderName, msg);
+    }
+
     /** Continuously selects and executes the most valuable available intention. */
     async agent_loop(): Promise<AGENT_EXIT_REASON> {
         await new Promise<void>((resolve) => setTimeout(resolve, 1000));
@@ -213,6 +224,19 @@ export class Agent {
                 : [];
 
             await this.waitForGridPosition();
+
+            if(this.useLLM) {
+                if (this.missionHandler?.isMissionWaiting()){
+                    // await this.missionHandler?.evaluateMission(this.getIntentionContext());
+                }
+
+                if(this.missionHandler?.areActiveMissionsPresent()) {
+                    this.missionHandler?.getActiveMission().forEach((mission: Mission) => {
+                        mission.log();
+                    });
+                }
+            }
+
 
             this.deliberationCycle += 1;
             this.refreshTemporaryBlockedCells();
@@ -688,7 +712,7 @@ export class Agent {
     ): Promise<Action[] | undefined> {
         this.pddlPlanner.resetPDDL();
         this.pddlPlanner.buildPDDLProblem(
-            new GameMap(context.gameMap),
+            context.gameMap,
             [...context.crates.values()],
             context.agentId,
             context.agentPosition,
@@ -774,25 +798,36 @@ export class Agent {
         }
     }
 
-    private gameMapWithTemporaryWalls(): string[][] {
+    private gameMapWithTemporaryWalls(): GameMap {
         if (this.temporarilyBlockedCells.size === 0) {
             return this.beliefs.map;
         }
-        const gameMap = this.beliefs.map.map(
-            (column: string[]): string[] => [...column],
-        );
+
+        // Extract raw map data from GameMap and create a copy
+        const mapCopy: string[][] = [];
+        for (let row = 0; row < this.beliefs.map.getRows(); row++) {
+            mapCopy[row] = [];
+            for (let col = 0; col < this.beliefs.map.getCols(); col++) {
+                const cellPos = new Position(row, col);
+                mapCopy[row][col] = this.beliefs.map.getCellValue(cellPos);
+            }
+        }
+
+        // Apply temporary blocked cells to the copy
         for (const blockedCell of this.temporarilyBlockedCells.values()) {
             const { position } = blockedCell;
             if (
                 position.x >= 0
-                && position.x < gameMap.length
+                && position.x < mapCopy.length
                 && position.y >= 0
-                && position.y < gameMap[position.x].length
+                && position.y < mapCopy[position.x].length
             ) {
-                gameMap[position.x][position.y] = "0";
+                mapCopy[position.x][position.y] = "0";
             }
         }
-        return gameMap;
+
+        // Return a new GameMap with the modified data
+        return new GameMap(mapCopy);
     }
 
     private positionKey(position: Position): string {

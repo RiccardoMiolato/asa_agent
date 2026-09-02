@@ -1,4 +1,4 @@
-import type { Beliefs } from "./beliefs.js";
+import { Beliefs } from "../bdi/beliefs.js";
 import { Position } from "./position.js";
 
 export type MoveDirection = "up" | "right" | "left" | "down";
@@ -15,6 +15,7 @@ export interface GameClient {
     emitPutdown(
         selected?: string[] | null,
     ): Promise<readonly ParcelActionAcknowledgement[]>;
+    emitSay (toId: string, msg: any ): Promise<'successful' | 'failed'>;
 }
 
 export abstract class Action {

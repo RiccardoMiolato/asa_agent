@@ -1,19 +1,25 @@
 import { DjsConnect, type DjsClientSocket } from "@unitn-asa/deliveroo-js-sdk/client";
 import { GhostMapServer } from './src/_ghost-map-server.js';
 import { AgentGhostMapSnapshotProvider } from './src/_ghost-map-snapshot.js';
-import { ConsoleAgentLogger } from './src/_logging.js';
 import { Agent, AGENT_EXIT_REASON } from './src/agent.js';
-import { AStarPathfinder } from './src/astar.js';
-import { Beliefs } from './src/beliefs.js';
-import { DesireGenerator } from './src/desires.js';
-import { ActionFactory } from './src/move.js';
+import { Beliefs } from './src/bdi/beliefs.js';
+import { DesireGenerator } from './src/bdi/desires.js';
+import { MissionHandler } from "./src/llm/MissionHandler.js";
+import { ConsoleAgentLogger } from './src/utils/_logging.js';
+import { AStarPathfinder } from "./src/utils/astar.js";
+import { ActionFactory } from "./src/utils/move.js";
 import type { IOAgent } from './types/IOAgent.js';
-import type { IOConfig } from './types/IOConfig.js';
+import { IOConfig } from "./types/IOConfig.js";
 import type { IOSensing } from './types/IOSensing.js';
 // Environment variables and script constants
 const host = process.env.HOST || "http://localhost:8080";
 const token = process.env.TOKEN || "";
 const agent_name = process.env.NAME || "cardo";
+
+const llmHost = process.env.LLM_HOST || "http://localhost:8080";
+const llmToken = process.env.LLM_TOKEN || "";
+const llmAgentName = process.env.LLM_NAME || "cardo";
+
 const ghostMapPort = Number(process.env.GHOST_MAP_PORT ?? "8081");
 const branchAndBoundSvgEnabled =
     process.env.BRANCH_AND_BOUND_SVG_ENABLED === "true";
@@ -29,6 +35,8 @@ const agent = new Agent(
     pathfinder,
     actionFactory,
     new ConsoleAgentLogger({ branchAndBoundSvgEnabled }),
+    true,
+    new MissionHandler(socket),
 );
 const ghostMapServer = new GhostMapServer(
     new AgentGhostMapSnapshotProvider(agent, beliefs, agent_name),
@@ -89,6 +97,16 @@ socket.onSensing((sensing: IOSensing): void => {
     );
 
     agent.signalBeliefRevision(revision);
+});
+
+socket.onMsg((senderId: string, senderName: string, message: any) => {
+    if(agent.usesLLM())
+        agent.handleMsgFromChat(senderId, senderName, message);
+});
+
+socket.onMsg((senderId: string, senderName: string, message: any) => {
+    if(agent.usesLLM())
+        agent.handleMsgFromChat(senderId, senderName, message);
 });
 
 void agent.agent_loop()

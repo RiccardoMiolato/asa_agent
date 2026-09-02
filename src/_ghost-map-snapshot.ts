@@ -1,6 +1,6 @@
 import type { Agent } from "./agent.js";
-import type { Beliefs } from "./beliefs.js";
-import type { PickupClusterSnapshot } from "./intentions.js";
+import type { Beliefs } from "./bdi/beliefs.js";
+import type { PickupClusterSnapshot } from "./bdi/intentions.js";
 import type { PlanningObjectiveDescription } from "./planning.js";
 import { Position } from "./position.js";
 
@@ -59,12 +59,12 @@ export class AgentGhostMapSnapshotProvider {
             schemaVersion: 5,
             updatedAt: Date.now(),
             sensingRevision: this.beliefs.currentSensingRevision(),
-            ready: this.beliefs.map.length > 0 && this.agent.id.length > 0,
+            ready: this.beliefs.map.getRows() > 0 && this.agent.id.length > 0,
             map: {
-                width: this.beliefs.map.length,
-                height: this.beliefs.map[0]?.length ?? 0,
+                width: this.beliefs.map.getRows(),
+                height: this.beliefs.map.getCols() ?? 0,
                 revision: this.beliefs.currentMapRevision(),
-                tiles: includeMapTiles ? this.beliefs.map : undefined,
+                tiles: includeMapTiles ? this.beliefs.map.getTiles() : undefined,
             },
             agent: {
                 id: this.agent.id,

@@ -17,7 +17,13 @@ export class GameMap {
         this.gameMap = map;
 
         this.rows = this.gameMap.length;
-        this.cols = this.gameMap[0].length;
+        this.rows > 0
+            ? this.cols = this.gameMap[0].length
+            : this.cols = 0;
+    }
+
+    getTiles(): string[][] {
+        return this.gameMap;
     }
 
     public getRows() {
@@ -68,5 +74,9 @@ export class GameMap {
             return false;
 
         return true;
+    }
+
+    public signature(): string {
+        return JSON.stringify(this.gameMap);
     }
 }

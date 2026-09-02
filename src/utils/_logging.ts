@@ -1,19 +1,9 @@
-import {
-    BELIEF_CHANGE_TYPE,
-    type BeliefChange,
-} from "./beliefs.js";
-import {
-    OPTION_TRAVERSABILITY,
-    type OptionEvaluationGraph,
-    type OptionEvaluationNode,
-} from "./option_evaluator.js";
-import type { DESIRE_TYPE } from "./desires.js";
-import type { PlanningObjectiveDescription } from "./planning.js";
-import type { Position } from "./position.js";
-import {
-    BaseBranchAndBoundGraphWriter,
-    BranchAndBoundSvgWriter,
-} from "./_branch-and-bound-svg.js";
+import { BaseBranchAndBoundGraphWriter, BranchAndBoundSvgWriter } from "../_branch-and-bound-svg";
+import { BELIEF_CHANGE_TYPE, BeliefChange } from "../bdi/beliefs";
+import { DESIRE_TYPE } from "../bdi/desires";
+import { OPTION_TRAVERSABILITY, OptionEvaluationGraph, OptionEvaluationNode } from "../bdi/option_evaluator";
+import { PlanningObjectiveDescription } from "../planning";
+import { Position } from "./position";
 
 /** ANSI presentation used only when stdout is attached to a color terminal. */
 class TerminalTheme {
@@ -559,5 +549,4 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
                 return "UNKNOWN";
         }
     }
-
 }

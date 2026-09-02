@@ -1,12 +1,13 @@
-import type { IOClockEvent } from "../types/IOClockEvent.js";
-import type { IOConfig } from "../types/IOConfig.js";
-import type { IOCrate } from "../types/IOCrate.js";
-import type { IOParcel } from "../types/IOParcel.js";
+import type { IOClockEvent } from "../../types/IOClockEvent.js";
+import type { IOConfig } from "../../types/IOConfig.js";
+import type { IOCrate } from "../../types/IOCrate.js";
+import type { IOParcel } from "../../types/IOParcel.js";
 import type {
     IOSensedAgent,
     IOSensedPosition,
-} from "../types/IOSensing.js";
-import { Position } from "./position.js";
+} from "../../types/IOSensing.js";
+import { GameMap } from "../utils/map.js";
+import { Position } from "../utils/position.js";
 
 /** Canonical internal parcel state; an absent carrier is always `undefined`. */
 export interface Parcel extends Omit<IOParcel, "carriedBy"> {
@@ -93,7 +94,7 @@ export class BeliefRevision {
 }
 
 export class Beliefs {
-    map: string[][];
+    map: GameMap;
 
     // OBJECT POSITIONS
     agents: Map<string, IOSensedAgent>;
@@ -124,7 +125,7 @@ export class Beliefs {
     // TODO add player position and id to the believes
 
     constructor() {
-        this.map = [];
+        this.map = new GameMap([]);
         this.agents = new Map<string, IOSensedAgent>();
         this.parcels = new Map<string, Parcel>();
         this.crates = new Map<string, Position>();
@@ -216,7 +217,7 @@ export class Beliefs {
     }
 
     configPhase(config: IOConfig): void {
-        this.map = config.GAME.map.tiles;
+        this.map = new GameMap(config.GAME.map.tiles);
         this.mapRevisionNumber += 1;
         this.movement_duration = config.GAME.player.movement_duration;
         this.frame_duration = config.CLOCK;
@@ -227,8 +228,8 @@ export class Beliefs {
         );
         this.lastRewardDecayAt = undefined;
 
-        const rows = this.map.length;
-        const cols = this.map[0].length;
+        const rows = this.map.getRows();
+        const cols = this.map.getCols();
 
         this.delivering_cells = [];
         this.pickup_cells = [];
@@ -237,13 +238,13 @@ export class Beliefs {
 
         for (let row = 0; row < rows; row++) {
             for (let col = 0; col < cols; col++) {
-                const cell = this.map[row][col];
+                const cellPos = new Position(row, col);
+                const cell = this.map.getCellValue(cellPos);
                 if (cell == '2') {
-                    this.delivering_cells.push(new Position(row, col)); // Map is rotated of 90 degree in the game
+                    this.delivering_cells.push(cellPos); // Map is rotated of 90 degree in the game
                 } else if (cell == '1') {
-                    const pickupCell = new Position(row, col);
-                    this.pickup_cells.push(pickupCell); // Map is rotated of 90 degree in the game
-                    this.pickupCellKeys.add(this.positionKey(pickupCell));
+                    this.pickup_cells.push(cellPos); // Map is rotated of 90 degree in the game
+                    this.pickupCellKeys.add(this.positionKey(cellPos));
                 }
             }
         }

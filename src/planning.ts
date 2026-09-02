@@ -1,11 +1,12 @@
-import type { BasePathfinder } from "./astar.js";
-import type { Parcel } from "./beliefs.js";
-import type { ActionFactory } from "./move.js";
-import type { Position } from "./position.js";
+import type { Parcel } from "./bdi/beliefs.js";
+import type { BasePathfinder } from "./utils/astar.js";
+import { GameMap } from "./utils/map.js";
+import type { ActionFactory } from "./utils/move.js";
+import type { Position } from "./utils/position.js";
 
 /** Immutable world state and services shared by all planning strategies. */
 export interface PlanningContext {
-    readonly gameMap: string[][];
+    readonly gameMap: GameMap;
     readonly agentPosition: Position;
     readonly crates: ReadonlyMap<string, Position>;
     readonly pickupCells: readonly Position[];

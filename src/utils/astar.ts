@@ -1,5 +1,5 @@
 import { Heap } from "heap-js";
-import { CoordinateOffset, Direction } from "./map.js";
+import { GameMap } from "./map.js";
 import type { Action, ActionFactory } from "./move.js";
 import { Position } from "./position.js";
 
@@ -12,10 +12,10 @@ export interface MovementPath {
 /** Contract implemented by pathfinding algorithms. */
 export abstract class BasePathfinder {
     private readonly pathLengthCache = new Map<string, number | undefined>();
-    private readonly pathLengthSymmetryCache = new Map<string[][], boolean>();
+    private readonly pathLengthSymmetryCache = new Map<GameMap, boolean>();
 
     abstract findPath(
-        gameMap: string[][],
+        gameMap: GameMap,
         startingPosition: Position,
         targetPosition: Position,
         crates: ReadonlyMap<string, Position>,
@@ -28,7 +28,7 @@ export abstract class BasePathfinder {
      * third-party pathfinders compatible while still exposing the destination for coverage.
      */
     findMovementPath(
-        gameMap: string[][],
+        gameMap: GameMap,
         startingPosition: Position,
         targetPosition: Position,
         crates: ReadonlyMap<string, Position>,
@@ -50,7 +50,7 @@ export abstract class BasePathfinder {
 
     /** Returns the route length, or `undefined` when the target is unreachable. */
     pathLength(
-        gameMap: string[][],
+        gameMap: GameMap,
         startingPosition: Position,
         targetPosition: Position,
         crates: ReadonlyMap<string, Position>,
@@ -85,12 +85,11 @@ export abstract class BasePathfinder {
     }
 
     private pathLengthCacheKey(
-        gameMap: string[][],
+        gameMap: GameMap,
         startingPosition: Position,
         targetPosition: Position,
         crates: ReadonlyMap<string, Position>,
     ): string {
-        const mapSignature = JSON.stringify(gameMap);
         const startingKey = `${startingPosition.x},${startingPosition.y}`;
         const targetKey = `${targetPosition.x},${targetPosition.y}`;
         const symmetricPath = this.pathLengthsAreSymmetric(gameMap);
@@ -102,10 +101,11 @@ export abstract class BasePathfinder {
             .map((crate: Position): string => `${crate.x},${crate.y}`)
             .sort()
             .join("|");
+        const mapSignature = gameMap.signature();
         return `${mapSignature}:${firstPosition}:${secondPosition}:${cratePositions}`;
     }
 
-    private pathLengthsAreSymmetric(gameMap: string[][]): boolean {
+    private pathLengthsAreSymmetric(gameMap: GameMap): boolean {
         const cachedSymmetry = this.pathLengthSymmetryCache.get(gameMap);
         if (cachedSymmetry !== undefined) {
             return cachedSymmetry;
@@ -117,7 +117,7 @@ export abstract class BasePathfinder {
     }
 
     /** Reports whether forward and reverse path lengths are interchangeable. */
-    protected hasSymmetricPathLengths(_gameMap: string[][]): boolean {
+    protected hasSymmetricPathLengths(_gameMap: GameMap): boolean {
         return false;
     }
 }
@@ -136,7 +136,7 @@ export class AStarPathfinder extends BasePathfinder {
     }
 
     findPath(
-        gameMap: string[][],
+        gameMap: GameMap,
         startingPosition: Position,
         targetPosition: Position,
         crates: ReadonlyMap<string, Position>,
@@ -150,7 +150,7 @@ export class AStarPathfinder extends BasePathfinder {
     }
 
     override findMovementPath(
-        gameMap: string[][],
+        gameMap: GameMap,
         startingPosition: Position,
         targetPosition: Position,
         crates: ReadonlyMap<string, Position>,
@@ -167,8 +167,8 @@ export class AStarPathfinder extends BasePathfinder {
                 fScore.get(this.positionKey(first))! - fScore.get(this.positionKey(second))!,
         );
 
-        for (let row = 0; row < gameMap.length; row++) {
-            for (let column = 0; column < gameMap[0].length; column++) {
+        for (let row = 0; row < gameMap.getRows(); row++) {
+            for (let column = 0; column < gameMap.getCols(); column++) {
                 const key = `${row},${column}`;
                 gScore.set(key, Infinity);
                 fScore.set(key, Infinity);
@@ -182,9 +182,6 @@ export class AStarPathfinder extends BasePathfinder {
         );
         openSet.add(startingPosition);
 
-        const offsets: CoordinateOffset[] = [[0, 1], [0, -1], [1, 0], [-1, 0]];
-        const directions: Direction[] = ["up", "down", "right", "left"];
-
         while (openSet.size() > 0) {
             const current = openSet.pop();
             if (!current) {
@@ -195,14 +192,12 @@ export class AStarPathfinder extends BasePathfinder {
                 return this.reconstructPath(cameFrom, current);
             }
 
-            for (let index = 0; index < offsets.length; index++) {
-                const offset = offsets[index];
-                const neighbor = new Position(current.x + offset[0], current.y + offset[1]);
-
-                if (!this.isValidCell(
+            const neighbors = gameMap.getNeighborsOf(current);
+            for (const { coord: neighbor, direction } of neighbors) {
+                if (!this.isValidNeighbor(
                     neighbor,
                     gameMap,
-                    directions[index],
+                    direction,
                     crates,
                 )) {
                     continue;
@@ -233,10 +228,11 @@ export class AStarPathfinder extends BasePathfinder {
     }
 
     /** A grid without directional-entry tiles has symmetric path lengths. */
-    protected override hasSymmetricPathLengths(gameMap: string[][]): boolean {
-        for (const column of gameMap) {
-            for (const tile of column) {
-                if (AStarPathfinder.DIRECTIONAL_TILES.has(tile)) {
+    protected override hasSymmetricPathLengths(gameMap: GameMap): boolean {
+        for (let row = 0; row < gameMap.getRows(); row++) {
+            for (let col = 0; col < gameMap.getCols(); col++) {
+                const cell = gameMap.getCellValue(new Position(row, col));
+                if (AStarPathfinder.DIRECTIONAL_TILES.has(cell)) {
                     return false;
                 }
             }
@@ -244,22 +240,17 @@ export class AStarPathfinder extends BasePathfinder {
         return true;
     }
 
-    private isValidCell(
+    private isValidNeighbor(
         neighbor: Position,
-        gameMap: string[][],
-        direction: Direction,
+        gameMap: GameMap,
+        direction: string,
         crates: ReadonlyMap<string, Position>,
     ): boolean {
-        if (
-            neighbor.x < 0 ||
-            neighbor.x >= gameMap.length ||
-            neighbor.y < 0 ||
-            neighbor.y >= gameMap[0].length
-        ) {
+        if (!gameMap.isValidCoordinates(neighbor)) {
             return false;
         }
 
-        const cell = gameMap[neighbor.x][neighbor.y];
+        const cell = gameMap.getCellValue(neighbor);
         if (cell === "0") {
             return false;
         }

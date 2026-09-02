@@ -1,11 +1,11 @@
-import type { Action } from "./move.js";
-import type { Desire } from "./desires.js";
 import {
     PlanningObjective,
     type PlanningContext,
     type PlanningObjectiveDescription,
-} from "./planning.js";
-import { Position } from "./position.js";
+} from "../planning.js";
+import type { Action } from "../utils/move.js";
+import { Position } from "../utils/position.js";
+import type { Desire } from "./desires.js";
 
 interface PickupCluster {
     readonly id: string;
@@ -645,9 +645,9 @@ export class SearchIntention extends Intention {
         cluster: PickupCluster,
     ): Position[] {
         const candidates: Position[] = [];
-        for (let x = 0; x < context.gameMap.length; x++) {
-            for (let y = 0; y < context.gameMap[0].length; y++) {
-                if (context.gameMap[x][y] === "0") {
+        for (let x = 0; x < context.gameMap.getRows(); x++) {
+            for (let y = 0; y < context.gameMap.getCols(); y++) {
+                if (context.gameMap.getCellValue(new Position(x,y)) === "0") {
                     continue;
                 }
 
