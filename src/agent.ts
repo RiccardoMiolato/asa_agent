@@ -739,7 +739,7 @@ export class Agent {
     ): Promise<Action[] | undefined> {
         this.pddlPlanner.resetPDDL();
         this.pddlPlanner.buildPDDLProblem(
-            new GameMap(context.gameMap),
+            context.gameMap,
             [...context.crates.values()],
             context.agentId,
             context.agentPosition,
@@ -866,25 +866,36 @@ export class Agent {
         }
     }
 
-    private gameMapWithTemporaryWalls(): string[][] {
+    private gameMapWithTemporaryWalls(): GameMap {
         if (this.temporarilyBlockedCells.size === 0) {
             return this.beliefs.map;
         }
-        const gameMap = this.beliefs.map.map(
-            (column: string[]): string[] => [...column],
-        );
+
+        // Extract raw map data from GameMap and create a copy
+        const mapCopy: string[][] = [];
+        for (let row = 0; row < this.beliefs.map.getRows(); row++) {
+            mapCopy[row] = [];
+            for (let col = 0; col < this.beliefs.map.getCols(); col++) {
+                const cellPos = new Position(row, col);
+                mapCopy[row][col] = this.beliefs.map.getCellValue(cellPos);
+            }
+        }
+
+        // Apply temporary blocked cells to the copy
         for (const blockedCell of this.temporarilyBlockedCells.values()) {
             const { position } = blockedCell;
             if (
                 position.x >= 0
-                && position.x < gameMap.length
+                && position.x < mapCopy.length
                 && position.y >= 0
-                && position.y < gameMap[position.x].length
+                && position.y < mapCopy[position.x].length
             ) {
-                gameMap[position.x][position.y] = "0";
+                mapCopy[position.x][position.y] = "0";
             }
         }
-        return gameMap;
+
+        // Return a new GameMap with the modified data
+        return new GameMap(mapCopy);
     }
 
     private positionKey(position: Position): string {

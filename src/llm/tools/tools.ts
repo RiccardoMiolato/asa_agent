@@ -53,7 +53,7 @@ interface MoveToResponse {
 }
 
 function move_to(context: IntentionContext, x: number, y: number, bonus: number): MoveToResponse {
-    const gameMap: GameMap = new GameMap(context.gameMap);
+    const gameMap: GameMap = context.gameMap;
     const mapPos = new Position(x, y);
 
     if (!gameMap.isValidCell(mapPos)){

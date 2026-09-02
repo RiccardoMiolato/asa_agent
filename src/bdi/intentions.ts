@@ -1,13 +1,14 @@
 import { PDDLGoal } from "../pddl/pddlPlanner.js";
 import { RewardDecayEstimator } from "../utils/_reward-decay.js";
 import { BasePathfinder } from "../utils/astar.js";
+import { GameMap } from "../utils/map.js";
 import { Action, ActionFactory } from "../utils/move.js";
 import { Position } from "../utils/position.js";
 import type { Parcel } from "./beliefs.js";
 
 /** Current world state and services available to an intention. */
 export interface IntentionContext {
-    readonly gameMap: string[][];
+    readonly gameMap: GameMap;
     readonly agentPosition: Position;
     readonly crates: ReadonlyMap<string, Position>;
     readonly pickupCells: readonly Position[];
@@ -680,9 +681,9 @@ export class SearchIntention extends Intention {
         cluster: PickupCluster,
     ): Position[] {
         const candidates: Position[] = [];
-        for (let x = 0; x < context.gameMap.length; x++) {
-            for (let y = 0; y < context.gameMap[0].length; y++) {
-                if (context.gameMap[x][y] === "0") {
+        for (let x = 0; x < context.gameMap.getRows(); x++) {
+            for (let y = 0; y < context.gameMap.getCols(); y++) {
+                if (context.gameMap.getCellValue(new Position(x,y)) === "0") {
                     continue;
                 }
 
