@@ -1,5 +1,6 @@
 import { IntentionContext } from "../bdi/intentions.js";
-import { LEVEL_1_EVALUATION_INSTRUCTIONS, MISSION_CLASSIFICATION_INSTRUCTIONS } from "./instructions/instruction.js";
+import { GameClient } from "../utils/move.js";
+import { LEVEL_1_EVALUATION_INSTRUCTIONS, LEVEL_2_EVALUATION_INSTRUCTION, LEVEL_3_EVALUATION_INSTRUCTION, MISSION_CLASSIFICATION_INSTRUCTIONS } from "./instructions/instruction.js";
 import { LLMClient, LLMMessage } from "./LLMClient.js";
 import { answer_trivia, get_agent_position, math_eval, move_to } from "./tools/tools.js";
 
@@ -12,7 +13,8 @@ import { answer_trivia, get_agent_position, math_eval, move_to } from "./tools/t
 interface MsgEvaluationResult {
     level: number,
     worth: boolean,
-    motivation: string
+    motivation: string,
+    requires_answer: boolean
 }
 
 interface ITool{
@@ -24,13 +26,20 @@ interface ToolPlanningResult {
     tools: ITool[]
 }
 
+interface ChatMessage {
+    senderId: string,
+    senderName: string,
+    message: string
+}
+
 export class MissionHandler {
     private readonly toolToFunctionMap: Map<string, Function>;
 
+    private readonly client: GameClient;
     private LLMClient: LLMClient;
-    private pendingChatMessages: string[];
+    private pendingChatMessages: ChatMessage[];
 
-    constructor() {
+    constructor(client: GameClient) {
         const LLM_API_URL = process.env.LITELLM_BASE_URL;
         const LLM_API_KEY = process.env.LITELLM_API_KEY;
         const LLM_MODEL = process.env.LOCAL_MODEL;
@@ -53,6 +62,8 @@ export class MissionHandler {
             ["get_agent_position", get_agent_position],
             ["answer_trivia", answer_trivia],
         ]);
+
+        this.client = client;
     }
 
     isMissionWaiting(): boolean {
@@ -60,23 +71,23 @@ export class MissionHandler {
     }
 
     // Waiting list for mission coming from the chat
-    addPendingMission(message: string): void {
-        this.pendingChatMessages.push(message);
+    addPendingMission(senderId: string, senderName: string, message: string): void {
+        this.pendingChatMessages.push({senderId, senderName, message});
     }
 
-    private getPendingMission(): string | undefined{
+    private getPendingMission(): ChatMessage | undefined{
         return this.pendingChatMessages.shift();
     }
 
     async evaluateMission(context: IntentionContext): Promise<void> {
-        const missionMsg = this.getPendingMission();
+        const mission = this.getPendingMission();
 
-        if(!missionMsg)
+        if(!mission)
             return;
 
         const message: LLMMessage = {
             role: "user",
-            content: missionMsg
+            content: mission.message
         };
 
         console.log("Started mission classification...");
@@ -87,59 +98,51 @@ export class MissionHandler {
 
         const evaluationResult: MsgEvaluationResult = JSON.parse(levelEvaluationRes);
 
+        let handleRes: string = "";
         if(evaluationResult.level == 1) {
-            await this.handleFirstLevelMissions(context, missionMsg);
+            handleRes = await this.handleFirstLevelMissions(message);
         } else if(evaluationResult.level == 2) {
-            await this.handleSecondLevelMissions(context, missionMsg);
+            handleRes = await this.handleSecondLevelMissions(message);
         } else if(evaluationResult.level == 3) {
-            await this.handleThirdLevelMissions(context, missionMsg);
+            handleRes = await this.handleThirdLevelMissions(message);
         }
+
+        if(handleRes === "")
+            return;
+
+        let toolsChain: ToolPlanningResult;
+        try{
+            toolsChain = JSON.parse(handleRes)
+        } catch(e) {
+            console.log("Error parsing tools chain");
+            return;
+        }
+
+        await this.ExecuteTools(context, toolsChain, mission, evaluationResult.requires_answer);
     }
 
-    private async handleFirstLevelMissions(context: IntentionContext, missionMsg: string) {
-        const message: LLMMessage = {
-            role: "user",
-            content: missionMsg
-        };
-
+    private async handleFirstLevelMissions(message: LLMMessage): Promise<string> {
         console.log("Evaluating level 1 mission...");
         const evaluationRes: string = await this.sendMessage([message], LEVEL_1_EVALUATION_INSTRUCTIONS);
 
-        if(evaluationRes === "")
-            return;
-
-        const actions_chain: ToolPlanningResult = JSON.parse(evaluationRes);
-
-        await this.ExecuteTools(actions_chain, context);
+        return evaluationRes;
     }
 
-    private async handleSecondLevelMissions(context: IntentionContext, missionMsg: string) {
-        const message: LLMMessage = {
-            role: "user",
-            content: missionMsg
-        };
-
+    private async handleSecondLevelMissions(message: LLMMessage): Promise<string> {
         console.log("Evaluating level 2 mission...");
-        const evaluationRes: string = await this.sendMessage([message], LEVEL_1_EVALUATION_INSTRUCTIONS);
-        const actions_chain: MsgEvaluationResult = JSON.parse(evaluationRes);
+        const evaluationRes: string = await this.sendMessage([message], LEVEL_2_EVALUATION_INSTRUCTION);
 
-        console.log(actions_chain);
+        return evaluationRes;
     }
 
-    private async handleThirdLevelMissions(context: IntentionContext, missionMsg: string) {
-        const message: LLMMessage = {
-            role: "user",
-            content: missionMsg
-        };
-
+    private async handleThirdLevelMissions(message: LLMMessage): Promise<string> {
         console.log("Evaluating level 3 mission...");
-        const evaluationRes: string = await this.sendMessage([message], LEVEL_1_EVALUATION_INSTRUCTIONS);
-        const actions_chain: MsgEvaluationResult = JSON.parse(evaluationRes);
+        const evaluationRes: string = await this.sendMessage([message], LEVEL_3_EVALUATION_INSTRUCTION);
 
-        console.log(actions_chain);
+        return evaluationRes;
     }
 
-    private async ExecuteTools(toolsChain: ToolPlanningResult, context: IntentionContext): Promise<any[]> {
+    private async ExecuteTools(context: IntentionContext, toolsChain: ToolPlanningResult, mission: ChatMessage, requires_answer: boolean): Promise<any[]> {
         const results: any[] = [];
 
         for (let i = 0; i < (toolsChain.tools ?? []).length; i++) {
@@ -163,6 +166,10 @@ export class MissionHandler {
                 console.log(`Executing tool ${tool.name} with params:`, tool.params);
                 results.push(await this.callTool(context, tool));
             }
+
+            if (requires_answer && results[i] !== undefined && (tool.name === "answer_trivia" || tool.name === "math_eval")) {
+                this.client.emitSay(mission.senderId, results[i]);
+            }
         }
 
         return results;
@@ -179,10 +186,13 @@ export class MissionHandler {
         try {
             let result: any;
 
-            if(tool.name === "answer_trivia" || tool.name === "math_eval")
+            if(tool.name === "answer_trivia"){
+                result = await toolFunction(this.LLMClient, ...tool.params);
+            } else if(tool.name === "math_eval"){
                 result = toolFunction(...tool.params);
-            else
+            } else{
                 result = toolFunction(context, ...tool.params);
+            }
 
             console.log(`Tool ${tool.name} executed with result: `, result);
 

@@ -36,7 +36,7 @@ const agent = new Agent(
     actionFactory,
     new ConsoleAgentLogger(activeLogging),
     true,
-    new MissionHandler(),
+    new MissionHandler(socket),
 );
 const ghostMapServer = new GhostMapServer(
     new AgentGhostMapSnapshotProvider(agent, beliefs, agent_name),
@@ -103,7 +103,7 @@ socket.onSensing((sensing: IOSensing): void => {
 
 socket.onMsg((senderId: string, senderName: string, message: any) => {
     if(agent.usesLLM())
-        agent.handleMsgFromChat(message);
+        agent.handleMsgFromChat(senderId, senderName, message);
 });
 
 void agent.agent_loop()

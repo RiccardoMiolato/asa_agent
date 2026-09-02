@@ -2,30 +2,38 @@ const TOOLS: Map<string, string> = new Map([
     ["math_eval", "Evaluate arithmetic expressions and return the result."],
     ["move_to", "Tells the agent to go to a specific location in the map."],
     ["answer_trivia", "Given a trivia question, return the answer."],
+    ["get_agent_position", "Returns the current position of the agent in the map."]
 ]);
 
 const TOOLS_FUNCTION_DEFINITION: Map<string, string> = new Map();
 
 TOOLS_FUNCTION_DEFINITION.set("math_eval", `
 {
-    "params": [espression: string],
-    "returns": number
+  "params": [espression: string],
+  "returns": number
 }
 `);
 
 TOOLS_FUNCTION_DEFINITION.set("move_to", `
 {
-    "params": [x: number, y: number],
-    "returns": string
+  "params": [x: number, y: number],
+  "returns": string
 }
 `);
 
 TOOLS_FUNCTION_DEFINITION.set("answer_trivia", `
-    {
-        "params": [question: string],
-        "returns": string
-    }
-    `);
+{
+  "params": [question: string],
+  "returns": string
+}
+`);
+
+TOOLS_FUNCTION_DEFINITION.set("get_agent_position", `
+{
+  "params": [],
+  "returns": Position
+}
+`);
 
 /**
  * This message is passed every time a new message
@@ -105,36 +113,34 @@ Use exactly this structure:
 "level": <integer: 1, 2, or 3>,
 "worth": <boolean: true | false>,
 "motivation": "<string: maximum 10 words>"
+"requires_answer": <boolean: true | false>
 }
 
 The "worth" field means whether the mission is strategically worth pursuing.
 Set it to true when the mission provides a positive strategic benefit/reward and
 false when it provides no benefit or imposes a penalty.
 
-The "motivation" must contain at most 10 words and briefly justify the classification
+The "motivation" must contain at most 10 words and briefly justify the classification.
+
+The "requires_answer" field indicates whether the mission requires an answer back to the sender.
+This includes all possible trivia questions, but also other request that requires some sort of computation
+such as mathematical expressions, or direct information regarding the state of the game itself.
+Examples of missions that DO REQUIRE an answer back are:
+- "Who is the owner of Tesla?"
+- "What is the largest planet in our solar system?"
+- "Who painted the Mona Lisa?"
+- "What is the capital of France?"
+- "Who wrote Romeo and Juliet?"
+- "Compute 10-2"
+- "Calculate 5-3-2"
+- "Which is the result of 4*5?"
+Examples of missions that DO NOT REQUIRE an answer back are:
+- "Move to x=10-2 y=4-3"
+- "If x=3*2 and y=2*7 is a valid cell, move there"
+
+General distinction: If mathematical results are required by the user, then answer is required. If expressions
+computation is functional to following anctions, then answer must not be sent back.
 `
-const MISSION_CLASSIFIER_RESULT_STRUCTURE =  {
-  format: {
-      type: "json_schema",
-      schema: {
-          type: "object",
-          properties: {
-              level: {
-                  type: "integer",
-                  enum: [1, 2, 3]
-              },
-              worth: {
-                  type: "boolean"
-              },
-              motivation: {
-                  type: "string"
-              }
-          },
-          required: ["level", "worth", "motivation"],
-          additionalProperties: false
-      }
-  }
-};
 
 const LEVEL_1_EVALUATION_INSTRUCTIONS: string = `
 You are an evaluator for atomic missions at the dependency of DeliverooJs Agent.
@@ -325,11 +331,79 @@ OUTPUT FORMAT (valid JSON only):
 }
 `;
 
+const TRIVIA_ANSWERING_RULES: string = `
+You are a Q&A assistant for a DeliverooJs autonomous agent.
+
+Your task is to answer trivia questions accurately anc concisely, using only th information provided in the question.
+
+Strict Rules:
+- Answer must be brief, as it will be sent back as a chat message.
+- Whenever it's possible just answer with a single word or a short phrase.
+- It is not allowed to provide any explanation, context, or additional information.
+
+OUTPUT RULES
+The output must be a valid JSON object with the following structure:
+{
+  "answer". "<string: concise answer to the trivia question>"
+}
+
+Examples
+Question: "What is the capital of Italy?"
+Output: {
+  "answer": "Rome"
+}
+
+Question: "Who is the owner of Tesla?"
+Output: {
+  "answer": "Elon Musk"
+}
+
+Question: "What is the largest planet in our solar system?"
+Output: {
+  "answer": "Jupiter"
+},
+
+Question: "Who painted the Mona Lisa?"
+Output: {
+  "answer": "Leonardo da Vinci"
+},
+
+Question: "What is the capital of France?"
+Output: {
+  "answer": "Paris"
+},
+
+Question: "Who wrote Romeo and Juliet?"
+Output: {
+  "answer": "William Shakespeare"
+},
+
+Question: "What is the chemical symbol for gold?"
+Output: {
+  "answer": "Au"
+},
+
+Question: "Which country is famous for the pyramids of Giza?"
+Output: {
+  "answer": "Egypt"
+},
+
+Question: "What is the fastest land animal?"
+Output: {
+  "answer": "Cheetah"
+},
+
+Question: "Who was the first person to walk on the Moon?"
+Output: {
+  "answer": "Neil Armstrong"
+}
+`
+
 export {
   LEVEL_1_EVALUATION_INSTRUCTIONS,
   LEVEL_2_EVALUATION_INSTRUCTION,
   LEVEL_3_EVALUATION_INSTRUCTION,
   MISSION_CLASSIFICATION_INSTRUCTIONS,
-  MISSION_CLASSIFIER_RESULT_STRUCTURE
+  TRIVIA_ANSWERING_RULES
 };
 

@@ -11,6 +11,7 @@ declare module '@unitn-asa/deliveroo-js-sdk/client' {
         emitMove(direction: MoveDirection): Promise<{ x: number; y: number } | false>;
         emitPickup(): Promise<{ id: string }[]>;
         emitPutdown(selected?: string[] | null): Promise<{ id: string }[]>;
+        emitSay (toId: string, msg: any ): Promise<'successful' | 'failed'>;
     }
 
     export function DjsConnect(

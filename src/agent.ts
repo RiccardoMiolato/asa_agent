@@ -184,11 +184,11 @@ export class Agent {
         return this.useLLM;
     }
 
-    handleMsgFromChat(msg: string): void {
+    handleMsgFromChat(senderId: string, senderName: string, msg: string): void {
         if(!this.useLLM)
             return;
 
-        this.missionHandler?.addPendingMission(msg);
+        this.missionHandler?.addPendingMission(senderId, senderName, msg);
     }
 
     /** Continuously selects and executes the most valuable available intention. */
