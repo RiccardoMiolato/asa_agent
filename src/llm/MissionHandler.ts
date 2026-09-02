@@ -1,7 +1,7 @@
 import { IntentionContext } from "../bdi/intentions.js";
 import { GameClient } from "../utils/move.js";
 import { Position } from "../utils/position.js";
-import { LEVEL_1_EVALUATION_INSTRUCTIONS, LEVEL_2_EVALUATION_INSTRUCTION, LEVEL_3_EVALUATION_INSTRUCTION, MISSION_CLASSIFICATION_INSTRUCTIONS } from "./instructions/instruction.js";
+import { MISSION_CLASSIFICATION_INSTRUCTIONS } from "./instructions/instruction.js";
 import { LLMClient, LLMMessage } from "./LLMClient.js";
 import { BonusType, Mission, MissionLevel, MissionType } from "./mission.js";
 import { answer_trivia, drop_at, get_agent_position, math_eval, move_to, MoveToResponse } from "./tools/tools.js";
@@ -132,7 +132,7 @@ export class MissionHandler {
 
     private async handleFirstLevelMissions(context: IntentionContext, mission: ChatMessage, message: LLMMessage, answer_trivia: boolean): Promise<void> {
         console.log("Evaluating level 1 mission...");
-        const evaluationRes: string = await this.sendMessage([message], LEVEL_1_EVALUATION_INSTRUCTIONS);
+        const evaluationRes: string = await this.sendMessage([message], LEVEL_1_EVALUATION_INSTRUCTION);
 
         if(evaluationRes === "")
             return;
