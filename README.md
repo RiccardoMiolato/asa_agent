@@ -109,6 +109,64 @@ const name = process.env.NAME ?? "agent";
 const socket: DjsClientSocket = DjsConnect(host, token, name);
 ```
 
+### Independently launched BDI and LLM runtimes
+
+One application process owns exactly one physical agent: its socket, beliefs,
+planner, agent loop, and ghost-map server. Launch the BDI and LLM peers in
+separate processes using separate environment files. Their coordination travels
+exclusively through the Deliveroo Socket.io `say`/`msg` protocol; they share no
+in-process state.
+
+For example, `.env.bdi` can contain:
+
+```dotenv
+HOST=http://localhost:8080
+TOKEN=<bdi-agent-token>
+NAME=BDI_Agent
+AGENT_ROLE=bdi
+PEER_NAME=LLM_Agent
+GHOST_MAP_PORT=8081
+```
+
+and `.env.llm` can contain:
+
+```dotenv
+HOST=http://localhost:8080
+TOKEN=<llm-agent-token>
+NAME=LLM_Agent
+AGENT_ROLE=llm
+PEER_NAME=BDI_Agent
+GHOST_MAP_PORT=8082
+
+LITELLM_BASE_URL=<llm-api-url>
+LITELLM_API_KEY=<llm-api-key>
+LOCAL_MODEL=<model-name>
+MAX_TOKENS=1000
+```
+
+Build once, then launch the agents in separate terminals:
+
+```sh
+npm run build
+node --env-file=.env.bdi dist/index.js
+node --env-file=.env.llm dist/index.js
+```
+
+When tokens are supplied, each `NAME` must match the name encoded in that
+server identity because peer discovery uses authenticated names announced by
+the `controller` event. Both processes must connect to the same `HOST`, use
+different tokens and names, and configure each other's name as `PEER_NAME`.
+
+Peer traffic uses a versioned, runtime-validated envelope. At startup, both
+agents exchange correlated `peer-hello` and `peer-hello-acknowledgement`
+messages until bidirectional reachability is established. Retries resume after
+a peer disconnects. Natural-language messages that do not match the internal
+protocol are routed only to the LLM-enabled agent's mission handler.
+
+This layer intentionally establishes transport and peer readiness only.
+Rendezvous proposals, commitments, arrivals, and cancellations belong to the
+level-3 coordination layer built on top of it.
+
 For guaranteed listener registration before any server event, disable auto-connect, install the listeners, and connect explicitly:
 
 ```ts

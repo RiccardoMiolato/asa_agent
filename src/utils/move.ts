@@ -15,7 +15,7 @@ export interface GameClient {
     emitPutdown(
         selected?: string[] | null,
     ): Promise<readonly ParcelActionAcknowledgement[]>;
-    emitSay (toId: string, msg: any ): Promise<'successful' | 'failed'>;
+    emitSay(toId: string, message: unknown): Promise<"successful" | "failed">;
 }
 
 export abstract class Action {
