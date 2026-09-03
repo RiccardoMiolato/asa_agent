@@ -17,10 +17,19 @@ export enum DELIVERY_SCORE_MODIFIER_PRIORITY {
     ADDITIVE = 30,
 }
 
+/** Direction in which a modifier can change a non-negative delivery score. */
+export enum DELIVERY_SCORE_MODIFIER_IMPACT {
+    PENALTY = "penalty",
+    NEUTRAL = "neutral",
+    BONUS = "bonus",
+}
+
 /** Contract for score transformations attached to delivery missions. */
 export abstract class BaseDeliveryScoreModifier {
     abstract readonly priority: DELIVERY_SCORE_MODIFIER_PRIORITY;
     readonly optimizesDeliveryTiming: boolean = false;
+
+    abstract impact(): DELIVERY_SCORE_MODIFIER_IMPACT;
 
     abstract apply(
         deliveryScore: number,
@@ -56,6 +65,16 @@ export class AdditiveDeliveryScoreModifier
     apply(deliveryScore: number, _context: DeliveryScoreContext): number {
         return deliveryScore + this.points;
     }
+
+    impact(): DELIVERY_SCORE_MODIFIER_IMPACT {
+        if (this.points < 0) {
+            return DELIVERY_SCORE_MODIFIER_IMPACT.PENALTY;
+        }
+        if (this.points > 0) {
+            return DELIVERY_SCORE_MODIFIER_IMPACT.BONUS;
+        }
+        return DELIVERY_SCORE_MODIFIER_IMPACT.NEUTRAL;
+    }
 }
 
 /** Multiplies the decayed parcel score delivered at the mission cell. */
@@ -69,6 +88,16 @@ export class MultiplicativeDeliveryScoreModifier
 
     apply(deliveryScore: number, _context: DeliveryScoreContext): number {
         return deliveryScore * this.factor;
+    }
+
+    impact(): DELIVERY_SCORE_MODIFIER_IMPACT {
+        if (this.factor < 1) {
+            return DELIVERY_SCORE_MODIFIER_IMPACT.PENALTY;
+        }
+        if (this.factor > 1) {
+            return DELIVERY_SCORE_MODIFIER_IMPACT.BONUS;
+        }
+        return DELIVERY_SCORE_MODIFIER_IMPACT.NEUTRAL;
     }
 }
 
@@ -98,6 +127,16 @@ export class ExactStackSizeDeliveryScoreModifier
         _context: DeliveryScoreContext,
     ): number {
         return deliveryScore * Math.max(1, this.factor);
+    }
+
+    impact(): DELIVERY_SCORE_MODIFIER_IMPACT {
+        if (this.factor < 1) {
+            return DELIVERY_SCORE_MODIFIER_IMPACT.PENALTY;
+        }
+        if (this.factor > 1) {
+            return DELIVERY_SCORE_MODIFIER_IMPACT.BONUS;
+        }
+        return DELIVERY_SCORE_MODIFIER_IMPACT.NEUTRAL;
     }
 }
 
@@ -136,6 +175,10 @@ export class ParcelScoreThresholdDeliveryScoreModifier
 
     override deliveryTimingThresholds(): readonly number[] {
         return this.deliverLower ? [this.threshold] : [];
+    }
+
+    impact(): DELIVERY_SCORE_MODIFIER_IMPACT {
+        return DELIVERY_SCORE_MODIFIER_IMPACT.PENALTY;
     }
 
     private isRewarded(parcelScore: number): boolean {
@@ -259,6 +302,35 @@ export class DeliveryCandidate {
                 (effect: BaseDeliveryScoreEffect): DeliveryScoreEffectId =>
                     effect.id,
             );
+    }
+
+    /** Whether a cell-specific penalty applies without a competing local bonus. */
+    hasUnopposedCellPenalty(): boolean {
+        let hasPenalty = false;
+        for (const effect of this.effects) {
+            if (!(effect instanceof DeliveryCellEffect)) {
+                continue;
+            }
+
+            const impact = effect.modifier.impact();
+            if (impact === DELIVERY_SCORE_MODIFIER_IMPACT.BONUS) {
+                return false;
+            }
+            if (impact === DELIVERY_SCORE_MODIFIER_IMPACT.PENALTY) {
+                hasPenalty = true;
+            }
+        }
+        return hasPenalty;
+    }
+
+    /** Whether the delivery cell carries at least one cell-specific bonus. */
+    hasCellBonus(): boolean {
+        return this.effects.some(
+            (effect: BaseDeliveryScoreEffect): boolean =>
+                effect instanceof DeliveryCellEffect
+                && effect.modifier.impact()
+                    === DELIVERY_SCORE_MODIFIER_IMPACT.BONUS,
+        );
     }
 }
 

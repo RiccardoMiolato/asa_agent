@@ -2,7 +2,6 @@ import { OptimisticPathLengthEstimator } from "../_path-estimation.js";
 import {
     DeliveryCandidate,
     DeliveryCandidateFactory,
-    DeliveryCellEffect,
     type BaseDeliveryScoreEffect,
 } from "../_delivery-scoring.js";
 import {
@@ -223,17 +222,12 @@ export class DesireGenerator {
             }
         }
 
+        const selectedCells = new Map<string, Position>();
         const nearestDeliveryCell = this.minimumDistanceCell(
             distancesFromPresent,
         );
-
-        const candidates = new Map<string, DeliveryCandidate>();
         if (nearestDeliveryCell !== undefined) {
-            this.addDeliveryCellCandidate(
-                candidates,
-                nearestDeliveryCell,
-                context.deliveryScoreEffects,
-            );
+            this.addDeliveryCell(selectedCells, nearestDeliveryCell);
         }
 
         for (const parcel of context.parcels.values()) {
@@ -263,34 +257,46 @@ export class DesireGenerator {
             }
 
             if (bestDeliveryCell !== undefined) {
-                this.addDeliveryCellCandidate(
-                    candidates,
-                    bestDeliveryCell,
-                    context.deliveryScoreEffects,
-                );
+                this.addDeliveryCell(selectedCells, bestDeliveryCell);
             }
         }
 
-        for (const effect of context.deliveryScoreEffects) {
-            if (!(effect instanceof DeliveryCellEffect)) {
-                continue;
-            }
-            if (
-                excludedRootDesireIdentities?.has(
-                    `drop:${effect.cell.x},${effect.cell.y}`,
-                )
-                || !context.deliveringCells.some(
-                    (deliveryCell: Position): boolean =>
-                        deliveryCell.isEqual(effect.cell),
-                )
-            ) {
-                continue;
-            }
-            this.addDeliveryCellCandidate(
-                candidates,
-                effect.cell,
+        const candidates = new Map<string, DeliveryCandidate>();
+        for (const selectedCell of selectedCells.values()) {
+            const selectedCandidate = DeliveryCandidateFactory.make(
+                selectedCell,
                 context.deliveryScoreEffects,
             );
+            if (!selectedCandidate.hasUnopposedCellPenalty()) {
+                this.addDeliveryCandidate(candidates, selectedCandidate);
+                continue;
+            }
+
+            const alternative = this.closestUnpenalizedDeliveryCandidate(
+                context,
+                selectedCell,
+                distancesFromPresent.keys(),
+                context.deliveryScoreEffects,
+            );
+            if (alternative === undefined) {
+                this.addDeliveryCandidate(candidates, selectedCandidate);
+                continue;
+            }
+
+            this.addDeliveryCandidate(candidates, alternative.candidate);
+            if (alternative.distance !== 1) {
+                this.addDeliveryCandidate(candidates, selectedCandidate);
+            }
+        }
+
+        for (const deliveryCell of distancesFromPresent.keys()) {
+            const candidate = DeliveryCandidateFactory.make(
+                deliveryCell,
+                context.deliveryScoreEffects,
+            );
+            if (candidate.hasCellBonus()) {
+                this.addDeliveryCandidate(candidates, candidate);
+            }
         }
 
         return [...candidates.values()];
@@ -322,14 +328,58 @@ export class DesireGenerator {
         return closestCell;
     }
 
-    private addDeliveryCellCandidate(
-        candidates: Map<string, DeliveryCandidate>,
-        deliveryCell: Position,
+    private closestUnpenalizedDeliveryCandidate(
+        context: PlanningContext,
+        penalizedCell: Position,
+        deliveryCells: Iterable<Position>,
         effects: readonly BaseDeliveryScoreEffect[],
+    ): { readonly candidate: DeliveryCandidate; readonly distance: number }
+        | undefined {
+        let closestCandidate: DeliveryCandidate | undefined;
+        let closestDistance = Infinity;
+        for (const deliveryCell of deliveryCells) {
+            if (deliveryCell.isEqual(penalizedCell)) {
+                continue;
+            }
+
+            const candidate = DeliveryCandidateFactory.make(
+                deliveryCell,
+                effects,
+            );
+            if (candidate.hasUnopposedCellPenalty()) {
+                continue;
+            }
+
+            const distance = this.pathLengthAllowingCrateMoves(
+                context,
+                penalizedCell,
+                deliveryCell,
+            );
+            if (distance !== undefined && distance < closestDistance) {
+                closestCandidate = candidate;
+                closestDistance = distance;
+            }
+        }
+
+        return closestCandidate === undefined
+            ? undefined
+            : { candidate: closestCandidate, distance: closestDistance };
+    }
+
+    private addDeliveryCell(
+        cells: Map<string, Position>,
+        deliveryCell: Position,
+    ): void {
+        cells.set(`${deliveryCell.x},${deliveryCell.y}`, deliveryCell);
+    }
+
+    private addDeliveryCandidate(
+        candidates: Map<string, DeliveryCandidate>,
+        candidate: DeliveryCandidate,
     ): void {
         candidates.set(
-            `${deliveryCell.x},${deliveryCell.y}`,
-            DeliveryCandidateFactory.make(deliveryCell, effects),
+            `${candidate.cell.x},${candidate.cell.y}`,
+            candidate,
         );
     }
 }
