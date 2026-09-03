@@ -24,6 +24,13 @@ export enum DELIVERY_SCORE_MODIFIER_IMPACT {
     BONUS = "bonus",
 }
 
+/** Why a delivery cell survived candidate-pool pruning. */
+export enum DELIVERY_CANDIDATE_SELECTION_REASON {
+    ORIGINAL = "original",
+    PENALTY_REPLACEMENT = "penalty-replacement",
+    BONUS = "bonus",
+}
+
 /** Contract for score transformations attached to delivery missions. */
 export abstract class BaseDeliveryScoreModifier {
     abstract readonly priority: DELIVERY_SCORE_MODIFIER_PRIORITY;
@@ -231,6 +238,9 @@ export class DeliveryCandidate {
     constructor(
         readonly cell: Position,
         readonly effects: readonly BaseDeliveryScoreEffect[],
+        readonly selectionReason:
+            DELIVERY_CANDIDATE_SELECTION_REASON =
+                DELIVERY_CANDIDATE_SELECTION_REASON.ORIGINAL,
     ) { }
 
     adjustedScore(
@@ -339,6 +349,8 @@ export class DeliveryCandidateFactory {
     static make(
         cell: Position,
         effects: readonly BaseDeliveryScoreEffect[],
+        selectionReason: DELIVERY_CANDIDATE_SELECTION_REASON =
+            DELIVERY_CANDIDATE_SELECTION_REASON.ORIGINAL,
     ): DeliveryCandidate {
         return new DeliveryCandidate(
             cell,
@@ -351,6 +363,7 @@ export class DeliveryCandidateFactory {
                     second: BaseDeliveryScoreEffect,
                 ): number => first.modifier.priority - second.modifier.priority,
             ),
+            selectionReason,
         );
     }
 }

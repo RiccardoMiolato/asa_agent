@@ -102,6 +102,9 @@ export class BranchAndBoundSvgRenderer {
             "      .mission-halo { fill: none; stroke: #f59e0b; stroke-width: 5; }",
             "      .mission-badge { fill: #f59e0b; stroke: #92400e; stroke-width: 1; }",
             "      .mission-badge-text { fill: #451a03; font: 700 11px system-ui, sans-serif; }",
+            "      .replacement-halo { fill: none; stroke: #0891b2; stroke-width: 4; stroke-dasharray: 9 4; }",
+            "      .replacement-badge { fill: #cffafe; stroke: #0891b2; stroke-width: 1; }",
+            "      .replacement-badge-text { fill: #164e63; font: 700 11px system-ui, sans-serif; }",
             "    </style>",
             "  </defs>",
             "  <rect width=\"100%\" height=\"100%\" fill=\"#f8fafc\"/>",
@@ -285,14 +288,28 @@ export class BranchAndBoundSvgRenderer {
         const missionDecoration = missionLabel
             ? this.renderMissionDecoration(vertex, missionLabel)
             : [];
+        const replacementDecoration = edge?.isPenaltyReplacement
+            ? this.renderReplacementDecoration(vertex)
+            : [];
         return [
             "  <g>",
             `    <title>${this.escape(title)}</title>`,
             `    <rect x="${vertex.x}" y="${vertex.y}" width="${BranchAndBoundSvgRenderer.NODE_WIDTH}" height="${BranchAndBoundSvgRenderer.NODE_HEIGHT}" rx="10" fill="${style.fill}" stroke="${style.color}" stroke-width="${style.width}"${style.dash}/>` ,
+            ...replacementDecoration,
             ...missionDecoration,
             ...textLines,
             "  </g>",
         ].join("\n");
+    }
+
+    private renderReplacementDecoration(vertex: SvgTreeVertex): string[] {
+        const badgeX = vertex.x + 12;
+        const badgeY = vertex.y - 12;
+        return [
+            `    <rect x="${vertex.x - 9}" y="${vertex.y - 9}" width="${BranchAndBoundSvgRenderer.NODE_WIDTH + 18}" height="${BranchAndBoundSvgRenderer.NODE_HEIGHT + 18}" rx="16" class="replacement-halo"/>`,
+            `    <rect x="${badgeX}" y="${badgeY}" width="108" height="24" rx="12" class="replacement-badge"/>`,
+            `    <text x="${badgeX + 54}" y="${badgeY + 16}" text-anchor="middle" class="replacement-badge-text">REPLACEMENT</text>`,
+        ];
     }
 
     private renderMissionDecoration(
@@ -393,7 +410,7 @@ export class BranchAndBoundSvgRenderer {
     }
 
     private edgeTooltip(edge: OptionEvaluationEdge): string {
-        return `${edge.optionIdentity}; traversability=${edge.traversability}; decision=${edge.decision}; distance=${edge.estimatedDistance ?? "n/a"}; wait=${edge.deliveryWaitMilliseconds}ms; arrival=${edge.estimatedArrivalMilliseconds ?? "n/a"}ms; realized-delivery-score=${edge.realizedDeliveryScore}; realized-drop-mission-score=${edge.realizedDeliveryMissionScore}; realized-cell-score=${edge.realizedCellScore}; estimated-action-score=${edge.estimatedActionScore ?? "n/a"}; remaining-parcel-score=${edge.remainingParcelScore ?? "n/a"}; upper-bound=${edge.branchUpperBound ?? "n/a"}; branch-score=${edge.branchScore ?? "n/a"}`;
+        return `${edge.optionIdentity}; penalty-replacement=${edge.isPenaltyReplacement}; traversability=${edge.traversability}; decision=${edge.decision}; distance=${edge.estimatedDistance ?? "n/a"}; wait=${edge.deliveryWaitMilliseconds}ms; arrival=${edge.estimatedArrivalMilliseconds ?? "n/a"}ms; realized-delivery-score=${edge.realizedDeliveryScore}; realized-drop-mission-score=${edge.realizedDeliveryMissionScore}; realized-cell-score=${edge.realizedCellScore}; estimated-action-score=${edge.estimatedActionScore ?? "n/a"}; remaining-parcel-score=${edge.remainingParcelScore ?? "n/a"}; upper-bound=${edge.branchUpperBound ?? "n/a"}; branch-score=${edge.branchScore ?? "n/a"}`;
     }
 
     private carriedLabel(node: OptionEvaluationNode): string {
@@ -519,6 +536,7 @@ export class BranchAndBoundSvgRenderer {
             "  <line x1=\"790\" y1=\"116\" x2=\"820\" y2=\"116\" stroke=\"#7c3aed\" stroke-width=\"2\" stroke-dasharray=\"4 4\"/><text x=\"828\" y=\"120\" class=\"legend\">pruned by bound</text>",
             "  <line x1=\"980\" y1=\"116\" x2=\"1010\" y2=\"116\" stroke=\"#dc2626\" stroke-width=\"2\" stroke-dasharray=\"7 5\"/><text x=\"1018\" y=\"120\" class=\"legend\">unreachable</text>",
             "  <rect x=\"48\" y=\"136\" width=\"24\" height=\"16\" rx=\"5\" fill=\"none\" stroke=\"#f59e0b\" stroke-width=\"4\"/><text x=\"82\" y=\"149\" class=\"legend\">mission cell or realized mission effect</text>",
+            "  <rect x=\"400\" y=\"136\" width=\"24\" height=\"16\" rx=\"5\" fill=\"none\" stroke=\"#0891b2\" stroke-width=\"4\" stroke-dasharray=\"9 4\"/><text x=\"434\" y=\"149\" class=\"legend\">penalty-replacement delivery cell</text>",
         ];
     }
 

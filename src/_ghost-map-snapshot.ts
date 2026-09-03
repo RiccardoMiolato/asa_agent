@@ -1,6 +1,7 @@
 import type { Agent } from "./agent.js";
 import type { Beliefs } from "./bdi/beliefs.js";
 import type { PickupClusterSnapshot } from "./bdi/intentions.js";
+import type { MissionDescription } from "./llm/mission.js";
 import type { PlanningObjectiveDescription } from "./planning.js";
 import { Position } from "./utils/position.js";
 
@@ -26,7 +27,7 @@ export interface GhostMapParcel {
 }
 
 export interface GhostMapSnapshot {
-    readonly schemaVersion: 5;
+    readonly schemaVersion: 6;
     readonly updatedAt: number;
     readonly sensingRevision: number;
     readonly ready: boolean;
@@ -42,6 +43,7 @@ export interface GhostMapSnapshot {
     readonly pickupClusters: readonly PickupClusterSnapshot[];
     readonly stripedPickupCells: readonly Position[];
     readonly knownParcels: readonly GhostMapParcel[];
+    readonly activeMissions: readonly MissionDescription[];
 }
 
 /** Builds an immutable, serializable view of the agent's private world model. */
@@ -56,7 +58,7 @@ export class AgentGhostMapSnapshotProvider {
         const decision = this.agent.currentDecision();
         const pickupClusters = this.agent.pickupClusterSnapshots();
         return {
-            schemaVersion: 5,
+            schemaVersion: 6,
             updatedAt: Date.now(),
             sensingRevision: this.beliefs.currentSensingRevision(),
             ready: this.beliefs.map.getRows() > 0 && this.agent.id.length > 0,
@@ -87,6 +89,7 @@ export class AgentGhostMapSnapshotProvider {
             stripedPickupCells: pickupClusters.flatMap(
                 (cluster): readonly Position[] => cluster.stripedCells,
             ),
+            activeMissions: this.agent.activeMissionDescriptions(),
             knownParcels: [...this.beliefs.parcels.values()]
                 .filter(
                     (parcel): boolean => !parcel.carriedBy

@@ -1,7 +1,8 @@
 import { BaseOptionBranchBoundEstimator, EarliestDeliveryRewardBranchBoundEstimator, OptionBranchBound } from "../_option-pruning.js";
-import type {
-    DeliveryCandidate,
-    DeliveryScoreEffectId,
+import {
+    DELIVERY_CANDIDATE_SELECTION_REASON,
+    type DeliveryCandidate,
+    type DeliveryScoreEffectId,
 } from "../_delivery-scoring.js";
 import { DeliveryTimingOptimizer } from "../_delivery-timing.js";
 import { PlanningContext } from "../planning.js";
@@ -63,6 +64,8 @@ export interface OptionEvaluationEdge {
     readonly optionType: DESIRE_TYPE;
     readonly parcelId: string | undefined;
     readonly targetPosition: Position;
+    /** Whether this delivery cell was added to replace a penalized selection. */
+    readonly isPenaltyReplacement: boolean;
     readonly traversability: OPTION_TRAVERSABILITY;
     readonly estimatedDistance: number | undefined;
     readonly estimatedArrivalMilliseconds: number | undefined;
@@ -235,6 +238,8 @@ export class OptionEvaluator {
                     optionType: desire.type,
                     parcelId: desire.parcelId,
                     targetPosition: desire.targetCell,
+                    isPenaltyReplacement:
+                        this.isPenaltyReplacement(desire),
                     traversability: OPTION_TRAVERSABILITY.UNREACHABLE,
                     estimatedDistance: undefined,
                     estimatedArrivalMilliseconds: undefined,
@@ -377,6 +382,8 @@ export class OptionEvaluator {
                     optionType: desire.type,
                     parcelId: desire.parcelId,
                     targetPosition: desire.targetCell,
+                    isPenaltyReplacement:
+                        this.isPenaltyReplacement(desire),
                     traversability: assessment.traversability,
                     estimatedDistance: assessment.distance,
                     estimatedArrivalMilliseconds: newElapsedMilliseconds,
@@ -448,6 +455,8 @@ export class OptionEvaluator {
                 optionType: candidate.desire.type,
                 parcelId: candidate.desire.parcelId,
                 targetPosition: candidate.desire.targetCell,
+                isPenaltyReplacement:
+                    this.isPenaltyReplacement(candidate.desire),
                 traversability: candidate.traversability,
                 estimatedDistance: candidate.distance,
                 estimatedArrivalMilliseconds: candidate.arrivalMilliseconds,
@@ -475,6 +484,12 @@ export class OptionEvaluator {
         });
 
         return bestResult;
+    }
+
+    private isPenaltyReplacement(desire: Desire): boolean {
+        return desire instanceof DeliverParcelsDesire
+            && desire.deliveryCandidate.selectionReason
+                === DELIVERY_CANDIDATE_SELECTION_REASON.PENALTY_REPLACEMENT;
     }
 
     private shouldPrune(

@@ -1,5 +1,6 @@
 import { OptimisticPathLengthEstimator } from "../_path-estimation.js";
 import {
+    DELIVERY_CANDIDATE_SELECTION_REASON,
     DeliveryCandidate,
     DeliveryCandidateFactory,
     type BaseDeliveryScoreEffect,
@@ -277,6 +278,7 @@ export class DesireGenerator {
                 selectedCell,
                 distancesFromPresent.keys(),
                 context.deliveryScoreEffects,
+                selectedCells,
             );
             if (alternative === undefined) {
                 this.addDeliveryCandidate(candidates, selectedCandidate);
@@ -293,6 +295,7 @@ export class DesireGenerator {
             const candidate = DeliveryCandidateFactory.make(
                 deliveryCell,
                 context.deliveryScoreEffects,
+                DELIVERY_CANDIDATE_SELECTION_REASON.BONUS,
             );
             if (candidate.hasCellBonus()) {
                 this.addDeliveryCandidate(candidates, candidate);
@@ -333,6 +336,7 @@ export class DesireGenerator {
         penalizedCell: Position,
         deliveryCells: Iterable<Position>,
         effects: readonly BaseDeliveryScoreEffect[],
+        originallySelectedCells: ReadonlyMap<string, Position>,
     ): { readonly candidate: DeliveryCandidate; readonly distance: number }
         | undefined {
         let closestCandidate: DeliveryCandidate | undefined;
@@ -345,6 +349,9 @@ export class DesireGenerator {
             const candidate = DeliveryCandidateFactory.make(
                 deliveryCell,
                 effects,
+                originallySelectedCells.has(this.deliveryCellKey(deliveryCell))
+                    ? DELIVERY_CANDIDATE_SELECTION_REASON.ORIGINAL
+                    : DELIVERY_CANDIDATE_SELECTION_REASON.PENALTY_REPLACEMENT,
             );
             if (candidate.hasUnopposedCellPenalty()) {
                 continue;
@@ -370,16 +377,20 @@ export class DesireGenerator {
         cells: Map<string, Position>,
         deliveryCell: Position,
     ): void {
-        cells.set(`${deliveryCell.x},${deliveryCell.y}`, deliveryCell);
+        cells.set(this.deliveryCellKey(deliveryCell), deliveryCell);
     }
 
     private addDeliveryCandidate(
         candidates: Map<string, DeliveryCandidate>,
         candidate: DeliveryCandidate,
     ): void {
-        candidates.set(
-            `${candidate.cell.x},${candidate.cell.y}`,
-            candidate,
-        );
+        const key = this.deliveryCellKey(candidate.cell);
+        if (!candidates.has(key)) {
+            candidates.set(key, candidate);
+        }
+    }
+
+    private deliveryCellKey(deliveryCell: Position): string {
+        return `${deliveryCell.x},${deliveryCell.y}`;
     }
 }

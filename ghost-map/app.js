@@ -28,6 +28,7 @@ class GhostMapRenderer {
         this.mapRevision = undefined;
         this.mapWidth = 0;
         this.mapHeight = 0;
+        this.deliveryCellKeys = new Set();
         this.mapRequestRequired = true;
         this.dynamicStateKey = undefined;
     }
@@ -37,7 +38,7 @@ class GhostMapRenderer {
     }
 
     render(snapshot) {
-        this.renderConnection(snapshot.ready, snapshot.schemaVersion === 5);
+        this.renderConnection(snapshot.ready, snapshot.schemaVersion === 6);
         this.renderAgent(snapshot.agent);
         this.renderTarget(snapshot.target);
         this.renderMap(snapshot);
@@ -82,6 +83,7 @@ class GhostMapRenderer {
             temporaryWalls,
             target,
             agent,
+            activeMissions,
         } = snapshot;
         if (map.tiles) {
             const mapChanged = map.revision !== this.mapRevision
@@ -117,6 +119,7 @@ class GhostMapRenderer {
             agent.position.x,
             agent.position.y,
             agent.score,
+            missionStateKey(activeMissions ?? []),
         ].join(":");
         if (dynamicStateKey === this.dynamicStateKey) {
             return;
@@ -176,6 +179,20 @@ class GhostMapRenderer {
             }`;
         }
 
+        const missionsByCell = this.groupMissionsByCell(
+            activeMissions ?? [],
+        );
+        for (const [key, missions] of missionsByCell) {
+            const cell = this.cells.get(key);
+            if (!cell) {
+                continue;
+            }
+            nextDynamicCellKeys.add(key);
+            cell.classList.add("mission-cell");
+            cell.append(makeMissionLayer(missions));
+            cell.title += ` · ${missions.map(missionTitle).join(" · ")}`;
+        }
+
         if (agent.id) {
             const agentKey = positionKey({
                 x: Math.round(agent.position.x),
@@ -216,6 +233,7 @@ class GhostMapRenderer {
     buildStaticMap(map) {
         const fragment = document.createDocumentFragment();
         const cells = new Map();
+        const deliveryCellKeys = new Set();
         elements.map.style.setProperty("--map-width", map.width);
         elements.map.style.setProperty("--map-height", map.height);
 
@@ -227,7 +245,11 @@ class GhostMapRenderer {
                 const baseTitle = `(${x}, ${y}) · ${tileLabel(tileType)}`;
                 cell.className = `cell tile-${tileType}`;
                 cell.dataset.position = key;
+                cell.dataset.tileType = tileType;
                 cell.dataset.baseTitle = baseTitle;
+                if (tileType === "2") {
+                    deliveryCellKeys.add(key);
+                }
                 cell.title = baseTitle;
                 cells.set(key, cell);
                 fragment.append(cell);
@@ -236,6 +258,7 @@ class GhostMapRenderer {
 
         elements.map.replaceChildren(fragment);
         this.cells = cells;
+        this.deliveryCellKeys = deliveryCellKeys;
         this.dynamicCellKeys.clear();
         this.mapRevision = map.revision;
         this.mapWidth = map.width;
@@ -254,6 +277,7 @@ class GhostMapRenderer {
                 "pickup-seen",
                 "cluster-active",
                 "target-cell",
+                "mission-cell",
             );
             cell.style.removeProperty("--cluster-color");
             cell.querySelectorAll(".marker").forEach(
@@ -275,6 +299,29 @@ class GhostMapRenderer {
             parcelsByCell.set(key, cellParcels);
         }
         return parcelsByCell;
+    }
+
+    groupMissionsByCell(missions) {
+        const missionsByCell = new Map();
+        for (const mission of missions) {
+            if (mission.target) {
+                appendGroupedValue(
+                    missionsByCell,
+                    positionKey(mission.target),
+                    mission,
+                );
+                continue;
+            }
+
+            for (const deliveryCellKey of this.deliveryCellKeys) {
+                appendGroupedValue(
+                    missionsByCell,
+                    deliveryCellKey,
+                    mission,
+                );
+            }
+        }
+        return missionsByCell;
     }
 }
 
@@ -310,6 +357,78 @@ function makeParcelLayer(parcels, agentId) {
         layer.append(marker);
     }
     return layer;
+}
+
+function makeMissionLayer(missions) {
+    const layer = document.createElement("span");
+    layer.className = "mission-layer marker";
+    layer.setAttribute("aria-hidden", "true");
+    for (const mission of missions) {
+        const badge = document.createElement("span");
+        badge.className = `mission-badge ${missionBadgeClass(mission)}`;
+        badge.textContent = missionLabel(mission);
+        badge.title = missionTitle(mission);
+        layer.append(badge);
+    }
+    return layer;
+}
+
+function appendGroupedValue(groupedValues, key, value) {
+    const values = groupedValues.get(key) ?? [];
+    values.push(value);
+    groupedValues.set(key, values);
+}
+
+function missionLabel(mission) {
+    if (mission.type === "stack-size") {
+        return `${formatMissionNumber(mission.multiplier)}×·${mission.stackSize}p`;
+    }
+    if (mission.type === "parcel-score") {
+        return `${mission.deliverLower ? "≤" : "≥"}${formatMissionNumber(mission.threshold)}`;
+    }
+    if (mission.bonusType === "multiplier") {
+        return `${formatMissionNumber(mission.bonusValue)}×`;
+    }
+    return `${mission.bonusType === "penalty" ? "-" : "+"}${formatMissionNumber(mission.bonusValue)}`;
+}
+
+function missionBadgeClass(mission) {
+    if (mission.type === "stack-size" || mission.type === "parcel-score") {
+        return "mission-rule";
+    }
+    if (mission.bonusType === "multiplier") {
+        return "mission-multiplier";
+    }
+    return mission.bonusType === "penalty"
+        ? "mission-penalty"
+        : "mission-reward";
+}
+
+function missionTitle(mission) {
+    if (mission.type === "stack-size") {
+        return `Delivery mission: exactly ${mission.stackSize} parcels → ${formatMissionNumber(mission.multiplier)}× score`;
+    }
+    if (mission.type === "parcel-score") {
+        return `Delivery mission: reward parcels worth ${mission.deliverLower ? "at most" : "at least"} ${formatMissionNumber(mission.threshold)}`;
+    }
+    const objective = {
+        "move-to": "Visit mission",
+        "pick-up": "Pickup mission",
+        "drop-at": "Delivery mission",
+        avoid: "Avoid mission",
+    }[mission.type] ?? "Mission";
+    const effect = mission.bonusType === "multiplier"
+        ? `${formatMissionNumber(mission.bonusValue)}× score`
+        : `${mission.bonusType === "penalty" ? "-" : "+"}${formatMissionNumber(mission.bonusValue)} points`;
+    return `${objective}: ${effect}`;
+}
+
+function missionStateKey(missions) {
+    return missions.map((mission) => JSON.stringify(mission)).join("|");
+}
+
+function formatMissionNumber(value) {
+    return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(2)));
 }
 
 function positionKey(position) {

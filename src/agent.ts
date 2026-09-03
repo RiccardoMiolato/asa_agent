@@ -13,7 +13,7 @@ import {
 } from "./bdi/desires.js";
 import { CommittedDesireIntention, Intention, PickupClusterSnapshot, SearchIntention } from "./bdi/intentions.js";
 import { OPTION_TRAVERSABILITY, OptionEvaluationGraph, OptionEvaluator } from "./bdi/option_evaluator.js";
-import type { Mission } from "./llm/mission.js";
+import type { Mission, MissionDescription } from "./llm/mission.js";
 import { MissionHandler } from "./llm/MissionHandler.js";
 import { PDDLPlanner } from "./pddl/pddlPlanner.js";
 import {
@@ -166,6 +166,13 @@ export class Agent {
     /** Exposes the selected decision to read-only observers. */
     currentDecision(): PlanningObjectiveDescription {
         return this.currentIntention.describe();
+    }
+
+    /** Exposes active mission metadata to read-only observers. */
+    activeMissionDescriptions(): readonly MissionDescription[] {
+        return this.missionHandler?.getActiveMission().map(
+            (mission: Mission): MissionDescription => mission.describe(),
+        ) ?? [];
     }
 
     /** Exposes temporary navigation walls without leaking the mutable map. */
