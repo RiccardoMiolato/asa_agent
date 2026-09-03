@@ -2,7 +2,8 @@ import { OptimisticPathLengthEstimator } from "../_path-estimation.js";
 import {
     DeliveryCandidate,
     DeliveryCandidateFactory,
-    type DeliveryCellEffect,
+    DeliveryCellEffect,
+    type BaseDeliveryScoreEffect,
 } from "../_delivery-scoring.js";
 import {
     PlanningObjective,
@@ -62,8 +63,18 @@ export class DeliverParcelsDesire extends Desire {
     readonly type = DESIRE_TYPE.DELIVER;
     readonly parcelId = undefined;
 
-    constructor(readonly deliveryCandidate: DeliveryCandidate) {
+    constructor(
+        readonly deliveryCandidate: DeliveryCandidate,
+        readonly waitMilliseconds: number = 0,
+    ) {
         super(deliveryCandidate.cell);
+    }
+
+    scheduledAfter(waitMilliseconds: number): DeliverParcelsDesire {
+        return new DeliverParcelsDesire(
+            this.deliveryCandidate,
+            waitMilliseconds,
+        );
     }
 
     identity(): string {
@@ -74,6 +85,7 @@ export class DeliverParcelsDesire extends Desire {
         return {
             type: "deliver",
             target: this.targetCell,
+            waitMilliseconds: this.waitMilliseconds,
         };
     }
 }
@@ -220,7 +232,7 @@ export class DesireGenerator {
             this.addDeliveryCellCandidate(
                 candidates,
                 nearestDeliveryCell,
-                context.deliveryCellEffects,
+                context.deliveryScoreEffects,
             );
         }
 
@@ -254,12 +266,15 @@ export class DesireGenerator {
                 this.addDeliveryCellCandidate(
                     candidates,
                     bestDeliveryCell,
-                    context.deliveryCellEffects,
+                    context.deliveryScoreEffects,
                 );
             }
         }
 
-        for (const effect of context.deliveryCellEffects) {
+        for (const effect of context.deliveryScoreEffects) {
+            if (!(effect instanceof DeliveryCellEffect)) {
+                continue;
+            }
             if (
                 excludedRootDesireIdentities?.has(
                     `drop:${effect.cell.x},${effect.cell.y}`,
@@ -274,7 +289,7 @@ export class DesireGenerator {
             this.addDeliveryCellCandidate(
                 candidates,
                 effect.cell,
-                context.deliveryCellEffects,
+                context.deliveryScoreEffects,
             );
         }
 
@@ -310,7 +325,7 @@ export class DesireGenerator {
     private addDeliveryCellCandidate(
         candidates: Map<string, DeliveryCandidate>,
         deliveryCell: Position,
-        effects: readonly DeliveryCellEffect[],
+        effects: readonly BaseDeliveryScoreEffect[],
     ): void {
         candidates.set(
             `${deliveryCell.x},${deliveryCell.y}`,

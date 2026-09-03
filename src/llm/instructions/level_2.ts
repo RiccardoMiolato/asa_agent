@@ -9,14 +9,14 @@ const TOOLS_FUNCTION_DEFINITION: Map<string, string> = new Map();
 
 TOOLS_FUNCTION_DEFINITION.set("stack_constraint", `
 {
-  "params": [stack_size: number],
+  "params": [stack_size: positive integer, multiplier: non-negative number],
   "returns": Constraint
 }
 `);
 
 TOOLS_FUNCTION_DEFINITION.set("delivery_constraint", `
 {
-    "params": [x: number, y: number, type: "reward" | "penalty" | "multiplier", bonus: number],
+    "params": [x: number, y: number, type: "points" | "multiplier", value: number],
     "returns": Constraint
 }
 `);
@@ -60,6 +60,9 @@ GUIDING RULES:
 3. Movement restriction tools need path validation before execution
 4. Strategy adaptation tools must update intention scoring logic
 5. Fallback tools ensure mission completion if primary strategy fails
+6. Persistent rules must produce one tool call for every coordinate they affect
+7. Use "multiplier" for relative rewards such as 5x, double, half, 0.3x, or zero reward
+8. Use "points" only for a fixed signed number of points
 
 OUTPUT FORMAT (valid JSON only):
 {
@@ -76,7 +79,7 @@ Mission: "Deliver stacks of exactly 3 parcels at a time to double the reward"
 Output: {
   "tools": [{
     "name": "stack_constraint",
-    "params": [ 3 ]
+    "params": [3, 2]
   }]
 }
 
@@ -84,34 +87,34 @@ Mission: "Deliver stacks of exactly 5 parcels at a time to get 0.3 of the standa
 Output: {
   "tools": [{
     "name": "stack_constraint",
-    "params": [ 5 ]
+    "params": [5, 0.3]
   }]
 }
 
 Mission: "Every time you deliver in (1,5) or (3,4) you get 5x pts than in a regular delivery tile"
 Output: {
   "tools": [{
-    "name": delivery_constraint,
-    "params": [1, 5, "reward", 5]
+    "name": "delivery_constraint",
+    "params": [1, 5, "multiplier", 5]
   },
   {
-    "name": delivery_constraint,
-    "params": [3, 4, "reward", 5]
+    "name": "delivery_constraint",
+    "params": [3, 4, "multiplier", 5]
   }]
 }
 
 Mission: "Every time you deliver in (9,20) you get 0 pts"
 Output: {
   "tools": [{
-    "name": delivery_constraint,
-    "params": [9, 20, "reset", 0]
+    "name": "delivery_constraint",
+    "params": [9, 20, "multiplier", 0]
   }]
 }
 
 Mission: "If you deliver parcels with a score higher than 10, you get no reward."
 Output: {
   "tools": [{
-    "name": parcel_constraint,
+    "name": "parcel_constraint",
     "params": [10, true]
   }]
 }
@@ -119,7 +122,7 @@ Output: {
 Mission: "Do not go through tile (10,2) otherwise you lose 50pts."
 Output: {
   "tools": [{
-    "name": avoid_cell,
+    "name": "avoid_cell",
     "params": [10, 2, -50]
   }]
 }

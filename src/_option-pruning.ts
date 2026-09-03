@@ -76,14 +76,30 @@ abstract class BaseRewardBranchBoundEstimator
         parcelIds: readonly string[],
         elapsedMilliseconds: number,
     ): number {
-        let score = 0;
+        return this.parcelScoresAt(
+            context,
+            parcelIds,
+            elapsedMilliseconds,
+        ).reduce(
+            (score: number, parcelScore: number): number =>
+                score + parcelScore,
+            0,
+        );
+    }
+
+    protected parcelScoresAt(
+        context: PlanningContext,
+        parcelIds: readonly string[],
+        elapsedMilliseconds: number,
+    ): readonly number[] {
+        const parcelScores: number[] = [];
         for (const parcelId of parcelIds) {
             const parcel = context.parcels.get(parcelId);
             if (parcel === undefined) {
                 continue;
             }
 
-            score += Math.max(
+            parcelScores.push(Math.max(
                 0,
                 RewardDecayEstimator.remainingReward(
                     parcel.reward,
@@ -91,9 +107,9 @@ abstract class BaseRewardBranchBoundEstimator
                     context.rewardDecayInterval,
                     context.millisecondsUntilNextRewardDecay,
                 ),
-            );
+            ));
         }
-        return score;
+        return parcelScores;
     }
 
     private estimatePickedParcelDeliveryScore(
@@ -119,16 +135,22 @@ abstract class BaseRewardBranchBoundEstimator
                     context.movementDuration,
                     context.frameDuration,
                 );
-            const baseDeliveryScore = this.scoreParcelsAt(
+            const parcelScores = this.parcelScoresAt(
                 context,
                 candidate.carriedParcelIdsAfterAction,
                 deliveryElapsedMilliseconds,
             );
+            const baseDeliveryScore = parcelScores.reduce(
+                (score: number, parcelScore: number): number =>
+                    score + parcelScore,
+                0,
+            );
             bestScore = Math.max(
                 bestScore,
                 baseDeliveryScore,
-                deliveryCandidate.adjustedScore(
+                deliveryCandidate.optimisticScore(
                     baseDeliveryScore,
+                    parcelScores,
                     candidate.remainingDeliveryEffectIds,
                 ),
             );
@@ -149,17 +171,19 @@ export class ConservativeRewardBranchBoundEstimator
     ): number {
         let score = 0;
         for (const parcelId of candidate.remainingParcelIds) {
-            const baseDeliveryScore = this.scoreParcelsAt(
+            const parcelScores = this.parcelScoresAt(
                 context,
                 [parcelId],
                 candidate.elapsedMillisecondsAfterAction,
             );
+            const baseDeliveryScore = parcelScores[0] ?? 0;
             let bestScore = baseDeliveryScore;
             for (const deliveryCandidate of candidate.deliveryCellCandidates) {
                 bestScore = Math.max(
                     bestScore,
-                    deliveryCandidate.adjustedScore(
+                    deliveryCandidate.optimisticScore(
                         baseDeliveryScore,
+                        parcelScores,
                         candidate.remainingDeliveryEffectIds,
                     ),
                 );
@@ -250,8 +274,9 @@ export class EarliestDeliveryRewardBranchBoundEstimator
             bestScore = Math.max(
                 bestScore,
                 baseDeliveryScore,
-                deliveryCandidate.adjustedScore(
+                deliveryCandidate.optimisticScore(
                     baseDeliveryScore,
+                    [baseDeliveryScore],
                     activeEffectIds,
                 ),
             );

@@ -219,7 +219,14 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
                 this.theme.success(this.formatMissionObjective(mission)),
             ),
             this.formatDetail("EFFECT", this.formatMissionEffect(mission)),
-            this.formatDetail("STATUS", this.theme.success("ACTIVE")),
+            this.formatDetail(
+                "STATUS",
+                this.theme.success(
+                    mission.lifetime === "persistent"
+                        ? "ACTIVE · PERSISTENT"
+                        : "ACTIVE · ONE SHOT",
+                ),
+            ),
             this.theme.heading(
                 "╰───────────────────────────────────────────────────────────────────────────────",
             ),
@@ -508,7 +515,10 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
                 return `PICK ${objective.parcelId} at `
                     + `(${objective.target.x}, ${objective.target.y})`;
             case "deliver":
-                return `DROP at (${objective.target.x}, ${objective.target.y})`;
+                return `DROP at (${objective.target.x}, ${objective.target.y})`
+                    + (objective.waitMilliseconds > 0
+                        ? ` after waiting ${objective.waitMilliseconds}ms`
+                        : "");
             case "visit":
                 return `VISIT (${objective.target.x}, ${objective.target.y}) `
                     + `for ${objective.score >= 0 ? "+" : ""}${objective.score}`;
@@ -521,20 +531,34 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
     }
 
     private formatMissionObjective(mission: MissionDescription): string {
-        const target = `(${mission.target.x}, ${mission.target.y})`;
         switch (mission.type) {
             case "move-to":
-                return `VISIT ${target}`;
+                return `VISIT (${mission.target.x}, ${mission.target.y})`;
             case "pick-up":
-                return `PICK UP at ${target}`;
+                return `PICK UP at (${mission.target.x}, ${mission.target.y})`;
             case "drop-at":
-                return `DROP at ${target}`;
+                return `DROP at (${mission.target.x}, ${mission.target.y})`;
             case "avoid":
-                return `AVOID ${target}`;
+                return `AVOID (${mission.target.x}, ${mission.target.y})`;
+            case "stack-size":
+                return `DELIVER exactly ${mission.stackSize} parcels`;
+            case "parcel-score":
+                return `DELIVER parcels worth ${mission.deliverLower ? "≤" : "≥"}`
+                    + ` ${mission.threshold}`;
         }
     }
 
     private formatMissionEffect(mission: MissionDescription): string {
+        if (mission.type === "stack-size") {
+            return this.theme.success(
+                `×${mission.multiplier} delivery score when matched`,
+            );
+        }
+        if (mission.type === "parcel-score") {
+            return `zero reward for parcels worth `
+                + `${mission.deliverLower ? ">" : "<"} ${mission.threshold}`;
+        }
+
         switch (mission.bonusType) {
             case "reward":
                 return this.theme.success(`+${mission.bonusValue} points`);

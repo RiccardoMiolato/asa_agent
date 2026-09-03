@@ -3,6 +3,7 @@ import type {
     DeliveryCandidate,
     DeliveryScoreEffectId,
 } from "../_delivery-scoring.js";
+import { DeliveryTimingOptimizer } from "../_delivery-timing.js";
 import { PlanningContext } from "../planning.js";
 import { RewardDecayEstimator } from "../utils/_reward-decay.js";
 import type {
@@ -65,6 +66,8 @@ export interface OptionEvaluationEdge {
     readonly traversability: OPTION_TRAVERSABILITY;
     readonly estimatedDistance: number | undefined;
     readonly estimatedArrivalMilliseconds: number | undefined;
+    /** Intentional delay after the fastest route and before delivery. */
+    readonly deliveryWaitMilliseconds: number;
     /** Reward realized on this edge; nonzero only when the action is a drop. */
     readonly realizedDeliveryScore: number;
     /** Portion of the delivery score contributed by drop-at modifiers. */
@@ -116,6 +119,7 @@ interface EvaluatedCandidate {
     readonly traversability: OPTION_TRAVERSABILITY;
     readonly distance: number;
     readonly arrivalMilliseconds: number;
+    readonly deliveryWaitMilliseconds: number;
     readonly realizedDeliveryScore: number;
     readonly realizedDeliveryMissionScore: number;
     readonly realizedCellScore: number;
@@ -167,7 +171,7 @@ export class OptionEvaluator {
             generation.deliveryCellCandidates,
             context.cellScoreEffects,
             new Set(
-                context.deliveryCellEffects.map(
+                context.deliveryScoreEffects.map(
                     (effect): DeliveryScoreEffectId => effect.id,
                 ),
             ),
@@ -234,6 +238,7 @@ export class OptionEvaluator {
                     traversability: OPTION_TRAVERSABILITY.UNREACHABLE,
                     estimatedDistance: undefined,
                     estimatedArrivalMilliseconds: undefined,
+                    deliveryWaitMilliseconds: 0,
                     realizedDeliveryScore: 0,
                     realizedDeliveryMissionScore: 0,
                     realizedCellScore: 0,
@@ -246,13 +251,15 @@ export class OptionEvaluator {
                 continue;
             }
 
-            const newElapsedMilliseconds = elapsedMilliseconds
+            let newElapsedMilliseconds = elapsedMilliseconds
                 + RewardDecayEstimator.actionSequenceDurationMilliseconds(
                     assessment.distance,
                     1,
                     context.movementDuration,
                     context.frameDuration,
                 );
+            let evaluatedDesire = desire;
+            let deliveryWaitMilliseconds = 0;
             const remainingDesires = new Set(desires);
             remainingDesires.delete(desire);
             const triggeredCellEffectIds = new Set(
@@ -268,7 +275,8 @@ export class OptionEvaluator {
             }
             const nextCellScoreEffects = remainingCellScoreEffects.filter(
                 (effect: CellScoreEffect): boolean =>
-                    !triggeredCellEffectIds.has(effect.id),
+                    !triggeredCellEffectIds.has(effect.id)
+                    || !effect.isConsumable(),
             );
 
             let newCarriedIds = [...carriedParcelIds];
@@ -293,21 +301,29 @@ export class OptionEvaluator {
                     }
                 }
             } else if (desire instanceof DeliverParcelsDesire) {
-                const baseDeliveryScore = this.computeDeliveryScore(
+                const parcelRewards = this.carriedParcelRewards(
                     context,
                     carriedParcelIds,
-                    newElapsedMilliseconds,
                 );
-                deliveryScoreForThisOption =
-                    desire.deliveryCandidate.adjustedScore(
-                        baseDeliveryScore,
-                        remainingDeliveryEffectIds,
-                    );
+                const timing = DeliveryTimingOptimizer.maximizeScore(
+                    desire.deliveryCandidate,
+                    parcelRewards,
+                    newElapsedMilliseconds,
+                    context.rewardDecayInterval,
+                    context.millisecondsUntilNextRewardDecay,
+                    remainingDeliveryEffectIds,
+                );
+                deliveryWaitMilliseconds = timing.waitMilliseconds;
+                newElapsedMilliseconds += deliveryWaitMilliseconds;
+                evaluatedDesire = desire.scheduledAfter(
+                    deliveryWaitMilliseconds,
+                );
+                deliveryScoreForThisOption = timing.adjustedDeliveryScore;
                 deliveryMissionScoreForThisOption =
-                    deliveryScoreForThisOption - baseDeliveryScore;
+                    deliveryScoreForThisOption - timing.baseDeliveryScore;
                 for (
                     const effectId
-                    of desire.deliveryCandidate.triggeredEffectIds(
+                    of desire.deliveryCandidate.consumedEffectIds(
                         remainingDeliveryEffectIds,
                     )
                 ) {
@@ -321,7 +337,7 @@ export class OptionEvaluator {
                 }
             }
 
-            const targetNodeId = `${nodeId}/${desire.identity()}`;
+            const targetNodeId = `${nodeId}/${evaluatedDesire.identity()}`;
             const remainingParcelIds = [...remainingDesires]
                 .filter(
                     (candidate: Desire): candidate is PickUpParcelDesire =>
@@ -364,6 +380,7 @@ export class OptionEvaluator {
                     traversability: assessment.traversability,
                     estimatedDistance: assessment.distance,
                     estimatedArrivalMilliseconds: newElapsedMilliseconds,
+                    deliveryWaitMilliseconds,
                     realizedDeliveryScore: deliveryScoreForThisOption,
                     realizedDeliveryMissionScore:
                         deliveryMissionScoreForThisOption,
@@ -396,17 +413,18 @@ export class OptionEvaluator {
                 + deliveryScoreForThisOption
                 + nextResult.totalScore;
             const candidateResult: EvaluationResult = {
-                bestSequence: [desire, ...nextResult.bestSequence],
+                bestSequence: [evaluatedDesire, ...nextResult.bestSequence],
                 totalScore,
                 completionMilliseconds: nextResult.completionMilliseconds,
             };
             const evaluatedCandidate: EvaluatedCandidate = {
                 order: currentOptionOrder,
-                desire,
+                desire: evaluatedDesire,
                 targetNodeId,
                 traversability: assessment.traversability,
                 distance: assessment.distance,
                 arrivalMilliseconds: newElapsedMilliseconds,
+                deliveryWaitMilliseconds,
                 realizedDeliveryScore: deliveryScoreForThisOption,
                 realizedDeliveryMissionScore:
                     deliveryMissionScoreForThisOption,
@@ -433,6 +451,7 @@ export class OptionEvaluator {
                 traversability: candidate.traversability,
                 estimatedDistance: candidate.distance,
                 estimatedArrivalMilliseconds: candidate.arrivalMilliseconds,
+                deliveryWaitMilliseconds: candidate.deliveryWaitMilliseconds,
                 realizedDeliveryScore: candidate.realizedDeliveryScore,
                 realizedDeliveryMissionScore:
                     candidate.realizedDeliveryMissionScore,
@@ -538,12 +557,11 @@ export class OptionEvaluator {
             < currentBest.completionMilliseconds;
     }
 
-    private computeDeliveryScore(
+    private carriedParcelRewards(
         context: PlanningContext,
         carriedParcelIds: readonly string[],
-        elapsedMilliseconds: number,
-    ): number {
-        let deliveryScore = 0;
+    ): readonly number[] {
+        const parcelRewards: number[] = [];
 
         for (const parcelId of carriedParcelIds) {
             const parcel = context.parcels.get(parcelId);
@@ -551,14 +569,9 @@ export class OptionEvaluator {
                 continue;
             }
 
-            deliveryScore += RewardDecayEstimator.remainingReward(
-                parcel.reward,
-                elapsedMilliseconds,
-                context.rewardDecayInterval,
-                context.millisecondsUntilNextRewardDecay,
-            );
+            parcelRewards.push(parcel.reward);
         }
 
-        return deliveryScore;
+        return parcelRewards;
     }
 }

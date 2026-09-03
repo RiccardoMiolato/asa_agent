@@ -363,7 +363,7 @@ export class BranchAndBoundSvgRenderer {
             : edge.branchUpperBound.toFixed(3);
         return [
             `${action} → (${edge.targetPosition.x}, ${edge.targetPosition.y}) · ${decision}`,
-            `${this.traversabilityLabel(edge.traversability)} · distance ${edge.estimatedDistance ?? "n/a"} · ETA ${edge.estimatedArrivalMilliseconds ?? "n/a"}ms`,
+            `${this.traversabilityLabel(edge.traversability)} · distance ${edge.estimatedDistance ?? "n/a"} · wait ${edge.deliveryWaitMilliseconds}ms · ETA ${edge.estimatedArrivalMilliseconds ?? "n/a"}ms`,
             `branch score ${score} · upper bound ${upperBound}`,
             node
                 ? `state carried ${this.carriedLabel(node)} · next ${node.selectedOptionIdentity ?? "STOP"}`
@@ -393,7 +393,7 @@ export class BranchAndBoundSvgRenderer {
     }
 
     private edgeTooltip(edge: OptionEvaluationEdge): string {
-        return `${edge.optionIdentity}; traversability=${edge.traversability}; decision=${edge.decision}; distance=${edge.estimatedDistance ?? "n/a"}; arrival=${edge.estimatedArrivalMilliseconds ?? "n/a"}ms; realized-delivery-score=${edge.realizedDeliveryScore}; realized-drop-mission-score=${edge.realizedDeliveryMissionScore}; realized-cell-score=${edge.realizedCellScore}; estimated-action-score=${edge.estimatedActionScore ?? "n/a"}; remaining-parcel-score=${edge.remainingParcelScore ?? "n/a"}; upper-bound=${edge.branchUpperBound ?? "n/a"}; branch-score=${edge.branchScore ?? "n/a"}`;
+        return `${edge.optionIdentity}; traversability=${edge.traversability}; decision=${edge.decision}; distance=${edge.estimatedDistance ?? "n/a"}; wait=${edge.deliveryWaitMilliseconds}ms; arrival=${edge.estimatedArrivalMilliseconds ?? "n/a"}ms; realized-delivery-score=${edge.realizedDeliveryScore}; realized-drop-mission-score=${edge.realizedDeliveryMissionScore}; realized-cell-score=${edge.realizedCellScore}; estimated-action-score=${edge.estimatedActionScore ?? "n/a"}; remaining-parcel-score=${edge.remainingParcelScore ?? "n/a"}; upper-bound=${edge.branchUpperBound ?? "n/a"}; branch-score=${edge.branchScore ?? "n/a"}`;
     }
 
     private carriedLabel(node: OptionEvaluationNode): string {

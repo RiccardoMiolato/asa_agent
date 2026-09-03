@@ -231,11 +231,11 @@ export class Agent {
 
             if(this.useLLM) {
                 if (this.missionHandler?.isMissionWaiting()){
-                    const mission: Mission | undefined =
+                    const missions: readonly Mission[] =
                         await this.missionHandler.evaluateMission(
                             this.getPlanningContext(),
                     );
-                    if (mission) {
+                    for (const mission of missions) {
                         this.logger.logMissionActivated(mission.describe());
                     }
                 }
@@ -297,8 +297,17 @@ export class Agent {
                     break;
                 }
 
+                const nextAction = this.plan.topAction();
+                if (!nextAction) {
+                    break;
+                }
                 await new Promise<void>((resolve) =>
-                    setTimeout(resolve, this.beliefs.movement_duration)
+                    setTimeout(
+                        resolve,
+                        nextAction.executionDelayMilliseconds(
+                            this.beliefs.movement_duration,
+                        ),
+                    )
                 );
 
                 if (this.isBeliefChanged) {
@@ -307,11 +316,6 @@ export class Agent {
                     this.isBeliefChanged = false;
                     nextCycleReason =
                         DELIBERATION_CYCLE_REASON.BELIEFS_CHANGED;
-                    break;
-                }
-
-                const nextAction = this.plan.topAction();
-                if (!nextAction) {
                     break;
                 }
 
@@ -649,10 +653,34 @@ export class Agent {
             result: "planned",
             actions: [
                 ...navigation.actions,
+                ...this.buildDeliveryWaitActions(desire, context),
                 context.actionFactory.drop(context.agentId),
             ],
             planner: navigation.planner,
         };
+    }
+
+    private buildDeliveryWaitActions(
+        desire: DeliverParcelsDesire,
+        context: PlanningContext,
+    ): Action[] {
+        const actions: Action[] = [];
+        let remainingWaitMilliseconds = desire.waitMilliseconds;
+        const maximumWaitStepMilliseconds = Math.max(
+            1,
+            Math.min(context.rewardDecayInterval ?? 1_000, 1_000),
+        );
+        while (remainingWaitMilliseconds > 0) {
+            const waitStepMilliseconds = Math.min(
+                remainingWaitMilliseconds,
+                maximumWaitStepMilliseconds,
+            );
+            actions.push(
+                context.actionFactory.wait(waitStepMilliseconds),
+            );
+            remainingWaitMilliseconds -= waitStepMilliseconds;
+        }
+        return actions;
     }
 
     private async buildSearchPlan(
@@ -787,8 +815,8 @@ export class Agent {
             actionFactory: this.actionFactory,
             cellScoreEffects:
                 this.missionHandler?.getActiveMoveToEffects() ?? [],
-            deliveryCellEffects:
-                this.missionHandler?.getActiveDropAtEffects() ?? [],
+            deliveryScoreEffects:
+                this.missionHandler?.getActiveDeliveryScoreEffects() ?? [],
         };
     }
 

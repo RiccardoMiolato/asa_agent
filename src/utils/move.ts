@@ -20,6 +20,28 @@ export interface GameClient {
 
 export abstract class Action {
     abstract execute(): Promise<boolean>;
+
+    /** Delay applied by the executor immediately before this action. */
+    executionDelayMilliseconds(defaultDelayMilliseconds: number): number {
+        return defaultDelayMilliseconds;
+    }
+}
+
+/** Intentional idle period represented as an executable, interruptible plan step. */
+export class WaitAction extends Action {
+    constructor(readonly delayMilliseconds: number) {
+        super();
+    }
+
+    async execute(): Promise<true> {
+        return true;
+    }
+
+    override executionDelayMilliseconds(
+        _defaultDelayMilliseconds: number,
+    ): number {
+        return this.delayMilliseconds;
+    }
 }
 
 /** A movement action whose destination can be checked before server execution. */
@@ -196,5 +218,12 @@ export class ActionFactory {
 
     drop(agentId: string): Action {
         return new Drop(this.client, this.beliefs, agentId);
+    }
+
+    wait(delayMilliseconds: number): Action {
+        if (!Number.isFinite(delayMilliseconds) || delayMilliseconds <= 0) {
+            throw new RangeError("Wait duration must be finite and positive");
+        }
+        return new WaitAction(delayMilliseconds);
     }
 }

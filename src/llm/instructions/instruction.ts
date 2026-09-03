@@ -77,7 +77,7 @@ Use exactly this structure:
 {
 "level": <integer: 1, 2, or 3>,
 "worth": <boolean: true | false>,
-"motivation": "<string: maximum 10 words>"
+"motivation": "<string: maximum 10 words>",
 "requires_answer": <boolean: true | false>
 }
 
@@ -112,4 +112,3 @@ computation is functional to following anctions, then answer must not be sent ba
 export {
   MISSION_CLASSIFICATION_INSTRUCTIONS
 };
-

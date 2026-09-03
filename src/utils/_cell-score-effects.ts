@@ -1,15 +1,22 @@
 import { Position } from "./position.js";
+import { SCORE_EFFECT_LIFETIME } from "../_score-effect-lifetime.js";
 
-/** Stable identity of a one-shot score effect attached to a map cell. */
+/** Stable identity of a score effect attached to a map cell. */
 export type CellScoreEffectId = string;
 
-/** A one-shot score change caused by entering a map cell. */
+/** A score change caused by entering a map cell. */
 export class CellScoreEffect {
     constructor(
         readonly id: CellScoreEffectId,
         readonly cell: Position,
         readonly score: number,
+        readonly lifetime: SCORE_EFFECT_LIFETIME =
+            SCORE_EFFECT_LIFETIME.ONE_SHOT,
     ) { }
+
+    isConsumable(): boolean {
+        return this.lifetime === SCORE_EFFECT_LIFETIME.ONE_SHOT;
+    }
 }
 
 /** Operations shared by route search and branch evaluation. */
@@ -41,7 +48,7 @@ export class CellScoreEffectEvaluator {
         return effects
             .map(
                 (effect: CellScoreEffect): string =>
-                    `${effect.id}@${effect.cell.x},${effect.cell.y}:${effect.score}`,
+                    `${effect.id}@${effect.cell.x},${effect.cell.y}:${effect.score}:${effect.lifetime}`,
             )
             .sort()
             .join("|");

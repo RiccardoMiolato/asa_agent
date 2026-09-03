@@ -30,6 +30,33 @@ export class RewardDecayEstimator {
         return Math.max(0, reward - decayTicks);
     }
 
+    /** Earliest elapsed time at which a reward is at or below a threshold. */
+    static elapsedMillisecondsUntilRewardAtMost(
+        reward: number,
+        threshold: number,
+        rewardDecayInterval: number | undefined,
+        millisecondsUntilNextDecay: number | undefined,
+    ): number | undefined {
+        if (reward <= threshold) {
+            return 0;
+        }
+        if (rewardDecayInterval === undefined) {
+            return undefined;
+        }
+
+        const requiredDecayTicks = Math.ceil(reward - threshold);
+        if (millisecondsUntilNextDecay !== undefined) {
+            return millisecondsUntilNextDecay
+                + (requiredDecayTicks - 1) * rewardDecayInterval;
+        }
+
+        // remainingReward() uses Math.round() without an observed next tick.
+        return Math.max(
+            0,
+            (requiredDecayTicks - 0.5) * rewardDecayInterval,
+        );
+    }
+
     private static decayTicks(
         elapsedMilliseconds: number,
         rewardDecayInterval: number,
