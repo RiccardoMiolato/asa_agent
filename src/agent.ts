@@ -5,9 +5,11 @@ import {
     type BeliefRevision
 } from "./bdi/beliefs.js";
 import {
+    DeliverParcelsDesire,
     Desire,
     DesireGenerator,
-    PickUpParcelDesire
+    PickUpParcelDesire,
+    VisitCellDesire,
 } from "./bdi/desires.js";
 import { CommittedDesireIntention, Intention, PickupClusterSnapshot, SearchIntention } from "./bdi/intentions.js";
 import { OPTION_TRAVERSABILITY, OptionEvaluationGraph, OptionEvaluator } from "./bdi/option_evaluator.js";
@@ -230,6 +232,8 @@ export class Agent {
                     await this.missionHandler?.evaluateMission(this.getPlanningContext());
                 }
 
+                this.missionHandler?.completeMoveToMissionsAt(this.position);
+
                 if(this.missionHandler?.areActiveMissionsPresent()) {
                     this.missionHandler?.getActiveMission().forEach((mission: Mission) => {
                         mission.log();
@@ -329,6 +333,9 @@ export class Agent {
                 this.plan.popAction();
                 if (movementDestination) {
                     planMoved = true;
+                    this.missionHandler?.completeMoveToMissionsAt(
+                        movementDestination,
+                    );
                 }
 
                 if (this.plan.isEmpty()) {
@@ -616,6 +623,18 @@ export class Agent {
             };
         }
 
+        if (desire instanceof VisitCellDesire) {
+            return {
+                result: "planned",
+                actions: navigation.actions,
+                planner: navigation.planner,
+            };
+        }
+
+        if (!(desire instanceof DeliverParcelsDesire)) {
+            throw new Error(`Unsupported desire type: ${desire.type}`);
+        }
+
         return {
             result: "planned",
             actions: [
@@ -680,6 +699,7 @@ export class Agent {
             context.agentPosition,
             targetLocation,
             context.crates,
+            context.cellScoreEffects,
         );
         if (directActions.length > 0) {
             return {
@@ -755,6 +775,8 @@ export class Agent {
             agentId: this.id,
             pathfinder: this.pathfinder,
             actionFactory: this.actionFactory,
+            cellScoreEffects:
+                this.missionHandler?.getActiveMoveToEffects() ?? [],
         };
     }
 

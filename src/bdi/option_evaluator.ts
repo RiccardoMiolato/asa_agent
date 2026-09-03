@@ -1,12 +1,17 @@
 import { BaseOptionBranchBoundEstimator, EarliestDeliveryRewardBranchBoundEstimator, OptionBranchBound } from "../_option-pruning.js";
 import { PlanningContext } from "../planning.js";
 import { RewardDecayEstimator } from "../utils/_reward-decay.js";
+import type {
+    CellScoreEffect,
+    CellScoreEffectId,
+} from "../utils/_cell-score-effects.js";
 import { Position } from "../utils/position.js";
 import {
     DeliverParcelsDesire,
     Desire,
     DesireGenerator,
     PickUpParcelDesire,
+    VisitCellDesire,
     type DESIRE_TYPE,
 } from "./desires.js";
 
@@ -44,7 +49,7 @@ export interface OptionEvaluationNode {
     readonly selectedOptionIdentity: string | undefined;
 }
 
-/** One pickup or drop edge considered from an evaluation node. */
+/** One pickup, delivery, or mission-visit edge considered from a node. */
 export interface OptionEvaluationEdge {
     readonly order: number;
     readonly sourceNodeId: string;
@@ -58,6 +63,8 @@ export interface OptionEvaluationEdge {
     readonly estimatedArrivalMilliseconds: number | undefined;
     /** Reward realized on this edge; nonzero only when the action is a drop. */
     readonly realizedDeliveryScore: number;
+    /** One-shot move-to rewards and penalties triggered along this edge. */
+    readonly realizedCellScore: number;
     /** Path-aware delivery estimate for parcels associated with this action. */
     readonly estimatedActionScore: number | undefined;
     /** Optimistic value of parcels still available for pickup. */
@@ -92,6 +99,8 @@ interface EvaluationResult {
 interface TraversabilityAssessment {
     readonly traversability: OPTION_TRAVERSABILITY;
     readonly distance: number | undefined;
+    readonly cellScore: number;
+    readonly triggeredCellEffectIds: readonly CellScoreEffectId[];
 }
 
 interface EvaluatedCandidate {
@@ -102,6 +111,7 @@ interface EvaluatedCandidate {
     readonly distance: number;
     readonly arrivalMilliseconds: number;
     readonly realizedDeliveryScore: number;
+    readonly realizedCellScore: number;
     readonly bound: OptionBranchBound;
     readonly result: EvaluationResult;
 }
@@ -148,6 +158,7 @@ export class OptionEvaluator {
             nodes,
             edges,
             generation.deliveryCellCandidates,
+            context.cellScoreEffects,
         );
 
         return {
@@ -176,6 +187,7 @@ export class OptionEvaluator {
         nodes: OptionEvaluationNode[],
         edges: OptionEvaluationEdge[],
         deliveryCellCandidates: readonly Position[],
+        remainingCellScoreEffects: readonly CellScoreEffect[],
     ): EvaluationResult {
         let bestResult: EvaluationResult = {
             bestSequence: [],
@@ -193,6 +205,7 @@ export class OptionEvaluator {
                 context,
                 agentPosition,
                 desire.targetCell,
+                remainingCellScoreEffects,
             );
 
             if (assessment.distance === undefined) {
@@ -208,6 +221,7 @@ export class OptionEvaluator {
                     estimatedDistance: undefined,
                     estimatedArrivalMilliseconds: undefined,
                     realizedDeliveryScore: 0,
+                    realizedCellScore: 0,
                     estimatedActionScore: undefined,
                     remainingParcelScore: undefined,
                     branchUpperBound: undefined,
@@ -226,9 +240,24 @@ export class OptionEvaluator {
                 );
             const remainingDesires = new Set(desires);
             remainingDesires.delete(desire);
+            const triggeredCellEffectIds = new Set(
+                assessment.triggeredCellEffectIds,
+            );
+            for (const candidate of remainingDesires) {
+                if (
+                    candidate instanceof VisitCellDesire
+                    && triggeredCellEffectIds.has(candidate.missionId)
+                ) {
+                    remainingDesires.delete(candidate);
+                }
+            }
+            const nextCellScoreEffects = remainingCellScoreEffects.filter(
+                (effect: CellScoreEffect): boolean =>
+                    !triggeredCellEffectIds.has(effect.id),
+            );
 
             let newCarriedIds = [...carriedParcelIds];
-            let scoreForThisOption = 0;
+            let deliveryScoreForThisOption = 0;
 
             if (desire instanceof PickUpParcelDesire) {
                 newCarriedIds.push(desire.parcelId);
@@ -244,8 +273,8 @@ export class OptionEvaluator {
                         );
                     }
                 }
-            } else {
-                scoreForThisOption = this.computeDeliveryScore(
+            } else if (desire instanceof DeliverParcelsDesire) {
+                deliveryScoreForThisOption = this.computeDeliveryScore(
                     context,
                     carriedParcelIds,
                     newElapsedMilliseconds,
@@ -273,7 +302,13 @@ export class OptionEvaluator {
                 carriedParcelIdsAfterAction: newCarriedIds,
                 remainingParcelIds,
                 elapsedMillisecondsAfterAction: newElapsedMilliseconds,
-                realizedDeliveryScore: scoreForThisOption,
+                realizedDeliveryScore: deliveryScoreForThisOption,
+                realizedCellScore: assessment.cellScore,
+                remainingPositiveCellScore: nextCellScoreEffects.reduce(
+                    (score: number, effect: CellScoreEffect): number =>
+                        effect.score > 0 ? score + effect.score : score,
+                    0,
+                ),
                 deliveryCellCandidates,
             });
             if (
@@ -294,7 +329,8 @@ export class OptionEvaluator {
                     traversability: assessment.traversability,
                     estimatedDistance: assessment.distance,
                     estimatedArrivalMilliseconds: newElapsedMilliseconds,
-                    realizedDeliveryScore: scoreForThisOption,
+                    realizedDeliveryScore: deliveryScoreForThisOption,
+                    realizedCellScore: assessment.cellScore,
                     estimatedActionScore: bound.estimatedActionScore,
                     remainingParcelScore: bound.remainingParcelScore,
                     branchUpperBound: bound.totalScore,
@@ -315,9 +351,12 @@ export class OptionEvaluator {
                 nodes,
                 edges,
                 deliveryCellCandidates,
+                nextCellScoreEffects,
             );
 
-            const totalScore = scoreForThisOption + nextResult.totalScore;
+            const totalScore = assessment.cellScore
+                + deliveryScoreForThisOption
+                + nextResult.totalScore;
             const candidateResult: EvaluationResult = {
                 bestSequence: [desire, ...nextResult.bestSequence],
                 totalScore,
@@ -330,7 +369,8 @@ export class OptionEvaluator {
                 traversability: assessment.traversability,
                 distance: assessment.distance,
                 arrivalMilliseconds: newElapsedMilliseconds,
-                realizedDeliveryScore: scoreForThisOption,
+                realizedDeliveryScore: deliveryScoreForThisOption,
+                realizedCellScore: assessment.cellScore,
                 bound,
                 result: candidateResult,
             };
@@ -354,6 +394,7 @@ export class OptionEvaluator {
                 estimatedDistance: candidate.distance,
                 estimatedArrivalMilliseconds: candidate.arrivalMilliseconds,
                 realizedDeliveryScore: candidate.realizedDeliveryScore,
+                realizedCellScore: candidate.realizedCellScore,
                 estimatedActionScore: candidate.bound.estimatedActionScore,
                 remainingParcelScore: candidate.bound.remainingParcelScore,
                 branchUpperBound: candidate.bound.totalScore,
@@ -392,41 +433,54 @@ export class OptionEvaluator {
         context: PlanningContext,
         startingPosition: Position,
         targetPosition: Position,
+        cellScoreEffects: readonly CellScoreEffect[],
     ): TraversabilityAssessment {
-        const directDistance = context.pathfinder.pathLength(
+        const directPath = context.pathfinder.findMovementPath(
             context.gameMap,
             startingPosition,
             targetPosition,
             context.crates,
+            cellScoreEffects,
         );
-        if (directDistance !== undefined) {
+        if (directPath.positions.length > 0) {
             return {
                 traversability: OPTION_TRAVERSABILITY.DIRECT,
-                distance: directDistance,
+                distance: directPath.movementSteps,
+                cellScore: directPath.cellScore,
+                triggeredCellEffectIds:
+                    directPath.triggeredCellEffectIds,
             };
         }
         if (context.crates.size === 0) {
             return {
                 traversability: OPTION_TRAVERSABILITY.UNREACHABLE,
                 distance: undefined,
+                cellScore: 0,
+                triggeredCellEffectIds: [],
             };
         }
 
-        const crateRelaxedDistance = context.pathfinder.pathLength(
+        const crateRelaxedPath = context.pathfinder.findMovementPath(
             context.gameMap,
             startingPosition,
             targetPosition,
             new Map<string, Position>(),
+            cellScoreEffects,
         );
-        return crateRelaxedDistance === undefined
+        return crateRelaxedPath.positions.length === 0
             ? {
                 traversability: OPTION_TRAVERSABILITY.UNREACHABLE,
                 distance: undefined,
+                cellScore: 0,
+                triggeredCellEffectIds: [],
             }
             : {
                 traversability:
                     OPTION_TRAVERSABILITY.REQUIRES_CRATE_PLANNING,
-                distance: crateRelaxedDistance,
+                distance: crateRelaxedPath.movementSteps,
+                cellScore: crateRelaxedPath.cellScore,
+                triggeredCellEffectIds:
+                    crateRelaxedPath.triggeredCellEffectIds,
             };
     }
 

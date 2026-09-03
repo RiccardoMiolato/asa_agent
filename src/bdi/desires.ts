@@ -5,11 +5,13 @@ import {
     type PlanningObjectiveDescription,
 } from "../planning.js";
 import { Position } from "../utils/position.js";
+import type { CellScoreEffectId } from "../utils/_cell-score-effects.js";
 
 /** Goal categories that can be considered by branch-and-bound. */
 export enum DESIRE_TYPE {
     PICK_UP = "pick",
     DELIVER = "drop",
+    VISIT = "visit",
 }
 
 /** A possible reward-bearing goal derived from the agent's beliefs. */
@@ -67,6 +69,33 @@ export class DeliverParcelsDesire extends Desire {
     }
 }
 
+/** Desire to deliberately collect a positive one-shot move-to reward. */
+export class VisitCellDesire extends Desire {
+    readonly type = DESIRE_TYPE.VISIT;
+    readonly parcelId = undefined;
+
+    constructor(
+        readonly missionId: CellScoreEffectId,
+        readonly score: number,
+        targetCell: Position,
+    ) {
+        super(targetCell);
+    }
+
+    identity(): string {
+        return `visit:${this.missionId}`;
+    }
+
+    describe(): PlanningObjectiveDescription {
+        return {
+            type: "visit",
+            missionId: this.missionId,
+            score: this.score,
+            target: this.targetCell,
+        };
+    }
+}
+
 /** Typed snapshot of the desires generated for one deliberation. */
 export interface DesireGeneration {
     readonly rootDesires: ReadonlySet<Desire>;
@@ -83,6 +112,17 @@ export class DesireGenerator {
         const rootDesires = new Set<Desire>();
         const carriedParcelIds: string[] = [];
         const deliveryCellCandidates = this.selectDeliveryCellCandidates(context);
+
+        for (const effect of context.cellScoreEffects) {
+            if (effect.score <= 0) {
+                continue;
+            }
+            this.addRootDesire(
+                rootDesires,
+                new VisitCellDesire(effect.id, effect.score, effect.cell),
+                excludedRootDesireIdentities,
+            );
+        }
 
         for (const parcel of context.parcels.values()) {
             if (parcel.carriedBy === context.agentId) {

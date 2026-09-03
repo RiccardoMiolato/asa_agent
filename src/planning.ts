@@ -1,4 +1,5 @@
 import type { Parcel } from "./bdi/beliefs.js";
+import type { CellScoreEffect } from "./utils/_cell-score-effects.js";
 import type { BasePathfinder } from "./utils/astar.js";
 import { GameMap } from "./utils/map.js";
 import type { ActionFactory } from "./utils/move.js";
@@ -21,6 +22,8 @@ export interface PlanningContext {
     readonly agentId: string;
     readonly pathfinder: BasePathfinder;
     readonly actionFactory: ActionFactory;
+    /** Active one-shot score changes caused by entering mission cells. */
+    readonly cellScoreEffects: readonly CellScoreEffect[];
 }
 
 /** Stable, structured description of the objective currently being executed. */
@@ -36,6 +39,12 @@ export type PlanningObjectiveDescription =
     }
     | {
         readonly type: "deliver";
+        readonly target: Position;
+    }
+    | {
+        readonly type: "visit";
+        readonly missionId: string;
+        readonly score: number;
         readonly target: Position;
     };
 

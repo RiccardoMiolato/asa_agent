@@ -3,6 +3,10 @@ import {
     type PlanningContext,
     type PlanningObjectiveDescription,
 } from "../planning.js";
+import type {
+    CellScoreEffect,
+    CellScoreEffectId,
+} from "../utils/_cell-score-effects.js";
 import type { Action } from "../utils/move.js";
 import { Position } from "../utils/position.js";
 import type { Desire } from "./desires.js";
@@ -48,6 +52,7 @@ interface CoverageSegment {
     readonly destination: Position;
     readonly newlyCoveredKeys: readonly string[];
     readonly utility: number;
+    readonly triggeredCellEffectIds: readonly CellScoreEffectId[];
 }
 
 interface RankedCoverageCandidate {
@@ -496,6 +501,7 @@ export class SearchIntention extends Intention {
                     context.agentPosition,
                     destination,
                     context.crates,
+                    context.cellScoreEffects,
                 );
                 if (movementPath.actions.length > 0) {
                     this.rememberPlannedCluster(
@@ -516,6 +522,7 @@ export class SearchIntention extends Intention {
                         context.agentPosition,
                         destination,
                         new Map<string, Position>(),
+                        context.cellScoreEffects,
                     );
                 if (pathWithMovableCrates.actions.length === 0) {
                     continue;
@@ -544,6 +551,7 @@ export class SearchIntention extends Intention {
         const actions: Action[] = [];
         let cursor = context.agentPosition;
         const candidates = this.makeCoverageCandidates(context, cluster);
+        let remainingCellScoreEffects = [...context.cellScoreEffects];
 
         while (uncoveredKeys.size > 0) {
             let bestSegment: CoverageSegment | undefined;
@@ -561,6 +569,7 @@ export class SearchIntention extends Intention {
                     cursor,
                     candidate.destination,
                     crates,
+                    remainingCellScoreEffects,
                 );
                 if (movementPath.positions.length === 0) {
                     continue;
@@ -584,6 +593,8 @@ export class SearchIntention extends Intention {
                     destination: candidate.destination,
                     newlyCoveredKeys,
                     utility,
+                    triggeredCellEffectIds:
+                        movementPath.triggeredCellEffectIds,
                 };
                 if (this.isBetterCoverageSegment(segment, bestSegment)) {
                     bestSegment = segment;
@@ -602,6 +613,13 @@ export class SearchIntention extends Intention {
                 uncoveredKeys.delete(coveredKey);
             }
             cursor = bestSegment.destination;
+            const triggeredCellEffectIds = new Set(
+                bestSegment.triggeredCellEffectIds,
+            );
+            remainingCellScoreEffects = remainingCellScoreEffects.filter(
+                (effect: CellScoreEffect): boolean =>
+                    !triggeredCellEffectIds.has(effect.id),
+            );
         }
 
         return { actions, target: cursor, complete: true };

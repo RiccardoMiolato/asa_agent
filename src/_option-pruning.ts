@@ -12,6 +12,8 @@ export interface OptionBranchCandidate {
     readonly remainingParcelIds: readonly string[];
     readonly elapsedMillisecondsAfterAction: number;
     readonly realizedDeliveryScore: number;
+    readonly realizedCellScore: number;
+    readonly remainingPositiveCellScore: number;
     readonly deliveryCellCandidates: readonly Position[];
 }
 
@@ -21,6 +23,7 @@ export interface OptionBranchBound {
     readonly estimatedActionScore: number;
     /** Optimistic value of parcels still available for pickup. */
     readonly remainingParcelScore: number;
+    /** Optimistic branch score, including remaining positive cell effects. */
     readonly totalScore: number;
 }
 
@@ -50,7 +53,10 @@ abstract class BaseRewardBranchBoundEstimator
         return {
             estimatedActionScore,
             remainingParcelScore,
-            totalScore: estimatedActionScore + remainingParcelScore,
+            totalScore: candidate.realizedCellScore
+                + estimatedActionScore
+                + remainingParcelScore
+                + candidate.remainingPositiveCellScore,
         };
     }
 

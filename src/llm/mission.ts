@@ -1,11 +1,13 @@
 import { Position } from "../utils/position.js";
 
+export type MissionId = string;
 export type MissionLevel = 1 | 2 | 3;
 export type MissionType = "move-to" | "pick-up" | "drop-at" | "avoid";
 export type BonusType = "reward" | "penalty" | "multiplier";
 
 export class Mission {
     constructor(
+        private readonly id: MissionId,
         private readonly missionLevel: MissionLevel,
         private readonly missionType: MissionType,
         private readonly bonusType: BonusType,
@@ -13,6 +15,10 @@ export class Mission {
         private readonly mapCell: Position
     ) {
 
+    }
+
+    getId(): MissionId {
+        return this.id;
     }
 
     getLevel(): MissionLevel {

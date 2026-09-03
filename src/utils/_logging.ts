@@ -468,6 +468,9 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
                     + `(${objective.target.x}, ${objective.target.y})`;
             case "deliver":
                 return `DROP at (${objective.target.x}, ${objective.target.y})`;
+            case "visit":
+                return `VISIT (${objective.target.x}, ${objective.target.y}) `
+                    + `for ${objective.score >= 0 ? "+" : ""}${objective.score}`;
             case "search":
                 return objective.target
                     ? `EXPLORE pickup cells toward `
@@ -495,7 +498,9 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
             }
             actions.push(selectedEdge.optionType === "pick"
                 ? `PICK ${selectedEdge.parcelId ?? "missing"}`
-                : `DROP (${selectedEdge.targetPosition.x},${selectedEdge.targetPosition.y})`);
+                : selectedEdge.optionType === "visit"
+                    ? `VISIT (${selectedEdge.targetPosition.x},${selectedEdge.targetPosition.y})`
+                    : `DROP (${selectedEdge.targetPosition.x},${selectedEdge.targetPosition.y})`);
             currentNode = selectedEdge.targetNodeId
                 ? nodesById.get(selectedEdge.targetNodeId)
                 : undefined;

@@ -1,4 +1,5 @@
 import { PlanningContext } from "../planning.js";
+import { CellScoreEffect } from "../utils/_cell-score-effects.js";
 import { GameClient } from "../utils/move.js";
 import { Position } from "../utils/position.js";
 import { MISSION_CLASSIFICATION_INSTRUCTIONS } from "./instructions/instruction.js";
@@ -27,7 +28,7 @@ interface Bonus {
     value: number
 }
 
-interface ITool{
+interface ITool {
     name: string,
     params: any[],
     bonus?: Bonus
@@ -51,6 +52,7 @@ export class MissionHandler {
     private pendingChatMessages: ChatMessage[];
 
     private activeMissions: Mission[];
+    private nextMissionId: number;
 
     constructor(client: GameClient) {
         const LLM_API_URL = process.env.LITELLM_BASE_URL;
@@ -58,7 +60,7 @@ export class MissionHandler {
         const LLM_MODEL = process.env.LOCAL_MODEL;
         const MAX_TOKENS = Number(process.env.MAX_TOKENS || "0");
 
-        if(!LLM_MODEL || !LLM_API_URL || !LLM_API_KEY)
+        if (!LLM_MODEL || !LLM_API_URL || !LLM_API_KEY)
             throw new Error("Missing ENV parameters for the LLM Agent");
 
         this.LLMClient = new LLMClient(
@@ -79,6 +81,7 @@ export class MissionHandler {
 
         this.client = client;
         this.activeMissions = [];
+        this.nextMissionId = 1;
     }
 
     areActiveMissionsPresent(): boolean {
@@ -89,23 +92,49 @@ export class MissionHandler {
         return this.activeMissions;
     }
 
+    /** Exposes fixed move-to rewards and penalties to the route planner. */
+    getActiveMoveToEffects(): readonly CellScoreEffect[] {
+        return this.activeMissions
+            .filter(
+                (mission: Mission): boolean =>
+                    mission.getType() === "move-to"
+                    && mission.getBonusType() !== "multiplier",
+            )
+            .map(
+                (mission: Mission): CellScoreEffect => new CellScoreEffect(
+                    mission.getId(),
+                    mission.getRelatedCell(),
+                    mission.getBonusValue(),
+                ),
+            );
+    }
+
+    /** Completes every one-shot move-to mission triggered at a reached cell. */
+    completeMoveToMissionsAt(cell: Position): void {
+        this.activeMissions = this.activeMissions.filter(
+            (mission: Mission): boolean =>
+                mission.getType() !== "move-to"
+                || !mission.getRelatedCell().isEqual(cell),
+        );
+    }
+
     isMissionWaiting(): boolean {
         return this.pendingChatMessages.length > 0;
     }
 
     // Waiting list for mission coming from the chat
     addPendingMission(senderId: string, senderName: string, message: string): void {
-        this.pendingChatMessages.push({senderId, senderName, message});
+        this.pendingChatMessages.push({ senderId, senderName, message });
     }
 
-    private getPendingMission(): ChatMessage | undefined{
+    private getPendingMission(): ChatMessage | undefined {
         return this.pendingChatMessages.shift();
     }
 
     async evaluateMission(context: PlanningContext): Promise<void> {
         const mission = this.getPendingMission();
 
-        if(!mission)
+        if (!mission)
             return;
 
         const message: LLMMessage = {
@@ -116,19 +145,19 @@ export class MissionHandler {
         console.log("Started mission classification...");
         const levelEvaluationRes: string = await this.sendMessage([message], MISSION_CLASSIFICATION_INSTRUCTIONS);
 
-        if(levelEvaluationRes === "")
+        if (levelEvaluationRes === "")
             return;
 
         const evaluationResult = this.parseClassificationJson(levelEvaluationRes);
 
-        if(!evaluationResult)
+        if (!evaluationResult)
             return;
 
-        if(evaluationResult.level == 1) {
+        if (evaluationResult.level == 1) {
             await this.handleFirstLevelMissions(context, mission, message, evaluationResult.requires_answer);
-        } else if(evaluationResult.level == 2) {
+        } else if (evaluationResult.level == 2) {
             await this.handleSecondLevelMissions(message);
-        } else if(evaluationResult.level == 3) {
+        } else if (evaluationResult.level == 3) {
             await this.handleThirdLevelMissions(message);
         }
     }
@@ -137,13 +166,11 @@ export class MissionHandler {
         console.log("Evaluating level 1 mission...");
         const evaluationRes: string = await this.sendMessage([message], LEVEL_1_EVALUATION_INSTRUCTIONS);
 
-        if(evaluationRes === "")
-            return;
-
         console.log(evaluationRes);
+
         const toolsChain = this.parsePlanningJson(evaluationRes);
 
-        if(!toolsChain)
+        if (!toolsChain || toolsChain.tools.length === 0)
             return;
 
         const results: any[] = await this.ExecuteTools(
@@ -155,13 +182,17 @@ export class MissionHandler {
         );
 
         const last_tool: ITool = toolsChain.tools[toolsChain.tools.length - 1];
-        if(last_tool.name === "move_to"){
+        if (last_tool.name === "move_to") {
             const lastRes: MoveToResponse = results[results.length - 1] as MoveToResponse;
             console.log(lastRes);
-            this.createMoveToMission(lastRes.targetPos, 1, last_tool.bonus);
-        } else if (last_tool.name === "drop_at"){
+            if (lastRes?.isValid) {
+                this.createMoveToMission(lastRes.targetPos, 1, last_tool.bonus);
+            }
+        } else if (last_tool.name === "drop_at") {
             const lastRes: MoveToResponse = results[results.length - 1] as MoveToResponse;
-            this.createDropAtMission(lastRes.targetPos, 1, last_tool.bonus);
+            if (lastRes?.isValid) {
+                this.createDropAtMission(lastRes.targetPos, 1, last_tool.bonus);
+            }
         }
     }
 
@@ -212,11 +243,11 @@ export class MissionHandler {
 
     private parsePlanningJson(jsonString: string): ToolPlanningResult | undefined {
         let toolsChain: ToolPlanningResult;
-        try{
+        try {
             toolsChain = JSON.parse(jsonString);
 
             return toolsChain;
-        } catch(e) {
+        } catch (e) {
             console.log("Error parsing tools chain");
             return;
         }
@@ -225,25 +256,25 @@ export class MissionHandler {
 
     private parseClassificationJson(jsonString: string): MsgEvaluationResult | undefined {
         let toolsChain: MsgEvaluationResult;
-        try{
+        try {
             toolsChain = JSON.parse(jsonString);
 
             return toolsChain;
-        } catch(e) {
+        } catch (e) {
             console.log("Error parsing tools chain");
             return;
         }
     }
 
     private createMoveToMission(cell: Position, level: MissionLevel, bonus: Bonus | undefined): void {
-        if(!bonus)
+        if (!bonus)
             return;
 
         const missionType: MissionType = "move-to";
 
         let bonusType: BonusType;
 
-        if(bonus.type === "points") {
+        if (bonus.type === "points") {
             bonusType = bonus.value < 0 ? "penalty" : "reward";
         } else {
             bonusType = "multiplier";
@@ -253,6 +284,7 @@ export class MissionHandler {
 
 
         const new_mission = new Mission(
+            `mission-${this.nextMissionId++}`,
             level,
             missionType,
             bonusType,
@@ -264,14 +296,14 @@ export class MissionHandler {
     }
 
     private createDropAtMission(cell: Position, level: MissionLevel, bonus: Bonus | undefined): void {
-        if(!bonus)
+        if (!bonus)
             return;
 
         const missionType: MissionType = "drop-at";
 
         let bonusType: BonusType;
 
-        if(bonus.type === "points") {
+        if (bonus.type === "points") {
             bonusType = bonus.value < 0 ? "penalty" : "reward";
         } else {
             bonusType = "multiplier";
@@ -281,6 +313,7 @@ export class MissionHandler {
 
 
         const new_mission = new Mission(
+            `mission-${this.nextMissionId++}`,
             level,
             missionType,
             bonusType,
@@ -295,7 +328,7 @@ export class MissionHandler {
     private async callTool(context: PlanningContext, level: number, tool: ITool): Promise<any> {
         const toolFunction: Function | undefined = this.toolToFunctionMap.get(tool.name);
 
-        if(!toolFunction) {
+        if (!toolFunction) {
             console.log(`Tool ${tool.name} not found`);
             return;
         }
@@ -303,15 +336,15 @@ export class MissionHandler {
         try {
             let result: any;
 
-            switch(tool.name) {
+            switch (tool.name) {
                 case "answer_trivia":
-                    result =  await toolFunction(this.LLMClient, ...tool.params);
+                    result = await toolFunction(this.LLMClient, ...tool.params);
                     break;
                 case "math_eval":
-                    result =  await toolFunction(...tool.params);
+                    result = await toolFunction(...tool.params);
                     break;
                 default:
-                    result =  await toolFunction(context, ...tool.params);
+                    result = await toolFunction(context, ...tool.params);
                     break;
             }
 
