@@ -13,7 +13,7 @@ import {
 } from "./bdi/desires.js";
 import { CommittedDesireIntention, Intention, PickupClusterSnapshot, SearchIntention } from "./bdi/intentions.js";
 import { OPTION_TRAVERSABILITY, OptionEvaluationGraph, OptionEvaluator } from "./bdi/option_evaluator.js";
-import { Mission } from "./llm/mission.js";
+import type { Mission } from "./llm/mission.js";
 import { MissionHandler } from "./llm/MissionHandler.js";
 import { PDDLPlanner } from "./pddl/pddlPlanner.js";
 import {
@@ -203,6 +203,7 @@ export class Agent {
         if(!this.useLLM)
             return;
 
+        this.logger.logMissionReceived({ senderName, message: msg });
         this.missionHandler?.addPendingMission(senderId, senderName, msg);
     }
 
@@ -230,16 +231,16 @@ export class Agent {
 
             if(this.useLLM) {
                 if (this.missionHandler?.isMissionWaiting()){
-                    await this.missionHandler?.evaluateMission(this.getPlanningContext());
+                    const mission: Mission | undefined =
+                        await this.missionHandler.evaluateMission(
+                            this.getPlanningContext(),
+                    );
+                    if (mission) {
+                        this.logger.logMissionActivated(mission.describe());
+                    }
                 }
 
                 this.missionHandler?.completeMoveToMissionsAt(this.position);
-
-                if(this.missionHandler?.areActiveMissionsPresent()) {
-                    this.missionHandler?.getActiveMission().forEach((mission: Mission) => {
-                        mission.log();
-                    });
-                }
             }
 
 

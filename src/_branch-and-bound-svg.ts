@@ -53,7 +53,8 @@ export class BranchAndBoundSvgRenderer {
     private static readonly HORIZONTAL_GAP = 150;
     private static readonly VERTICAL_GAP = 28;
     private static readonly PADDING = 48;
-    private static readonly HEADER_HEIGHT = 150;
+    private static readonly HEADER_HEIGHT = 176;
+    private static readonly MISSION_BADGE_WIDTH = 134;
 
     render(
         graph: OptionEvaluationGraph,
@@ -98,6 +99,9 @@ export class BranchAndBoundSvgRenderer {
             "      .node-title { font-weight: 700; font-size: 13px; }",
             "      .node-detail { font-size: 11px; fill: #475569; }",
             "      .legend { font: 12px system-ui, sans-serif; fill: #334155; }",
+            "      .mission-halo { fill: none; stroke: #f59e0b; stroke-width: 5; }",
+            "      .mission-badge { fill: #f59e0b; stroke: #92400e; stroke-width: 1; }",
+            "      .mission-badge-text { fill: #451a03; font: 700 11px system-ui, sans-serif; }",
             "    </style>",
             "  </defs>",
             "  <rect width=\"100%\" height=\"100%\" fill=\"#f8fafc\"/>",
@@ -271,17 +275,62 @@ export class BranchAndBoundSvgRenderer {
             )
             : this.rootNodeLines(vertex.node);
         const title = edge ? this.edgeTooltip(edge) : "Evaluator root state";
+        const missionLabel = edge
+            ? this.missionEffectLabel(edge)
+            : undefined;
         const textLines = lines.map(
             (line: string, index: number): string =>
                 `    <text x="${vertex.x + 14}" y="${vertex.y + 24 + index * 20}" class="${index === 0 ? "node-title" : "node-detail"}">${this.escape(line)}</text>`,
         );
+        const missionDecoration = missionLabel
+            ? this.renderMissionDecoration(vertex, missionLabel)
+            : [];
         return [
             "  <g>",
             `    <title>${this.escape(title)}</title>`,
             `    <rect x="${vertex.x}" y="${vertex.y}" width="${BranchAndBoundSvgRenderer.NODE_WIDTH}" height="${BranchAndBoundSvgRenderer.NODE_HEIGHT}" rx="10" fill="${style.fill}" stroke="${style.color}" stroke-width="${style.width}"${style.dash}/>` ,
+            ...missionDecoration,
             ...textLines,
             "  </g>",
         ].join("\n");
+    }
+
+    private renderMissionDecoration(
+        vertex: SvgTreeVertex,
+        label: string,
+    ): string[] {
+        const badgeX = vertex.x
+            + BranchAndBoundSvgRenderer.NODE_WIDTH
+            - BranchAndBoundSvgRenderer.MISSION_BADGE_WIDTH
+            - 12;
+        const badgeY = vertex.y - 12;
+        return [
+            `    <rect x="${vertex.x - 5}" y="${vertex.y - 5}" width="${BranchAndBoundSvgRenderer.NODE_WIDTH + 10}" height="${BranchAndBoundSvgRenderer.NODE_HEIGHT + 10}" rx="14" class="mission-halo"/>`,
+            `    <rect x="${badgeX}" y="${badgeY}" width="${BranchAndBoundSvgRenderer.MISSION_BADGE_WIDTH}" height="24" rx="12" class="mission-badge"/>`,
+            `    <text x="${badgeX + BranchAndBoundSvgRenderer.MISSION_BADGE_WIDTH / 2}" y="${badgeY + 16}" text-anchor="middle" class="mission-badge-text">${this.escape(label)}</text>`,
+        ];
+    }
+
+    private missionEffectLabel(
+        edge: OptionEvaluationEdge,
+    ): string | undefined {
+        const missionScore = edge.realizedCellScore
+            + edge.realizedDeliveryMissionScore;
+        if (
+            edge.optionType !== "visit"
+            && missionScore === 0
+        ) {
+            return undefined;
+        }
+        if (missionScore === 0) {
+            return "★ MISSION";
+        }
+        return `★ MISSION ${missionScore > 0 ? "+" : ""}`
+            + this.formatCompactScore(missionScore);
+    }
+
+    private formatCompactScore(score: number): string {
+        return Number.isInteger(score) ? `${score}` : score.toFixed(3);
     }
 
     private rootNodeLines(node: OptionEvaluationNode | undefined): string[] {
@@ -469,6 +518,7 @@ export class BranchAndBoundSvgRenderer {
             "  <line x1=\"520\" y1=\"116\" x2=\"550\" y2=\"116\" stroke=\"#d97706\" stroke-width=\"2\" stroke-dasharray=\"7 5\"/><text x=\"558\" y=\"120\" class=\"legend\">crate-relaxed; requires PDDL</text>",
             "  <line x1=\"790\" y1=\"116\" x2=\"820\" y2=\"116\" stroke=\"#7c3aed\" stroke-width=\"2\" stroke-dasharray=\"4 4\"/><text x=\"828\" y=\"120\" class=\"legend\">pruned by bound</text>",
             "  <line x1=\"980\" y1=\"116\" x2=\"1010\" y2=\"116\" stroke=\"#dc2626\" stroke-width=\"2\" stroke-dasharray=\"7 5\"/><text x=\"1018\" y=\"120\" class=\"legend\">unreachable</text>",
+            "  <rect x=\"48\" y=\"136\" width=\"24\" height=\"16\" rx=\"5\" fill=\"none\" stroke=\"#f59e0b\" stroke-width=\"4\"/><text x=\"82\" y=\"149\" class=\"legend\">mission cell or realized mission effect</text>",
         ];
     }
 

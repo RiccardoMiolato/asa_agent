@@ -2,6 +2,7 @@ import { BaseBranchAndBoundGraphWriter, BranchAndBoundSvgWriter } from "../_bran
 import { BELIEF_CHANGE_TYPE, BeliefChange } from "../bdi/beliefs.js";
 import { DESIRE_TYPE } from "../bdi/desires.js";
 import { OPTION_TRAVERSABILITY, OptionEvaluationGraph, OptionEvaluationNode } from "../bdi/option_evaluator.js";
+import type { MissionDescription } from "../llm/mission.js";
 import { PlanningObjectiveDescription } from "../planning.js";
 import { Position } from "./position.js";
 
@@ -60,6 +61,12 @@ export interface DeliveryGainLog {
 /** A server-rejected movement that causes immediate replanning. */
 export interface MoveFailureLog {
     readonly destination: Position;
+}
+
+/** One chat request newly queued for mission evaluation. */
+export interface MissionRequestLog {
+    readonly senderName: string;
+    readonly message: string;
 }
 
 /** Planner used to validate a selected root option against the real map. */
@@ -146,6 +153,12 @@ export abstract class BaseAgentLogger {
     abstract logDeliveryGain(delivery: DeliveryGainLog): void;
 
     /** Optional so existing non-console loggers remain source-compatible. */
+    logMissionReceived(_request: MissionRequestLog): void { }
+
+    /** Optional so existing non-console loggers remain source-compatible. */
+    logMissionActivated(_mission: MissionDescription): void { }
+
+    /** Optional so existing non-console loggers remain source-compatible. */
     logMoveFailure(_failure: MoveFailureLog): void { }
 
     /** Optional so existing non-console loggers remain source-compatible. */
@@ -184,6 +197,34 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
             + `  ${this.theme.muted("·")}`
             + `  total ${delivery.totalScore}`,
         );
+    }
+
+    override logMissionReceived(request: MissionRequestLog): void {
+        console.log(
+            `\n${this.theme.label("◆ MISSION RECEIVED")}`
+            + `  from ${request.senderName}`
+            + `  ${this.theme.muted("·")}`
+            + `  ${request.message}`,
+        );
+    }
+
+    override logMissionActivated(mission: MissionDescription): void {
+        const lines: string[] = [
+            "",
+            this.theme.heading("╭─ MISSION ACTIVATED"),
+            this.formatDetail("MISSION", mission.id),
+            this.formatDetail("LEVEL", `${mission.level}`),
+            this.formatDetail(
+                "OBJECTIVE",
+                this.theme.success(this.formatMissionObjective(mission)),
+            ),
+            this.formatDetail("EFFECT", this.formatMissionEffect(mission)),
+            this.formatDetail("STATUS", this.theme.success("ACTIVE")),
+            this.theme.heading(
+                "╰───────────────────────────────────────────────────────────────────────────────",
+            ),
+        ];
+        console.log(lines.join("\n"));
     }
 
     override logMoveFailure(failure: MoveFailureLog): void {
@@ -476,6 +517,33 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
                     ? `EXPLORE pickup cells toward `
                         + `(${objective.target.x}, ${objective.target.y})`
                     : "EXPLORE pickup cells";
+        }
+    }
+
+    private formatMissionObjective(mission: MissionDescription): string {
+        const target = `(${mission.target.x}, ${mission.target.y})`;
+        switch (mission.type) {
+            case "move-to":
+                return `VISIT ${target}`;
+            case "pick-up":
+                return `PICK UP at ${target}`;
+            case "drop-at":
+                return `DROP at ${target}`;
+            case "avoid":
+                return `AVOID ${target}`;
+        }
+    }
+
+    private formatMissionEffect(mission: MissionDescription): string {
+        switch (mission.bonusType) {
+            case "reward":
+                return this.theme.success(`+${mission.bonusValue} points`);
+            case "penalty":
+                return this.theme.error(`-${mission.bonusValue} points`);
+            case "multiplier":
+                return this.theme.success(
+                    `×${mission.bonusValue} delivery score`,
+                );
         }
     }
 

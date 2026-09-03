@@ -104,11 +104,6 @@ socket.onMsg((senderId: string, senderName: string, message: any) => {
         agent.handleMsgFromChat(senderId, senderName, message);
 });
 
-socket.onMsg((senderId: string, senderName: string, message: any) => {
-    if(agent.usesLLM())
-        agent.handleMsgFromChat(senderId, senderName, message);
-});
-
 void agent.agent_loop()
     .then(async (exitReason: AGENT_EXIT_REASON): Promise<void> => {
         switch (exitReason) {

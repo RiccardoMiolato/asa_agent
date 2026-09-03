@@ -171,47 +171,49 @@ export class MissionHandler {
         return this.pendingChatMessages.shift();
     }
 
-    async evaluateMission(context: PlanningContext): Promise<void> {
+    async evaluateMission(context: PlanningContext): Promise<Mission | undefined> {
         const mission = this.getPendingMission();
 
         if (!mission)
-            return;
+            return undefined;
 
         const message: LLMMessage = {
             role: "user",
             content: mission.message
         };
 
-        console.log("Started mission classification...");
         const levelEvaluationRes: string = await this.sendMessage([message], MISSION_CLASSIFICATION_INSTRUCTIONS);
 
         if (levelEvaluationRes === "")
-            return;
+            return undefined;
 
         const evaluationResult = this.parseClassificationJson(levelEvaluationRes);
 
         if (!evaluationResult)
-            return;
+            return undefined;
 
         if (evaluationResult.level == 1) {
-            await this.handleFirstLevelMissions(context, mission, message, evaluationResult.requires_answer);
+            return this.handleFirstLevelMissions(
+                context,
+                mission,
+                message,
+                evaluationResult.requires_answer,
+            );
         } else if (evaluationResult.level == 2) {
             await this.handleSecondLevelMissions(message);
         } else if (evaluationResult.level == 3) {
             await this.handleThirdLevelMissions(message);
         }
+        return undefined;
     }
 
-    private async handleFirstLevelMissions(context: PlanningContext, mission: ChatMessage, message: LLMMessage, answer_trivia: boolean): Promise<void> {
-        console.log("Evaluating level 1 mission...");
+    private async handleFirstLevelMissions(context: PlanningContext, mission: ChatMessage, message: LLMMessage, answer_trivia: boolean): Promise<Mission | undefined> {
         const evaluationRes: string = await this.sendMessage([message], LEVEL_1_EVALUATION_INSTRUCTIONS);
-
-        console.log(evaluationRes);
 
         const toolsChain = this.parsePlanningJson(evaluationRes);
 
         if (!toolsChain || toolsChain.tools.length === 0)
-            return;
+            return undefined;
 
         const results: any[] = await this.ExecuteTools(
             context,
@@ -224,16 +226,24 @@ export class MissionHandler {
         const last_tool: ITool = toolsChain.tools[toolsChain.tools.length - 1];
         if (last_tool.name === "move_to") {
             const lastRes: MoveToResponse = results[results.length - 1] as MoveToResponse;
-            console.log(lastRes);
             if (lastRes?.isValid) {
-                this.createMoveToMission(lastRes.targetPos, 1, last_tool.bonus);
+                return this.createMoveToMission(
+                    lastRes.targetPos,
+                    1,
+                    last_tool.bonus,
+                );
             }
         } else if (last_tool.name === "drop_at") {
             const lastRes: MoveToResponse = results[results.length - 1] as MoveToResponse;
             if (lastRes?.isValid) {
-                this.createDropAtMission(lastRes.targetPos, 1, last_tool.bonus);
+                return this.createDropAtMission(
+                    lastRes.targetPos,
+                    1,
+                    last_tool.bonus,
+                );
             }
         }
+        return undefined;
     }
 
     private async handleSecondLevelMissions(message: LLMMessage): Promise<void> {
@@ -257,19 +267,15 @@ export class MissionHandler {
             // Check if THIS tool has $ref params
             if (tool.params?.some((param: any) => param?.$ref !== undefined)) {
                 // Resolve $ref to previous results
-                console.log(tool.params);
                 const resolvedParams = tool.params.map((param: any) => {
-                    console.log(results, param, param.$ref, param['$ref']);
                     if (param && param.$ref !== undefined) {
                         return results[param.$ref];
                     }
                     return param;
                 });
-                console.log(`Executing tool ${tool.name} with resolved params:`, resolvedParams);
                 results.push(await this.callTool(context, level, { name: tool.name, params: resolvedParams }));
             } else {
                 // No references, execute normally
-                console.log(`Executing tool ${tool.name} with params:`, tool.params);
                 results.push(await this.callTool(context, level, tool));
             }
 
@@ -306,9 +312,9 @@ export class MissionHandler {
         }
     }
 
-    private createMoveToMission(cell: Position, level: MissionLevel, bonus: Bonus | undefined): void {
+    private createMoveToMission(cell: Position, level: MissionLevel, bonus: Bonus | undefined): Mission | undefined {
         if (!bonus)
-            return;
+            return undefined;
 
         const missionType: MissionType = "move-to";
 
@@ -333,11 +339,12 @@ export class MissionHandler {
         );
 
         this.activeMissions.push(new_mission);
+        return new_mission;
     }
 
-    private createDropAtMission(cell: Position, level: MissionLevel, bonus: Bonus | undefined): void {
+    private createDropAtMission(cell: Position, level: MissionLevel, bonus: Bonus | undefined): Mission | undefined {
         if (!bonus)
-            return;
+            return undefined;
 
         const missionType: MissionType = "drop-at";
 
@@ -362,6 +369,7 @@ export class MissionHandler {
         );
 
         this.activeMissions.push(new_mission);
+        return new_mission;
     }
 
 
@@ -387,8 +395,6 @@ export class MissionHandler {
                     result = await toolFunction(context, ...tool.params);
                     break;
             }
-
-            console.log(`Tool ${tool.name} executed with result: `, result);
 
             return result;
         } catch (error) {
