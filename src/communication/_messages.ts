@@ -19,6 +19,8 @@ export enum PEER_MESSAGE_TYPE {
     RENDEZVOUS_ASSIGNMENT = "rendezvous-assignment",
     RENDEZVOUS_ACKNOWLEDGEMENT = "rendezvous-acknowledgement",
     RENDEZVOUS_ARRIVED = "rendezvous-arrived",
+    RENDEZVOUS_ARRIVAL_ACKNOWLEDGEMENT =
+        "rendezvous-arrival-acknowledgement",
 }
 
 declare const AGENT_COMMUNICATION_MESSAGE_ID: unique symbol;
@@ -84,13 +86,23 @@ export interface RendezvousArrivedMessage
     readonly position: AgentCommunicationPosition;
 }
 
+/** Confirms receipt of one participant's arrival announcement. */
+export interface RendezvousArrivalAcknowledgementMessage
+    extends BaseAgentCommunicationMessage {
+    readonly type: PEER_MESSAGE_TYPE.RENDEZVOUS_ARRIVAL_ACKNOWLEDGEMENT;
+    readonly role: AGENT_ROLE;
+    readonly rendezvousId: string;
+    readonly acknowledgedMessageId: AgentCommunicationMessageId;
+}
+
 /** Every validated message accepted by the peer communication layer. */
 export type AgentCommunicationMessage =
     | PeerHelloMessage
     | PeerHelloAcknowledgementMessage
     | RendezvousAssignmentMessage
     | RendezvousAcknowledgementMessage
-    | RendezvousArrivedMessage;
+    | RendezvousArrivedMessage
+    | RendezvousArrivalAcknowledgementMessage;
 
 /** Creates valid, correlated peer-protocol messages. */
 export class AgentCommunicationMessageFactory {
@@ -166,6 +178,21 @@ export class AgentCommunicationMessageFactory {
             role,
             rendezvousId,
             position,
+        };
+    }
+
+    /** Confirms receipt of one exact peer-arrival announcement. */
+    static rendezvousArrivalAcknowledgement(
+        role: AGENT_ROLE,
+        rendezvousId: string,
+        acknowledgedMessageId: AgentCommunicationMessageId,
+    ): RendezvousArrivalAcknowledgementMessage {
+        return {
+            ...AgentCommunicationMessageFactory.base(),
+            type: PEER_MESSAGE_TYPE.RENDEZVOUS_ARRIVAL_ACKNOWLEDGEMENT,
+            role,
+            rendezvousId,
+            acknowledgedMessageId,
         };
     }
 
@@ -291,6 +318,26 @@ export class AgentCommunicationMessageParser {
                 type: PEER_MESSAGE_TYPE.RENDEZVOUS_ARRIVED,
                 rendezvousId: value["rendezvousId"],
                 position: value["position"],
+            };
+        }
+        if (
+            value["type"]
+                === PEER_MESSAGE_TYPE.RENDEZVOUS_ARRIVAL_ACKNOWLEDGEMENT
+            && AgentCommunicationMessageParser.isNonEmptyString(
+                value["rendezvousId"],
+            )
+            && AgentCommunicationMessageParser.isNonEmptyString(
+                value["acknowledgedMessageId"],
+            )
+        ) {
+            return {
+                ...common,
+                type:
+                    PEER_MESSAGE_TYPE.RENDEZVOUS_ARRIVAL_ACKNOWLEDGEMENT,
+                rendezvousId: value["rendezvousId"],
+                acknowledgedMessageId:
+                    value["acknowledgedMessageId"] as
+                    AgentCommunicationMessageId,
             };
         }
         return undefined;

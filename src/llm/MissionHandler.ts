@@ -440,7 +440,9 @@ export class MissionHandler {
     private parsePlanningJson(jsonString: string): ToolPlanningResult | undefined {
         let toolsChain: ToolPlanningResult;
         try {
-            toolsChain = JSON.parse(jsonString);
+            toolsChain = MissionHandler.parseLlmJson(
+                jsonString,
+            ) as ToolPlanningResult;
 
             return toolsChain;
         } catch (e) {
@@ -453,7 +455,7 @@ export class MissionHandler {
         jsonString: string,
     ): LevelTwoToolPlanningResult | undefined {
         try {
-            const parsed: unknown = JSON.parse(jsonString);
+            const parsed = MissionHandler.parseLlmJson(jsonString);
             if (!MissionHandler.isRecord(parsed)) {
                 return undefined;
             }
@@ -537,7 +539,7 @@ export class MissionHandler {
         jsonString: string,
     ): LevelThreeToolPlanningResult | undefined {
         try {
-            const parsed: unknown = JSON.parse(jsonString);
+            const parsed = MissionHandler.parseLlmJson(jsonString);
             if (!MissionHandler.isRecord(parsed)) {
                 return undefined;
             }
@@ -693,11 +695,25 @@ export class MissionHandler {
         return typeof value === "number" && Number.isFinite(value);
     }
 
+    /**
+     * Parses a bare JSON response or one JSON object wrapped in a code fence.
+     * Additional prose remains invalid so malformed plans cannot be executed.
+     */
+    private static parseLlmJson(jsonString: string): unknown {
+        const response = jsonString.trim();
+        const fencedResponse = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(
+            response,
+        );
+        return JSON.parse(fencedResponse?.[1] ?? response) as unknown;
+    }
+
 
     private parseClassificationJson(jsonString: string): MsgEvaluationResult | undefined {
         let toolsChain: MsgEvaluationResult;
         try {
-            toolsChain = JSON.parse(jsonString);
+            toolsChain = MissionHandler.parseLlmJson(
+                jsonString,
+            ) as MsgEvaluationResult;
 
             return toolsChain;
         } catch (e) {

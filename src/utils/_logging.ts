@@ -4,53 +4,8 @@ import { DESIRE_TYPE } from "../bdi/desires.js";
 import { OPTION_TRAVERSABILITY, OptionEvaluationGraph, OptionEvaluationNode } from "../bdi/option_evaluator.js";
 import type { MissionDescription } from "../llm/mission.js";
 import { PlanningObjectiveDescription } from "../planning.js";
+import { TerminalTheme } from "../presentation/index.js";
 import { Position } from "./position.js";
-
-/** ANSI presentation used only when stdout is attached to a color terminal. */
-class TerminalTheme {
-    private static readonly RESET = "\u001B[0m";
-    private static readonly BOLD = "\u001B[1m";
-    private static readonly DIM = "\u001B[2m";
-    private static readonly RED = "\u001B[31m";
-    private static readonly GREEN = "\u001B[32m";
-    private static readonly YELLOW = "\u001B[33m";
-    private static readonly BLUE = "\u001B[34m";
-    private static readonly CYAN = "\u001B[36m";
-
-    private readonly enabled: boolean = process.stdout.isTTY
-        && process.env.NO_COLOR === undefined;
-
-    heading(value: string): string {
-        return this.decorate(value, [TerminalTheme.BOLD, TerminalTheme.CYAN]);
-    }
-
-    label(value: string): string {
-        return this.decorate(value, [TerminalTheme.BOLD, TerminalTheme.BLUE]);
-    }
-
-    success(value: string): string {
-        return this.decorate(value, [TerminalTheme.BOLD, TerminalTheme.GREEN]);
-    }
-
-    warning(value: string): string {
-        return this.decorate(value, [TerminalTheme.BOLD, TerminalTheme.YELLOW]);
-    }
-
-    error(value: string): string {
-        return this.decorate(value, [TerminalTheme.BOLD, TerminalTheme.RED]);
-    }
-
-    muted(value: string): string {
-        return this.decorate(value, [TerminalTheme.DIM]);
-    }
-
-    private decorate(value: string, codes: readonly string[]): string {
-        if (!this.enabled) {
-            return value;
-        }
-        return `${codes.join("")}${value}${TerminalTheme.RESET}`;
-    }
-}
 
 /** Authoritative score increase reported by the server after a delivery. */
 export interface DeliveryGainLog {
@@ -211,25 +166,31 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
     }
 
     override logMissionActivated(mission: MissionDescription): void {
+        const heading = (value: string): string => mission.level === 3
+            ? this.theme.violet(value)
+            : this.theme.heading(value);
+        const accent = (value: string): string => mission.level === 3
+            ? this.theme.violet(value)
+            : this.theme.success(value);
         const lines: string[] = [
             "",
-            this.theme.heading("╭─ MISSION ACTIVATED"),
+            heading("╭─ MISSION ACTIVATED"),
             this.formatDetail("MISSION", mission.id),
-            this.formatDetail("LEVEL", `${mission.level}`),
+            this.formatDetail("LEVEL", accent(`${mission.level}`)),
             this.formatDetail(
                 "OBJECTIVE",
-                this.theme.success(this.formatMissionObjective(mission)),
+                accent(this.formatMissionObjective(mission)),
             ),
             this.formatDetail("EFFECT", this.formatMissionEffect(mission)),
             this.formatDetail(
                 "STATUS",
-                this.theme.success(
+                accent(
                     mission.lifetime === "persistent"
                         ? "ACTIVE · PERSISTENT"
                         : "ACTIVE · ONE SHOT",
                 ),
             ),
-            this.theme.heading(
+            heading(
                 "╰───────────────────────────────────────────────────────────────────────────────",
             ),
         ];
@@ -568,7 +529,7 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
                 + `${mission.deliverLower ? ">" : "<"} ${mission.threshold}`;
         }
         if (mission.type === "rendezvous") {
-            return this.theme.success(`+${mission.reward} joint points`);
+            return this.theme.violet(`+${mission.reward} joint points`);
         }
 
         switch (mission.bonusType) {

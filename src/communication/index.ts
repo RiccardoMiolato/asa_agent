@@ -46,6 +46,7 @@ export {
     type PeerHelloAcknowledgementMessage,
     type PeerHelloMessage,
     type RendezvousAcknowledgementMessage,
+    type RendezvousArrivalAcknowledgementMessage,
     type RendezvousArrivedMessage,
     type RendezvousAssignmentMessage,
 } from "./_messages.js";

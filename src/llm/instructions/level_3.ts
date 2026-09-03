@@ -37,7 +37,13 @@ RULES:
 5. If the mission is not this supported rendezvous form, return {"tools":[]}.
 6. Return exactly one plan_rendezvous call for a supported mission.
 
-OUTPUT FORMAT (valid JSON only):
+OUTPUT RULES:
+- Return ONLY a valid JSON object.
+- The first character of the response must be "{" and the last must be "}".
+- Do not use Markdown or code fences.
+- Do not include explanations, comments, or introductory text.
+
+OUTPUT FORMAT:
 {
   "tools": [
     {

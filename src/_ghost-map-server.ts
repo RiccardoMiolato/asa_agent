@@ -77,6 +77,9 @@ export class GhostMapServer {
 
         const server = this.server;
         this.server = undefined;
+        if (!server.listening) {
+            return Promise.resolve();
+        }
         return new Promise<void>((resolveStop, rejectStop): void => {
             server.close((error?: Error): void => {
                 if (error) {

@@ -929,6 +929,9 @@ export class Agent {
     }
 
     private addTemporaryBlockedCell(position: Position): void {
+        if (!position.isGridAligned()) {
+            return;
+        }
         const key = this.positionKey(position);
         const existing = this.temporarilyBlockedCells.get(key);
         this.temporarilyBlockedCells.set(key, {
@@ -976,14 +979,18 @@ export class Agent {
         // Apply temporary blocked cells to the copy
         for (const blockedCell of this.temporarilyBlockedCells.values()) {
             const { position } = blockedCell;
-            if (
-                position.x >= 0
-                && position.x < mapCopy.length
-                && position.y >= 0
-                && position.y < mapCopy[position.x].length
-            ) {
-                mapCopy[position.x][position.y] = "0";
+            if (!position.isGridAligned()) {
+                continue;
             }
+            const row = mapCopy[position.x];
+            if (
+                row === undefined
+                || position.y < 0
+                || position.y >= row.length
+            ) {
+                continue;
+            }
+            row[position.y] = "0";
         }
 
         // Return a new GameMap with the modified data

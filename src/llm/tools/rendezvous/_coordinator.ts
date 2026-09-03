@@ -9,6 +9,7 @@ import {
     type AgentCommunicationPeerStatusHandler,
     PEER_MESSAGE_TYPE,
     type RendezvousArrivedMessage,
+    type RendezvousArrivalAcknowledgementMessage,
     type RendezvousAssignmentMessage,
 } from "../../../communication/index.js";
 import { SCORE_EFFECT_LIFETIME } from "../../../_score-effect-lifetime.js";
@@ -39,6 +40,7 @@ export interface RendezvousCoordinationSnapshot {
     readonly reward: number;
     readonly state: RENDEZVOUS_COORDINATION_STATE;
     readonly peerArrived: boolean;
+    readonly arrivalAcknowledged: boolean;
 }
 
 interface RendezvousRecord {
@@ -49,6 +51,7 @@ interface RendezvousRecord {
     readonly assignmentMessage: RendezvousAssignmentMessage | undefined;
     state: RENDEZVOUS_COORDINATION_STATE;
     peerArrived: boolean;
+    arrivalAcknowledged: boolean;
     arrivalMessage: RendezvousArrivedMessage | undefined;
     completionWaiters: Set<() => void>;
 }
@@ -151,6 +154,7 @@ export class PeerRendezvousCoordinator extends BaseRendezvousCoordinator {
             assignmentMessage,
             state: RENDEZVOUS_COORDINATION_STATE.PROPOSING,
             peerArrived: false,
+            arrivalAcknowledged: false,
             arrivalMessage: undefined,
             completionWaiters: new Set<() => void>(),
         });
@@ -171,6 +175,7 @@ export class PeerRendezvousCoordinator extends BaseRendezvousCoordinator {
                     record.rendezvousId,
                     record.localTarget,
                 );
+            record.arrivalAcknowledged = false;
             if (record.peerArrived) {
                 this.complete(record);
             } else {
@@ -246,6 +251,7 @@ export class PeerRendezvousCoordinator extends BaseRendezvousCoordinator {
                 reward: record.reward,
                 state: record.state,
                 peerArrived: record.peerArrived,
+                arrivalAcknowledged: record.arrivalAcknowledged,
             }),
         );
     }
@@ -270,6 +276,9 @@ export class PeerRendezvousCoordinator extends BaseRendezvousCoordinator {
                 return;
             case PEER_MESSAGE_TYPE.RENDEZVOUS_ARRIVED:
                 await this.handlePeerArrival(message);
+                return;
+            case PEER_MESSAGE_TYPE.RENDEZVOUS_ARRIVAL_ACKNOWLEDGEMENT:
+                this.handleArrivalAcknowledgement(message);
                 return;
             default:
                 return;
@@ -298,6 +307,7 @@ export class PeerRendezvousCoordinator extends BaseRendezvousCoordinator {
                 assignmentMessage: undefined,
                 state: RENDEZVOUS_COORDINATION_STATE.COMMITTED,
                 peerArrived: false,
+                arrivalAcknowledged: false,
                 arrivalMessage: undefined,
                 completionWaiters: new Set<() => void>(),
             };
@@ -310,7 +320,7 @@ export class PeerRendezvousCoordinator extends BaseRendezvousCoordinator {
                 message.messageId,
             ),
         );
-        if (record.arrivalMessage) {
+        if (record.arrivalMessage && !record.arrivalAcknowledged) {
             await this.channel.send(record.arrivalMessage);
         }
     }
@@ -347,6 +357,14 @@ export class PeerRendezvousCoordinator extends BaseRendezvousCoordinator {
         ) {
             return;
         }
+        await this.channel.send(
+            AgentCommunicationMessageFactory
+                .rendezvousArrivalAcknowledgement(
+                    this.localRole,
+                    message.rendezvousId,
+                    message.messageId,
+                ),
+        );
         record.peerArrived = true;
         if (
             record.state
@@ -355,12 +373,20 @@ export class PeerRendezvousCoordinator extends BaseRendezvousCoordinator {
             this.complete(record);
             return;
         }
+    }
+
+    private handleArrivalAcknowledgement(
+        message: RendezvousArrivalAcknowledgementMessage,
+    ): void {
+        const record = this.records.get(message.rendezvousId);
         if (
-            record.state === RENDEZVOUS_COORDINATION_STATE.COMPLETED
-            && record.arrivalMessage
+            !record
+            || record.arrivalMessage?.messageId
+                !== message.acknowledgedMessageId
         ) {
-            await this.channel.send(record.arrivalMessage);
+            return;
         }
+        record.arrivalAcknowledged = true;
     }
 
     private complete(record: RendezvousRecord): void {
@@ -382,9 +408,14 @@ export class PeerRendezvousCoordinator extends BaseRendezvousCoordinator {
                 await this.channel.send(record.assignmentMessage);
             }
             if (
-                record.state
-                    === RENDEZVOUS_COORDINATION_STATE.WAITING_FOR_PEER
+                (
+                    record.state
+                        === RENDEZVOUS_COORDINATION_STATE.WAITING_FOR_PEER
+                    || record.state
+                        === RENDEZVOUS_COORDINATION_STATE.COMPLETED
+                )
                 && record.arrivalMessage
+                && !record.arrivalAcknowledged
             ) {
                 await this.channel.send(record.arrivalMessage);
             }
