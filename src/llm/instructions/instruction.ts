@@ -77,15 +77,12 @@ Use exactly this structure:
 {
 "level": <integer: 1, 2, or 3>,
 "worth": <boolean: true | false>,
-"motivation": "<string: maximum 10 words>",
 "requires_answer": <boolean: true | false>
 }
 
 The "worth" field means whether the mission is strategically worth pursuing.
 Set it to true when the mission provides a positive strategic benefit/reward and
 false when it provides no benefit or imposes a penalty.
-
-The "motivation" must contain at most 10 words and briefly justify the classification.
 
 The "requires_answer" field indicates whether the mission requires an answer back to the sender.
 This includes all possible trivia questions, but also other request that requires some sort of computation

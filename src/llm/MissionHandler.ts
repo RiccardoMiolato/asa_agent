@@ -50,7 +50,6 @@ import {
 interface MsgEvaluationResult {
     level: number,
     worth: boolean,
-    motivation: string,
     requires_answer: boolean
 }
 
@@ -189,8 +188,8 @@ export class MissionHandler {
                 (
                     mission: Mission,
                 ): mission is DeliveryCellMission
-                    | StackSizeMission
-                    | ParcelScoreMission =>
+                | StackSizeMission
+                | ParcelScoreMission =>
                     mission instanceof DeliveryCellMission
                     || mission instanceof StackSizeMission
                     || mission instanceof ParcelScoreMission,
@@ -274,7 +273,6 @@ export class MissionHandler {
 
     private async handleFirstLevelMissions(context: PlanningContext, mission: ChatMessage, message: LLMMessage, answer_trivia: boolean): Promise<Mission | undefined> {
         const evaluationRes: string = await this.sendMessage([message], LEVEL_1_EVALUATION_INSTRUCTIONS);
-
         const toolsChain = this.parsePlanningJson(evaluationRes);
 
         if (!toolsChain || toolsChain.tools.length === 0)

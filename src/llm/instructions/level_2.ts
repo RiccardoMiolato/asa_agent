@@ -1,8 +1,8 @@
 const TOOLS: Map<string, string> = new Map([
-    ["stack_constraint", "Handles constraints relative to stack capacity when delivering parcels."],
-    ["delivery_constraint", "Handles constraints relative to delivery points."],
-    ["parcel_constraint", "Handles constraints relative to parcels score when delivering."],
-    ["avoid_cell", "Handles penalty assigned to agents for walking over a specific cell."],
+  ["stack_constraint", "Handles constraints relative to stack capacity when delivering parcels."],
+  ["delivery_constraint", "Handles constraints relative to delivery points."],
+  ["parcel_constraint", "Handles constraints relative to parcels score when delivering."],
+  ["avoid_cell", "Handles penalty assigned to agents for walking over a specific cell."],
 ]);
 
 const TOOLS_FUNCTION_DEFINITION: Map<string, string> = new Map();
@@ -64,12 +64,17 @@ GUIDING RULES:
 7. Use "multiplier" for relative rewards such as 5x, double, half, 0.3x, or zero reward
 8. Use "points" only for a fixed signed number of points
 
-OUTPUT FORMAT (valid JSON only):
+OUTPUT:
+Return ONLY a valid JSON object.
+Your entire response must begin with "{" and end with "}".
+Do not include markdown, code fences, explanations, comments, or additional text.
+
+The output must have this structure:
 {
   "tools": [
     {
       "name": "<tool_name>",
-      "params": ["<param1>", "<param2>"]
+      "params": [...]
     }
   ]
 }

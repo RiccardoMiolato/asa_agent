@@ -8,7 +8,7 @@
   "main": "index.ts",
   "scripts": {
     "build": "tsc",
-    "start": "node --env-file=.env dist/index.js",
+    "start": "rm -rf -- logs/branch-and-bound/* &&node --env-file=.env dist/index.js",
     "dev": "npm run build && npm run start",
     "test": "npm run build && node --test dist/src/_action-ack.spec.js dist/src/_option-pruning.spec.js dist/src/_search-intention.spec.js",
     "test:missions": "npm run build && node --test dist/src/_level-two-mission.test.js",
