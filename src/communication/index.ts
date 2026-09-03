@@ -42,6 +42,10 @@ export {
     AgentCommunicationMessageParser,
     type AgentCommunicationMessage,
     type AgentCommunicationMessageId,
+    type AgentCommunicationPosition,
     type PeerHelloAcknowledgementMessage,
     type PeerHelloMessage,
+    type RendezvousAcknowledgementMessage,
+    type RendezvousArrivedMessage,
+    type RendezvousAssignmentMessage,
 } from "./_messages.js";

@@ -163,9 +163,14 @@ messages until bidirectional reachability is established. Retries resume after
 a peer disconnects. Natural-language messages that do not match the internal
 protocol are routed only to the LLM-enabled agent's mission handler.
 
-This layer intentionally establishes transport and peer readiness only.
-Rendezvous proposals, commitments, arrivals, and cancellations belong to the
-level-3 coordination layer built on top of it.
+Level-3 rendezvous coordination uses the same validated channel. The LLM peer
+sends a correlated `rendezvous-assignment`; the BDI peer installs its local
+branch-and-bound reward and returns `rendezvous-acknowledgement`, after which
+the LLM installs its corresponding reward. Each peer sends
+`rendezvous-arrived` only after observing itself at its assigned cell. Arrival
+facts are order-independent: an agent that arrives first waits, while the
+second arrival completes the mission and wakes both planners for a fresh
+deliberation cycle. Assignment and pending-arrival messages are retried.
 
 For guaranteed listener registration before any server event, disable auto-connect, install the listeners, and connect explicitly:
 

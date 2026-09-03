@@ -13,7 +13,7 @@
     "test": "npm run build && node --test dist/src/_action-ack.spec.js dist/src/_agent-communication.spec.js dist/src/_option-pruning.spec.js dist/src/_runtime-config.spec.js dist/src/_search-intention.spec.js",
     "test:communication": "npm run build && node --test dist/src/_agent-communication.spec.js",
     "test:runtime": "npm run build && node --test dist/src/_runtime-config.spec.js",
-    "test:missions": "npm run build && node --test dist/src/_level-two-mission.test.js",
+    "test:missions": "npm run build && node --test dist/src/_level-two-mission.test.js dist/src/_level-three-mission-tests.js",
     "test:actions": "npm run build && node --test dist/src/_action-ack.spec.js",
     "test:pruning": "npm run build && node --test dist/src/_option-pruning.spec.js",
     "ghost-map": "npm run build && npm run start"

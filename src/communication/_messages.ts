@@ -16,6 +16,9 @@ export enum AGENT_ROLE {
 export enum PEER_MESSAGE_TYPE {
     HELLO = "peer-hello",
     HELLO_ACKNOWLEDGEMENT = "peer-hello-acknowledgement",
+    RENDEZVOUS_ASSIGNMENT = "rendezvous-assignment",
+    RENDEZVOUS_ACKNOWLEDGEMENT = "rendezvous-acknowledgement",
+    RENDEZVOUS_ARRIVED = "rendezvous-arrived",
 }
 
 declare const AGENT_COMMUNICATION_MESSAGE_ID: unique symbol;
@@ -32,6 +35,12 @@ interface BaseAgentCommunicationMessage {
     readonly sentAt: number;
 }
 
+/** Serializable grid coordinate used at the transport boundary. */
+export interface AgentCommunicationPosition {
+    readonly x: number;
+    readonly y: number;
+}
+
 /** Announces one peer and requests proof that the other peer is reachable. */
 export interface PeerHelloMessage extends BaseAgentCommunicationMessage {
     readonly type: PEER_MESSAGE_TYPE.HELLO;
@@ -46,10 +55,42 @@ export interface PeerHelloAcknowledgementMessage
     readonly acknowledgedMessageId: AgentCommunicationMessageId;
 }
 
+/** Assigns one safe cell to each participant in a joint rendezvous. */
+export interface RendezvousAssignmentMessage
+    extends BaseAgentCommunicationMessage {
+    readonly type: PEER_MESSAGE_TYPE.RENDEZVOUS_ASSIGNMENT;
+    readonly role: AGENT_ROLE.LLM;
+    readonly rendezvousId: string;
+    readonly reward: number;
+    readonly llmAgentTarget: AgentCommunicationPosition;
+    readonly bdiAgentTarget: AgentCommunicationPosition;
+}
+
+/** Confirms that the BDI peer installed one rendezvous assignment. */
+export interface RendezvousAcknowledgementMessage
+    extends BaseAgentCommunicationMessage {
+    readonly type: PEER_MESSAGE_TYPE.RENDEZVOUS_ACKNOWLEDGEMENT;
+    readonly role: AGENT_ROLE.BDI;
+    readonly rendezvousId: string;
+    readonly acknowledgedMessageId: AgentCommunicationMessageId;
+}
+
+/** Reports that one participant is physically at its assigned cell. */
+export interface RendezvousArrivedMessage
+    extends BaseAgentCommunicationMessage {
+    readonly type: PEER_MESSAGE_TYPE.RENDEZVOUS_ARRIVED;
+    readonly role: AGENT_ROLE;
+    readonly rendezvousId: string;
+    readonly position: AgentCommunicationPosition;
+}
+
 /** Every validated message accepted by the peer communication layer. */
 export type AgentCommunicationMessage =
     | PeerHelloMessage
-    | PeerHelloAcknowledgementMessage;
+    | PeerHelloAcknowledgementMessage
+    | RendezvousAssignmentMessage
+    | RendezvousAcknowledgementMessage
+    | RendezvousArrivedMessage;
 
 /** Creates valid, correlated peer-protocol messages. */
 export class AgentCommunicationMessageFactory {
@@ -78,6 +119,62 @@ export class AgentCommunicationMessageFactory {
             type: PEER_MESSAGE_TYPE.HELLO_ACKNOWLEDGEMENT,
             role,
             acknowledgedMessageId,
+        };
+    }
+
+    /** Creates the stable assignment retried until the BDI peer confirms it. */
+    static rendezvousAssignment(
+        rendezvousId: string,
+        reward: number,
+        llmAgentTarget: AgentCommunicationPosition,
+        bdiAgentTarget: AgentCommunicationPosition,
+    ): RendezvousAssignmentMessage {
+        return {
+            ...AgentCommunicationMessageFactory.base(),
+            type: PEER_MESSAGE_TYPE.RENDEZVOUS_ASSIGNMENT,
+            role: AGENT_ROLE.LLM,
+            rendezvousId,
+            reward,
+            llmAgentTarget,
+            bdiAgentTarget,
+        };
+    }
+
+    /** Confirms installation of one exact assignment message. */
+    static rendezvousAcknowledgement(
+        rendezvousId: string,
+        acknowledgedMessageId: AgentCommunicationMessageId,
+    ): RendezvousAcknowledgementMessage {
+        return {
+            ...AgentCommunicationMessageFactory.base(),
+            type: PEER_MESSAGE_TYPE.RENDEZVOUS_ACKNOWLEDGEMENT,
+            role: AGENT_ROLE.BDI,
+            rendezvousId,
+            acknowledgedMessageId,
+        };
+    }
+
+    /** Announces arrival at the sender's assigned rendezvous cell. */
+    static rendezvousArrived(
+        role: AGENT_ROLE,
+        rendezvousId: string,
+        position: AgentCommunicationPosition,
+    ): RendezvousArrivedMessage {
+        return {
+            ...AgentCommunicationMessageFactory.base(),
+            type: PEER_MESSAGE_TYPE.RENDEZVOUS_ARRIVED,
+            role,
+            rendezvousId,
+            position,
+        };
+    }
+
+    private static base(): BaseAgentCommunicationMessage {
+        return {
+            protocol: AGENT_COMMUNICATION_PROTOCOL,
+            protocolVersion: AGENT_COMMUNICATION_PROTOCOL_VERSION,
+            messageId: AgentCommunicationMessageFactory.messageId(),
+            sentAt: Date.now(),
         };
     }
 
@@ -137,6 +234,65 @@ export class AgentCommunicationMessageParser {
                     value["acknowledgedMessageId"] as AgentCommunicationMessageId,
             };
         }
+        if (
+            value["type"] === PEER_MESSAGE_TYPE.RENDEZVOUS_ASSIGNMENT
+            && value["role"] === AGENT_ROLE.LLM
+            && AgentCommunicationMessageParser.isNonEmptyString(
+                value["rendezvousId"],
+            )
+            && AgentCommunicationMessageParser.isPositiveNumber(
+                value["reward"],
+            )
+            && AgentCommunicationMessageParser.isPosition(
+                value["llmAgentTarget"],
+            )
+            && AgentCommunicationMessageParser.isPosition(
+                value["bdiAgentTarget"],
+            )
+        ) {
+            return {
+                ...common,
+                type: PEER_MESSAGE_TYPE.RENDEZVOUS_ASSIGNMENT,
+                role: AGENT_ROLE.LLM,
+                rendezvousId: value["rendezvousId"],
+                reward: value["reward"],
+                llmAgentTarget: value["llmAgentTarget"],
+                bdiAgentTarget: value["bdiAgentTarget"],
+            };
+        }
+        if (
+            value["type"] === PEER_MESSAGE_TYPE.RENDEZVOUS_ACKNOWLEDGEMENT
+            && value["role"] === AGENT_ROLE.BDI
+            && AgentCommunicationMessageParser.isNonEmptyString(
+                value["rendezvousId"],
+            )
+            && AgentCommunicationMessageParser.isNonEmptyString(
+                value["acknowledgedMessageId"],
+            )
+        ) {
+            return {
+                ...common,
+                type: PEER_MESSAGE_TYPE.RENDEZVOUS_ACKNOWLEDGEMENT,
+                role: AGENT_ROLE.BDI,
+                rendezvousId: value["rendezvousId"],
+                acknowledgedMessageId:
+                    value["acknowledgedMessageId"] as AgentCommunicationMessageId,
+            };
+        }
+        if (
+            value["type"] === PEER_MESSAGE_TYPE.RENDEZVOUS_ARRIVED
+            && AgentCommunicationMessageParser.isNonEmptyString(
+                value["rendezvousId"],
+            )
+            && AgentCommunicationMessageParser.isPosition(value["position"])
+        ) {
+            return {
+                ...common,
+                type: PEER_MESSAGE_TYPE.RENDEZVOUS_ARRIVED,
+                rendezvousId: value["rendezvousId"],
+                position: value["position"],
+            };
+        }
         return undefined;
     }
 
@@ -152,6 +308,20 @@ export class AgentCommunicationMessageParser {
         return typeof value === "number"
             && Number.isFinite(value)
             && value >= 0;
+    }
+
+    private static isPositiveNumber(value: unknown): value is number {
+        return typeof value === "number"
+            && Number.isFinite(value)
+            && value > 0;
+    }
+
+    private static isPosition(
+        value: unknown,
+    ): value is AgentCommunicationPosition {
+        return AgentCommunicationMessageParser.isRecord(value)
+            && Number.isInteger(value["x"])
+            && Number.isInteger(value["y"]);
     }
 
     private static isAgentRole(value: unknown): value is AGENT_ROLE {

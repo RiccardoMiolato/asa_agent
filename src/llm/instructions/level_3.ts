@@ -1,25 +1,25 @@
 const TOOLS: Map<string, string> = new Map([
-    ["math_eval", "Evaluate arithmetic expressions and return the result."],
-    ["move_to", "Tells the agent to go to a specific location in the map."],
-    ["drop_at", "Tells the agent to drop parcels in a specific location of the map."],
-    ["answer_trivia", "Given a trivia question, return the answer."],
-    ["get_agent_position", "Returns the current position of the agent in the map."]
+    [
+        "plan_rendezvous",
+        "Selects two distinct safe cells inside a target neighborhood and assigns one to each agent.",
+    ],
 ]);
 
 const TOOLS_FUNCTION_DEFINITION: Map<string, string> = new Map();
 
-TOOLS_FUNCTION_DEFINITION.set("math_eval", `
+TOOLS_FUNCTION_DEFINITION.set("plan_rendezvous", `
 {
-  "params": [espression: string],
-  "returns": number
+  "params": [x: integer, y: integer, maximum_distance: non-negative integer, reward: positive number],
+  "returns": RendezvousMission
 }
 `);
 
 const LEVEL_3_EVALUATION_INSTRUCTION: string = `
-You are a mission coordinator for multi-agent DeliverooJs cooperation.
+You are a mission planner for multi-agent DeliverooJs cooperation.
 
-Given a LEVEL 3 mission (requiring multi-agent coordination), identify the tools
-needed for reliable agent synchronization and communication.
+For the currently supported LEVEL 3 mission, extract the target neighborhood and
+joint reward. The tool executor has access to the map and selects safe positions;
+you must not invent the two assigned cells yourself.
 
 AVAILABLE TOOLS:
 ${Array.from(TOOLS.entries()).map(([name, description]) => `- ${name}: ${description}`).join("\n")}
@@ -28,18 +28,14 @@ TOOL FUNCTIONS DEFINITIONS:
 ${Array.from(TOOLS_FUNCTION_DEFINITION.entries()).map(([name, definition]) => `- ${name}:\n${definition}`).join("\n")}
 
 
-LEVEL 3 MISSION CHARACTERISTICS:
-- Requires coordination between LLM agent (master) and BDI agent (slave)
-- Involves synchronized positioning, role allocation, or handoff sequences
-- May require waiting, blocking, or sequential task execution
-- Success depends on reliable inter-agent communication
-
-GUIDING RULES:
-1. Communication tools must enable reliable message passing between agents
-2. Synchronization tools ensure agents reach target positions/states together
-3. Role allocation tools assign tasks to master or slave based on capability
-4. State tracking tools monitor both agent positions and mission progress
-5. Timeout tools prevent deadlocks from sensing delays or failed moves
+RULES:
+1. Use plan_rendezvous only when both agents must occupy safe cells within a
+   maximum distance of one center and wait for one another.
+2. Pass the center x, center y, maximum Manhattan distance, and total joint reward.
+3. Do not split or duplicate the joint reward between agents.
+4. Do not emit movement or communication tools.
+5. If the mission is not this supported rendezvous form, return {"tools":[]}.
+6. Return exactly one plan_rendezvous call for a supported mission.
 
 OUTPUT FORMAT (valid JSON only):
 {
@@ -50,6 +46,10 @@ OUTPUT FORMAT (valid JSON only):
     }
   ]
 }
+
+EXAMPLE:
+Mission: "Move both agents to the neighborhood of position (8,12) within a maximum distance of 3, and have them wait for each other. You will receive 500pts."
+Output: {"tools":[{"name":"plan_rendezvous","params":[8,12,3,500]}]}
 `;
 
 export { LEVEL_3_EVALUATION_INSTRUCTION };

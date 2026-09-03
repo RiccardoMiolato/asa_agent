@@ -103,6 +103,8 @@ export enum DELIBERATION_CYCLE_REASON {
     OPTION_SEGMENT_COMPLETED = "option-segment-completed",
     PLAN_COMPLETED = "plan-completed",
     TRANSIENT_BLOCKAGE_RETRY = "transient-blockage-retry",
+    RENDEZVOUS_STATE_CHANGED = "rendezvous-state-changed",
+    RENDEZVOUS_COMPLETED = "rendezvous-completed",
 }
 
 /** Complete explanation of evaluator passes and executable-plan validation. */
@@ -480,6 +482,10 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
                 return "The previous plan completed";
             case DELIBERATION_CYCLE_REASON.TRANSIENT_BLOCKAGE_RETRY:
                 return "Retrying after a temporary blockage";
+            case DELIBERATION_CYCLE_REASON.RENDEZVOUS_STATE_CHANGED:
+                return "A rendezvous commitment changed";
+            case DELIBERATION_CYCLE_REASON.RENDEZVOUS_COMPLETED:
+                return "Both rendezvous participants arrived";
         }
     }
 
@@ -545,6 +551,9 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
             case "parcel-score":
                 return `DELIVER parcels worth ${mission.deliverLower ? "≤" : "≥"}`
                     + ` ${mission.threshold}`;
+            case "rendezvous":
+                return `RENDEZVOUS near (${mission.center.x}, `
+                    + `${mission.center.y}) within ${mission.maximumDistance}`;
         }
     }
 
@@ -557,6 +566,9 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
         if (mission.type === "parcel-score") {
             return `zero reward for parcels worth `
                 + `${mission.deliverLower ? ">" : "<"} ${mission.threshold}`;
+        }
+        if (mission.type === "rendezvous") {
+            return this.theme.success(`+${mission.reward} joint points`);
         }
 
         switch (mission.bonusType) {

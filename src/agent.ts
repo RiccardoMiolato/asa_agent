@@ -13,8 +13,14 @@ import {
 } from "./bdi/desires.js";
 import { CommittedDesireIntention, Intention, PickupClusterSnapshot, SearchIntention } from "./bdi/intentions.js";
 import { OPTION_TRAVERSABILITY, OptionEvaluationGraph, OptionEvaluator } from "./bdi/option_evaluator.js";
-import type { Mission, MissionDescription } from "./llm/mission.js";
+import {
+    RENDEZVOUS_PARTICIPANT,
+    RendezvousMission,
+    type Mission,
+    type MissionDescription,
+} from "./llm/mission.js";
 import { MissionHandler } from "./llm/MissionHandler.js";
+import type { BaseRendezvousCoordinator } from "./llm/tools/rendezvous/index.js";
 import { PDDLPlanner } from "./pddl/pddlPlanner.js";
 import {
     type PlanningContext,
@@ -103,6 +109,7 @@ export class Agent {
     private readonly gridPositionWaiters: Set<() => void>;
     private hasAuthoritativePosition: boolean;
     private deliberationCycle: number;
+    private isRendezvousStateChanged: boolean;
 
     private readonly pddlPlanner: PDDLPlanner;
 
@@ -112,6 +119,7 @@ export class Agent {
         private readonly pathfinder: BasePathfinder,
         private readonly actionFactory: ActionFactory,
         private readonly logger: BaseAgentLogger,
+        private readonly rendezvousCoordinator: BaseRendezvousCoordinator,
         useLLM: boolean = false,
         llmMissionHandler: MissionHandler | undefined = undefined,
     ) {
@@ -131,8 +139,12 @@ export class Agent {
         this.gridPositionWaiters = new Set<() => void>();
         this.hasAuthoritativePosition = false;
         this.deliberationCycle = 0;
+        this.isRendezvousStateChanged = false;
         this.pddlPlanner = new PDDLPlanner(this.actionFactory);
         this.optionEvaluator = new OptionEvaluator(desireGenerator);
+        this.rendezvousCoordinator.subscribeStateChanges((): void => {
+            this.isRendezvousStateChanged = true;
+        });
     }
 
     updatePosition(x: number, y: number): void {
@@ -142,6 +154,10 @@ export class Agent {
         if (!this.position.isGridAligned()) {
             return;
         }
+
+        this.rendezvousCoordinator.observePosition(
+            new Position(this.position.x, this.position.y),
+        );
 
         const waiters = [...this.gridPositionWaiters];
         this.gridPositionWaiters.clear();
@@ -227,7 +243,7 @@ export class Agent {
                 );
             }
             deliberateImmediately = false;
-            const cycleReason = nextCycleReason;
+            let cycleReason = nextCycleReason;
             nextCycleReason = DELIBERATION_CYCLE_REASON.PLAN_COMPLETED;
             const cycleBeliefChanges = cycleReason
                 === DELIBERATION_CYCLE_REASON.BELIEFS_CHANGED
@@ -235,6 +251,16 @@ export class Agent {
                 : [];
 
             await this.waitForGridPosition();
+
+            this.rendezvousCoordinator.observePosition(this.position);
+            if (this.rendezvousCoordinator.isWaitingForPeer()) {
+                await this.rendezvousCoordinator.waitForPeer();
+            }
+            if (this.completeCoordinatedMissions()) {
+                cycleReason =
+                    DELIBERATION_CYCLE_REASON.RENDEZVOUS_COMPLETED;
+            }
+            this.isRendezvousStateChanged = false;
 
             if(this.useLLM) {
                 if (this.missionHandler?.isMissionWaiting()){
@@ -244,6 +270,9 @@ export class Agent {
                     );
                     for (const mission of missions) {
                         this.logger.logMissionActivated(mission.describe());
+                        if (mission instanceof RendezvousMission) {
+                            this.proposeRendezvous(mission);
+                        }
                     }
                 }
 
@@ -293,6 +322,14 @@ export class Agent {
             let planInterrupted = false;
             let planMoved = false;
             while (!this.plan.isEmpty()) {
+                const rendezvousInterruption =
+                    await this.handleRendezvousStateChange();
+                if (rendezvousInterruption) {
+                    deliberateImmediately = true;
+                    planInterrupted = true;
+                    nextCycleReason = rendezvousInterruption;
+                    break;
+                }
                 if (
                     this.isBeliefChanged
                 ) {
@@ -316,6 +353,15 @@ export class Agent {
                         ),
                     )
                 );
+
+                const delayedRendezvousInterruption =
+                    await this.handleRendezvousStateChange();
+                if (delayedRendezvousInterruption) {
+                    deliberateImmediately = true;
+                    planInterrupted = true;
+                    nextCycleReason = delayedRendezvousInterruption;
+                    break;
+                }
 
                 if (this.isBeliefChanged) {
                     deliberateImmediately = true;
@@ -821,10 +867,55 @@ export class Agent {
             pathfinder: this.pathfinder,
             actionFactory: this.actionFactory,
             cellScoreEffects:
-                this.missionHandler?.getActiveMoveToEffects() ?? [],
+                [
+                    ...(this.missionHandler?.getActiveMoveToEffects() ?? []),
+                    ...this.rendezvousCoordinator.activeScoreEffects(),
+                ],
             deliveryScoreEffects:
                 this.missionHandler?.getActiveDeliveryScoreEffects() ?? [],
         };
+    }
+
+    private proposeRendezvous(mission: RendezvousMission): void {
+        this.rendezvousCoordinator.propose({
+            rendezvousId: mission.getId(),
+            reward: mission.reward,
+            llmAgentTarget: mission.assignmentFor(
+                RENDEZVOUS_PARTICIPANT.LLM_AGENT,
+            ).target,
+            bdiAgentTarget: mission.assignmentFor(
+                RENDEZVOUS_PARTICIPANT.BDI_AGENT,
+            ).target,
+        });
+    }
+
+    private completeCoordinatedMissions(): boolean {
+        const completedIds =
+            this.rendezvousCoordinator.consumeCompletedRendezvousIds();
+        for (const missionId of completedIds) {
+            this.missionHandler?.completeMission(missionId);
+        }
+        return completedIds.length > 0;
+    }
+
+    private async handleRendezvousStateChange(): Promise<
+        DELIBERATION_CYCLE_REASON | undefined
+    > {
+        if (!this.isRendezvousStateChanged) {
+            return undefined;
+        }
+
+        const wasWaiting = this.rendezvousCoordinator.isWaitingForPeer();
+        this.replacePlan([]);
+        this.selectedDesireSequence = [];
+        if (wasWaiting) {
+            await this.rendezvousCoordinator.waitForPeer();
+        }
+        const completed = this.completeCoordinatedMissions();
+        this.isRendezvousStateChanged = false;
+        return completed || wasWaiting
+            ? DELIBERATION_CYCLE_REASON.RENDEZVOUS_COMPLETED
+            : DELIBERATION_CYCLE_REASON.RENDEZVOUS_STATE_CHANGED;
     }
 
     /** Waits out animated fractional coordinates before discrete path planning. */

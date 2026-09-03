@@ -11,6 +11,7 @@ import {
     PeerHandshakeService,
 } from "../communication/index.js";
 import { MissionHandler } from "../llm/MissionHandler.js";
+import { PeerRendezvousCoordinator } from "../llm/tools/rendezvous/index.js";
 import { ConsoleAgentLogger } from "../utils/_logging.js";
 import { AStarPathfinder } from "../utils/astar.js";
 import { ActionFactory } from "../utils/move.js";
@@ -32,6 +33,18 @@ export class AgentRuntimeFactory {
         const actionFactory = new ActionFactory(socket, beliefs);
         const pathfinder = new AStarPathfinder(actionFactory);
         const usesLLM = config.role === AGENT_ROLE.LLM;
+        const communicationLogger = new ConsoleAgentCommunicationLogger();
+        const communicationChannel =
+            new DeliverooAgentCommunicationChannel(
+                socket,
+                config.peerName,
+                communicationLogger,
+            );
+        const rendezvousCoordinator = new PeerRendezvousCoordinator(
+            communicationChannel,
+            config.role,
+            1_000,
+        );
         const agent = new Agent(
             beliefs,
             new DesireGenerator(),
@@ -40,16 +53,10 @@ export class AgentRuntimeFactory {
             new ConsoleAgentLogger({
                 branchAndBoundSvgEnabled: config.branchAndBoundSvgEnabled,
             }),
+            rendezvousCoordinator,
             usesLLM,
             usesLLM ? new MissionHandler(socket) : undefined,
         );
-        const communicationLogger = new ConsoleAgentCommunicationLogger();
-        const communicationChannel =
-            new DeliverooAgentCommunicationChannel(
-                socket,
-                config.peerName,
-                communicationLogger,
-            );
         const handshakeService = new PeerHandshakeService(
             communicationChannel,
             config.role,
@@ -72,6 +79,7 @@ export class AgentRuntimeFactory {
             beliefs,
             communicationChannel,
             handshakeService,
+            rendezvousCoordinator,
             ghostMapServer,
             new ConsoleAgentRuntimeLogger(),
         );

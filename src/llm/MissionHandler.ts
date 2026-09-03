@@ -18,10 +18,17 @@ import {
     Mission,
     MoveToMission,
     ParcelScoreMission,
+    RendezvousMission,
     StackSizeMission,
     type BonusType,
     type MissionLevel,
 } from "./mission.js";
+import {
+    BaseRendezvousPositionSelector,
+    ReachableRendezvousPositionSelector,
+    RendezvousObjective,
+    type RendezvousPositionSelection,
+} from "./tools/rendezvous/index.js";
 import {
     answer_trivia,
     AvoidCellConstraint,
@@ -103,6 +110,20 @@ interface LevelTwoToolPlanningResult {
     readonly tools: readonly LevelTwoToolCall[];
 }
 
+interface PlanRendezvousToolCall {
+    readonly name: "plan_rendezvous";
+    readonly params: readonly [
+        x: number,
+        y: number,
+        maximumDistance: number,
+        reward: number,
+    ];
+}
+
+interface LevelThreeToolPlanningResult {
+    readonly tools: readonly PlanRendezvousToolCall[];
+}
+
 interface ChatMessage {
     senderId: string,
     senderName: string,
@@ -119,7 +140,13 @@ export class MissionHandler {
     private activeMissions: Mission[];
     private nextMissionId: number;
 
-    constructor(client: GameClient, llmClient?: LLMClient) {
+    constructor(
+        client: GameClient,
+        llmClient?: LLMClient,
+        private readonly rendezvousPositionSelector:
+            BaseRendezvousPositionSelector =
+                new ReachableRendezvousPositionSelector(),
+    ) {
         const LLM_API_URL = process.env.LITELLM_BASE_URL;
         const LLM_API_KEY = process.env.LITELLM_API_KEY;
         const LLM_MODEL = process.env.LOCAL_MODEL;
@@ -159,6 +186,13 @@ export class MissionHandler {
 
     getActiveMission(): readonly Mission[] {
         return this.activeMissions;
+    }
+
+    /** Removes a mission completed by an external coordination service. */
+    completeMission(missionId: string): void {
+        this.activeMissions = this.activeMissions.filter(
+            (mission: Mission): boolean => mission.getId() !== missionId,
+        );
     }
 
     /** Exposes one-shot visit effects and persistent avoid-cell penalties. */
@@ -266,7 +300,7 @@ export class MissionHandler {
         } else if (evaluationResult.level == 2) {
             return this.handleSecondLevelMissions(context, message);
         } else if (evaluationResult.level == 3) {
-            await this.handleThirdLevelMissions(message);
+            return this.handleThirdLevelMissions(context, message);
         }
         return [];
     }
@@ -335,10 +369,43 @@ export class MissionHandler {
         return this.activateLevelTwoConstraints(context, constraints);
     }
 
-    private async handleThirdLevelMissions(message: LLMMessage): Promise<void> {
+    private async handleThirdLevelMissions(
+        context: PlanningContext,
+        message: LLMMessage,
+    ): Promise<readonly Mission[]> {
         console.log("Evaluating level 3 mission...");
-        const evaluationRes: string = await this.sendMessage([message], LEVEL_3_EVALUATION_INSTRUCTION);
+        const evaluationRes = await this.sendMessage(
+            [message],
+            LEVEL_3_EVALUATION_INSTRUCTION,
+        );
+        const plan = this.parseLevelThreePlanningJson(evaluationRes);
+        if (!plan || plan.tools.length !== 1) {
+            return [];
+        }
 
+        const tool = plan.tools[0];
+        if (!tool) {
+            return [];
+        }
+
+        let objective: RendezvousObjective;
+        try {
+            objective = new RendezvousObjective(...tool.params);
+        } catch (error: unknown) {
+            console.error("Invalid level-3 rendezvous objective", error);
+            return [];
+        }
+        const selection = this.rendezvousPositionSelector.select(
+            context,
+            objective,
+        );
+        if (!selection) {
+            return [];
+        }
+
+        const mission = this.createRendezvousMission(objective, selection);
+        this.activeMissions.push(mission);
+        return [mission];
     }
 
     private async ExecuteTools(context: PlanningContext, level: number, toolsChain: ToolPlanningResult, mission: ChatMessage, requires_answer: boolean): Promise<any[]> {
@@ -466,6 +533,55 @@ export class MissionHandler {
         }
     }
 
+    private parseLevelThreePlanningJson(
+        jsonString: string,
+    ): LevelThreeToolPlanningResult | undefined {
+        try {
+            const parsed: unknown = JSON.parse(jsonString);
+            if (!MissionHandler.isRecord(parsed)) {
+                return undefined;
+            }
+            const tools = parsed["tools"];
+            if (!Array.isArray(tools)) {
+                return undefined;
+            }
+
+            const parsedTools: PlanRendezvousToolCall[] = [];
+            for (const tool of tools) {
+                const parsedTool = this.parseLevelThreeToolCall(tool);
+                if (!parsedTool) {
+                    return undefined;
+                }
+                parsedTools.push(parsedTool);
+            }
+            return { tools: parsedTools };
+        } catch (error: unknown) {
+            console.error("Error parsing level-3 tools chain", error);
+            return undefined;
+        }
+    }
+
+    private parseLevelThreeToolCall(
+        value: unknown,
+    ): PlanRendezvousToolCall | undefined {
+        if (!MissionHandler.isRecord(value)) {
+            return undefined;
+        }
+        const params = value["params"];
+        if (
+            value["name"] !== "plan_rendezvous"
+            || !Array.isArray(params)
+            || params.length !== 4
+            || !params.every(MissionHandler.isNumber)
+        ) {
+            return undefined;
+        }
+        return {
+            name: "plan_rendezvous",
+            params: [params[0], params[1], params[2], params[3]],
+        };
+    }
+
     private executeLevelTwoTool(
         tool: LevelTwoToolCall,
     ): BaseLevelTwoConstraint {
@@ -550,6 +666,22 @@ export class MissionHandler {
         if (mission) {
             this.nextMissionId += 1;
         }
+        return mission;
+    }
+
+    private createRendezvousMission(
+        objective: RendezvousObjective,
+        selection: RendezvousPositionSelection,
+    ): RendezvousMission {
+        const mission = new RendezvousMission(
+            `mission-${this.nextMissionId}`,
+            objective.center,
+            objective.maximumDistance,
+            objective.reward,
+            selection.llmAgentTarget,
+            selection.bdiAgentTarget,
+        );
+        this.nextMissionId += 1;
         return mission;
     }
 

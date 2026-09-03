@@ -14,7 +14,11 @@ import { Position } from "../utils/position.js";
 export type MissionId = string;
 export type MissionLevel = 1 | 2 | 3;
 export type CellMissionType = "move-to" | "pick-up" | "drop-at" | "avoid";
-export type MissionType = CellMissionType | "stack-size" | "parcel-score";
+export type MissionType =
+    | CellMissionType
+    | "stack-size"
+    | "parcel-score"
+    | "rendezvous";
 export type BonusType = "reward" | "penalty" | "multiplier";
 
 interface BaseMissionDescription {
@@ -45,11 +49,33 @@ export interface ParcelScoreMissionDescription extends BaseMissionDescription {
     readonly deliverLower: boolean;
 }
 
+/** Stable participants used by a two-agent rendezvous assignment. */
+export enum RENDEZVOUS_PARTICIPANT {
+    LLM_AGENT = "llm-agent",
+    BDI_AGENT = "bdi-agent",
+}
+
+/** One participant's assigned safe cell. */
+export interface RendezvousAssignment {
+    readonly participant: RENDEZVOUS_PARTICIPANT;
+    readonly target: Position;
+}
+
+/** Structured description of a planned, not-yet-negotiated rendezvous. */
+export interface RendezvousMissionDescription extends BaseMissionDescription {
+    readonly type: "rendezvous";
+    readonly center: Position;
+    readonly maximumDistance: number;
+    readonly reward: number;
+    readonly assignments: readonly RendezvousAssignment[];
+}
+
 /** Immutable mission details exposed to logging and read-only observers. */
 export type MissionDescription =
     | CellMissionDescription
     | StackSizeMissionDescription
-    | ParcelScoreMissionDescription;
+    | ParcelScoreMissionDescription
+    | RendezvousMissionDescription;
 
 /** Base contract for every mission retained by the mission handler. */
 export abstract class Mission {
@@ -287,6 +313,62 @@ export class ParcelScoreMission extends Mission {
             type: this.getType(),
             threshold: this.threshold,
             deliverLower: this.deliverLower,
+        };
+    }
+}
+
+/** Joint level-3 objective whose assignments await peer negotiation. */
+export class RendezvousMission extends Mission {
+    private readonly assignments: readonly RendezvousAssignment[];
+
+    constructor(
+        id: MissionId,
+        readonly center: Position,
+        readonly maximumDistance: number,
+        readonly reward: number,
+        llmAgentTarget: Position,
+        bdiAgentTarget: Position,
+    ) {
+        super(id, 3, SCORE_EFFECT_LIFETIME.ONE_SHOT);
+        this.assignments = [
+            {
+                participant: RENDEZVOUS_PARTICIPANT.LLM_AGENT,
+                target: llmAgentTarget,
+            },
+            {
+                participant: RENDEZVOUS_PARTICIPANT.BDI_AGENT,
+                target: bdiAgentTarget,
+            },
+        ];
+    }
+
+    getType(): "rendezvous" {
+        return "rendezvous";
+    }
+
+    assignmentFor(
+        participant: RENDEZVOUS_PARTICIPANT,
+    ): RendezvousAssignment {
+        const assignment = this.assignments.find(
+            (candidate: RendezvousAssignment): boolean =>
+                candidate.participant === participant,
+        );
+        if (!assignment) {
+            throw new Error(`Missing rendezvous assignment for ${participant}`);
+        }
+        return assignment;
+    }
+
+    describe(): RendezvousMissionDescription {
+        return {
+            id: this.getId(),
+            level: this.getLevel(),
+            lifetime: this.getLifetime(),
+            type: this.getType(),
+            center: this.center,
+            maximumDistance: this.maximumDistance,
+            reward: this.reward,
+            assignments: this.assignments,
         };
     }
 }
