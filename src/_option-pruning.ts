@@ -1,4 +1,8 @@
 import { OptimisticPathLengthEstimator } from "./_path-estimation.js";
+import type {
+    DeliveryCandidate,
+    DeliveryScoreEffectId,
+} from "./_delivery-scoring.js";
 import { DESIRE_TYPE } from "./bdi/desires.js";
 import type { PlanningContext } from "./planning.js";
 import { RewardDecayEstimator } from "./utils/_reward-decay.js";
@@ -14,7 +18,9 @@ export interface OptionBranchCandidate {
     readonly realizedDeliveryScore: number;
     readonly realizedCellScore: number;
     readonly remainingPositiveCellScore: number;
-    readonly deliveryCellCandidates: readonly Position[];
+    readonly deliveryCellCandidates: readonly DeliveryCandidate[];
+    readonly remainingDeliveryEffectIds:
+        ReadonlySet<DeliveryScoreEffectId>;
 }
 
 /** Explainable optimistic score assigned to one candidate branch. */
@@ -95,11 +101,11 @@ abstract class BaseRewardBranchBoundEstimator
         candidate: OptionBranchCandidate,
     ): number {
         let bestScore = 0;
-        for (const deliveryCell of candidate.deliveryCellCandidates) {
+        for (const deliveryCandidate of candidate.deliveryCellCandidates) {
             const distance = OptimisticPathLengthEstimator.estimate(
                 context,
                 candidate.positionAfterAction,
-                deliveryCell,
+                deliveryCandidate.cell,
             );
             if (distance === undefined) {
                 continue;
@@ -113,12 +119,17 @@ abstract class BaseRewardBranchBoundEstimator
                     context.movementDuration,
                     context.frameDuration,
                 );
+            const baseDeliveryScore = this.scoreParcelsAt(
+                context,
+                candidate.carriedParcelIdsAfterAction,
+                deliveryElapsedMilliseconds,
+            );
             bestScore = Math.max(
                 bestScore,
-                this.scoreParcelsAt(
-                    context,
-                    candidate.carriedParcelIdsAfterAction,
-                    deliveryElapsedMilliseconds,
+                baseDeliveryScore,
+                deliveryCandidate.adjustedScore(
+                    baseDeliveryScore,
+                    candidate.remainingDeliveryEffectIds,
                 ),
             );
         }
@@ -136,11 +147,26 @@ export class ConservativeRewardBranchBoundEstimator
         context: PlanningContext,
         candidate: OptionBranchCandidate,
     ): number {
-        return this.scoreParcelsAt(
-            context,
-            candidate.remainingParcelIds,
-            candidate.elapsedMillisecondsAfterAction,
-        );
+        let score = 0;
+        for (const parcelId of candidate.remainingParcelIds) {
+            const baseDeliveryScore = this.scoreParcelsAt(
+                context,
+                [parcelId],
+                candidate.elapsedMillisecondsAfterAction,
+            );
+            let bestScore = baseDeliveryScore;
+            for (const deliveryCandidate of candidate.deliveryCellCandidates) {
+                bestScore = Math.max(
+                    bestScore,
+                    deliveryCandidate.adjustedScore(
+                        baseDeliveryScore,
+                        candidate.remainingDeliveryEffectIds,
+                    ),
+                );
+            }
+            score += bestScore;
+        }
+        return score;
     }
 }
 
@@ -174,52 +200,62 @@ export class EarliestDeliveryRewardBranchBoundEstimator
                 continue;
             }
 
-            const deliveryDistance = this.estimateNearestDeliveryDistance(
+            const bestDeliveryScore = this.estimateBestDeliveryScore(
                 context,
-                pickupPosition,
-                candidate.deliveryCellCandidates,
-            );
-            if (deliveryDistance === undefined) {
-                continue;
-            }
-
-            const earliestDeliveryElapsedMilliseconds =
-                candidate.elapsedMillisecondsAfterAction
-                + RewardDecayEstimator.actionSequenceDurationMilliseconds(
-                    pickupDistance + deliveryDistance,
-                    2,
-                    context.movementDuration,
-                    context.frameDuration,
-                );
-            score += RewardDecayEstimator.remainingReward(
                 parcel.reward,
-                earliestDeliveryElapsedMilliseconds,
-                context.rewardDecayInterval,
-                context.millisecondsUntilNextRewardDecay,
+                pickupPosition,
+                pickupDistance,
+                candidate.elapsedMillisecondsAfterAction,
+                candidate.deliveryCellCandidates,
+                candidate.remainingDeliveryEffectIds,
             );
+            score += bestDeliveryScore;
         }
         return score;
     }
 
-    private estimateNearestDeliveryDistance(
+    private estimateBestDeliveryScore(
         context: PlanningContext,
+        parcelReward: number,
         pickupPosition: Position,
-        deliveryCellCandidates: readonly Position[],
-    ): number | undefined {
-        let nearestDistance: number | undefined;
-        for (const deliveryCell of deliveryCellCandidates) {
+        pickupDistance: number,
+        elapsedMilliseconds: number,
+        deliveryCellCandidates: readonly DeliveryCandidate[],
+        activeEffectIds: ReadonlySet<DeliveryScoreEffectId>,
+    ): number {
+        let bestScore = 0;
+        for (const deliveryCandidate of deliveryCellCandidates) {
             const distance = OptimisticPathLengthEstimator.estimate(
                 context,
                 pickupPosition,
-                deliveryCell,
+                deliveryCandidate.cell,
             );
-            if (
-                distance !== undefined
-                && (nearestDistance === undefined || distance < nearestDistance)
-            ) {
-                nearestDistance = distance;
+            if (distance === undefined) {
+                continue;
             }
+
+            const deliveryElapsedMilliseconds = elapsedMilliseconds
+                + RewardDecayEstimator.actionSequenceDurationMilliseconds(
+                    pickupDistance + distance,
+                    2,
+                    context.movementDuration,
+                    context.frameDuration,
+                );
+            const baseDeliveryScore = RewardDecayEstimator.remainingReward(
+                parcelReward,
+                deliveryElapsedMilliseconds,
+                context.rewardDecayInterval,
+                context.millisecondsUntilNextRewardDecay,
+            );
+            bestScore = Math.max(
+                bestScore,
+                baseDeliveryScore,
+                deliveryCandidate.adjustedScore(
+                    baseDeliveryScore,
+                    activeEffectIds,
+                ),
+            );
         }
-        return nearestDistance;
+        return bestScore;
     }
 }

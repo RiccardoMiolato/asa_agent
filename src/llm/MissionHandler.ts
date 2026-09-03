@@ -1,4 +1,9 @@
 import { PlanningContext } from "../planning.js";
+import {
+    AdditiveDeliveryScoreModifier,
+    DeliveryCellEffect,
+    MultiplicativeDeliveryScoreModifier,
+} from "../_delivery-scoring.js";
 import { CellScoreEffect } from "../utils/_cell-score-effects.js";
 import { GameClient } from "../utils/move.js";
 import { Position } from "../utils/position.js";
@@ -88,7 +93,7 @@ export class MissionHandler {
         return this.activeMissions.length > 0;
     }
 
-    getActiveMission(): Mission[] {
+    getActiveMission(): readonly Mission[] {
         return this.activeMissions;
     }
 
@@ -111,9 +116,44 @@ export class MissionHandler {
 
     /** Completes every one-shot move-to mission triggered at a reached cell. */
     completeMoveToMissionsAt(cell: Position): void {
+        this.completeMissionsAt("move-to", cell);
+    }
+
+    /** Exposes drop-at modifiers without coupling BDI planning to LLM types. */
+    getActiveDropAtEffects(): readonly DeliveryCellEffect[] {
+        return this.activeMissions
+            .filter(
+                (mission: Mission): boolean =>
+                    mission.getType() === "drop-at",
+            )
+            .map(
+                (mission: Mission): DeliveryCellEffect =>
+                    new DeliveryCellEffect(
+                        mission.getId(),
+                        mission.getRelatedCell(),
+                        mission.getBonusType() === "multiplier"
+                            ? new MultiplicativeDeliveryScoreModifier(
+                                mission.getBonusValue(),
+                            )
+                            : new AdditiveDeliveryScoreModifier(
+                                mission.getBonusValue(),
+                            ),
+                    ),
+            );
+    }
+
+    /** Completes every one-shot drop-at mission fulfilled at a delivery cell. */
+    completeDropAtMissionsAt(cell: Position): void {
+        this.completeMissionsAt("drop-at", cell);
+    }
+
+    private completeMissionsAt(
+        missionType: MissionType,
+        cell: Position,
+    ): void {
         this.activeMissions = this.activeMissions.filter(
             (mission: Mission): boolean =>
-                mission.getType() !== "move-to"
+                mission.getType() !== missionType
                 || !mission.getRelatedCell().isEqual(cell),
         );
     }

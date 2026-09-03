@@ -1,4 +1,8 @@
 import { BaseOptionBranchBoundEstimator, EarliestDeliveryRewardBranchBoundEstimator, OptionBranchBound } from "../_option-pruning.js";
+import type {
+    DeliveryCandidate,
+    DeliveryScoreEffectId,
+} from "../_delivery-scoring.js";
 import { PlanningContext } from "../planning.js";
 import { RewardDecayEstimator } from "../utils/_reward-decay.js";
 import type {
@@ -63,6 +67,8 @@ export interface OptionEvaluationEdge {
     readonly estimatedArrivalMilliseconds: number | undefined;
     /** Reward realized on this edge; nonzero only when the action is a drop. */
     readonly realizedDeliveryScore: number;
+    /** Portion of the delivery score contributed by drop-at modifiers. */
+    readonly realizedDeliveryMissionScore: number;
     /** One-shot move-to rewards and penalties triggered along this edge. */
     readonly realizedCellScore: number;
     /** Path-aware delivery estimate for parcels associated with this action. */
@@ -111,6 +117,7 @@ interface EvaluatedCandidate {
     readonly distance: number;
     readonly arrivalMilliseconds: number;
     readonly realizedDeliveryScore: number;
+    readonly realizedDeliveryMissionScore: number;
     readonly realizedCellScore: number;
     readonly bound: OptionBranchBound;
     readonly result: EvaluationResult;
@@ -159,6 +166,11 @@ export class OptionEvaluator {
             edges,
             generation.deliveryCellCandidates,
             context.cellScoreEffects,
+            new Set(
+                context.deliveryCellEffects.map(
+                    (effect): DeliveryScoreEffectId => effect.id,
+                ),
+            ),
         );
 
         return {
@@ -186,8 +198,10 @@ export class OptionEvaluator {
         depth: number,
         nodes: OptionEvaluationNode[],
         edges: OptionEvaluationEdge[],
-        deliveryCellCandidates: readonly Position[],
+        deliveryCellCandidates: readonly DeliveryCandidate[],
         remainingCellScoreEffects: readonly CellScoreEffect[],
+        remainingDeliveryEffectIds:
+            ReadonlySet<DeliveryScoreEffectId>,
     ): EvaluationResult {
         let bestResult: EvaluationResult = {
             bestSequence: [],
@@ -221,6 +235,7 @@ export class OptionEvaluator {
                     estimatedDistance: undefined,
                     estimatedArrivalMilliseconds: undefined,
                     realizedDeliveryScore: 0,
+                    realizedDeliveryMissionScore: 0,
                     realizedCellScore: 0,
                     estimatedActionScore: undefined,
                     remainingParcelScore: undefined,
@@ -258,6 +273,10 @@ export class OptionEvaluator {
 
             let newCarriedIds = [...carriedParcelIds];
             let deliveryScoreForThisOption = 0;
+            let deliveryMissionScoreForThisOption = 0;
+            const nextDeliveryEffectIds = new Set(
+                remainingDeliveryEffectIds,
+            );
 
             if (desire instanceof PickUpParcelDesire) {
                 newCarriedIds.push(desire.parcelId);
@@ -267,18 +286,33 @@ export class OptionEvaluator {
                         candidate instanceof DeliverParcelsDesire,
                 );
                 if (!hasDeliveryDesire) {
-                    for (const deliveryCell of deliveryCellCandidates) {
+                    for (const deliveryCandidate of deliveryCellCandidates) {
                         remainingDesires.add(
-                            new DeliverParcelsDesire(deliveryCell),
+                            new DeliverParcelsDesire(deliveryCandidate),
                         );
                     }
                 }
             } else if (desire instanceof DeliverParcelsDesire) {
-                deliveryScoreForThisOption = this.computeDeliveryScore(
+                const baseDeliveryScore = this.computeDeliveryScore(
                     context,
                     carriedParcelIds,
                     newElapsedMilliseconds,
                 );
+                deliveryScoreForThisOption =
+                    desire.deliveryCandidate.adjustedScore(
+                        baseDeliveryScore,
+                        remainingDeliveryEffectIds,
+                    );
+                deliveryMissionScoreForThisOption =
+                    deliveryScoreForThisOption - baseDeliveryScore;
+                for (
+                    const effectId
+                    of desire.deliveryCandidate.triggeredEffectIds(
+                        remainingDeliveryEffectIds,
+                    )
+                ) {
+                    nextDeliveryEffectIds.delete(effectId);
+                }
                 newCarriedIds = [];
                 for (const candidate of remainingDesires) {
                     if (candidate instanceof DeliverParcelsDesire) {
@@ -310,6 +344,7 @@ export class OptionEvaluator {
                     0,
                 ),
                 deliveryCellCandidates,
+                remainingDeliveryEffectIds: nextDeliveryEffectIds,
             });
             if (
                 this.shouldPrune(
@@ -330,6 +365,8 @@ export class OptionEvaluator {
                     estimatedDistance: assessment.distance,
                     estimatedArrivalMilliseconds: newElapsedMilliseconds,
                     realizedDeliveryScore: deliveryScoreForThisOption,
+                    realizedDeliveryMissionScore:
+                        deliveryMissionScoreForThisOption,
                     realizedCellScore: assessment.cellScore,
                     estimatedActionScore: bound.estimatedActionScore,
                     remainingParcelScore: bound.remainingParcelScore,
@@ -352,6 +389,7 @@ export class OptionEvaluator {
                 edges,
                 deliveryCellCandidates,
                 nextCellScoreEffects,
+                nextDeliveryEffectIds,
             );
 
             const totalScore = assessment.cellScore
@@ -370,6 +408,8 @@ export class OptionEvaluator {
                 distance: assessment.distance,
                 arrivalMilliseconds: newElapsedMilliseconds,
                 realizedDeliveryScore: deliveryScoreForThisOption,
+                realizedDeliveryMissionScore:
+                    deliveryMissionScoreForThisOption,
                 realizedCellScore: assessment.cellScore,
                 bound,
                 result: candidateResult,
@@ -394,6 +434,8 @@ export class OptionEvaluator {
                 estimatedDistance: candidate.distance,
                 estimatedArrivalMilliseconds: candidate.arrivalMilliseconds,
                 realizedDeliveryScore: candidate.realizedDeliveryScore,
+                realizedDeliveryMissionScore:
+                    candidate.realizedDeliveryMissionScore,
                 realizedCellScore: candidate.realizedCellScore,
                 estimatedActionScore: candidate.bound.estimatedActionScore,
                 remainingParcelScore: candidate.bound.remainingParcelScore,

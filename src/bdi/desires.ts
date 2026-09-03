@@ -1,5 +1,10 @@
 import { OptimisticPathLengthEstimator } from "../_path-estimation.js";
 import {
+    DeliveryCandidate,
+    DeliveryCandidateFactory,
+    type DeliveryCellEffect,
+} from "../_delivery-scoring.js";
+import {
     PlanningObjective,
     type PlanningContext,
     type PlanningObjectiveDescription,
@@ -57,6 +62,10 @@ export class DeliverParcelsDesire extends Desire {
     readonly type = DESIRE_TYPE.DELIVER;
     readonly parcelId = undefined;
 
+    constructor(readonly deliveryCandidate: DeliveryCandidate) {
+        super(deliveryCandidate.cell);
+    }
+
     identity(): string {
         return `drop:${this.targetCell.x},${this.targetCell.y}`;
     }
@@ -100,7 +109,7 @@ export class VisitCellDesire extends Desire {
 export interface DesireGeneration {
     readonly rootDesires: ReadonlySet<Desire>;
     readonly carriedParcelIds: readonly string[];
-    readonly deliveryCellCandidates: readonly Position[];
+    readonly deliveryCellCandidates: readonly DeliveryCandidate[];
 }
 
 /** Derives possible goals from beliefs while limiting delivery-cell fan-out. */
@@ -111,7 +120,10 @@ export class DesireGenerator {
     ): DesireGeneration {
         const rootDesires = new Set<Desire>();
         const carriedParcelIds: string[] = [];
-        const deliveryCellCandidates = this.selectDeliveryCellCandidates(context);
+        const deliveryCellCandidates = this.selectDeliveryCellCandidates(
+            context,
+            excludedRootDesireIdentities,
+        );
 
         for (const effect of context.cellScoreEffects) {
             if (effect.score <= 0) {
@@ -144,13 +156,10 @@ export class DesireGenerator {
         }
 
         if (carriedParcelIds.length > 0) {
-            for (const deliveryCell of this.selectDeliveryCellCandidates(
-                context,
-                excludedRootDesireIdentities,
-            )) {
+            for (const deliveryCandidate of deliveryCellCandidates) {
                 this.addRootDesire(
                     rootDesires,
-                    new DeliverParcelsDesire(deliveryCell),
+                    new DeliverParcelsDesire(deliveryCandidate),
                     excludedRootDesireIdentities,
                 );
             }
@@ -181,7 +190,7 @@ export class DesireGenerator {
     private selectDeliveryCellCandidates(
         context: PlanningContext,
         excludedRootDesireIdentities?: ReadonlySet<string>,
-    ): readonly Position[] {
+    ): readonly DeliveryCandidate[] {
         const distancesFromPresent = new Map<Position, number>();
         for (const deliveryCell of context.deliveringCells) {
             if (
@@ -205,12 +214,15 @@ export class DesireGenerator {
         const nearestDeliveryCell = this.minimumDistanceCell(
             distancesFromPresent,
         );
-        if (nearestDeliveryCell === undefined) {
-            return [];
-        }
 
-        const candidates = new Map<string, Position>();
-        this.addDeliveryCellCandidate(candidates, nearestDeliveryCell);
+        const candidates = new Map<string, DeliveryCandidate>();
+        if (nearestDeliveryCell !== undefined) {
+            this.addDeliveryCellCandidate(
+                candidates,
+                nearestDeliveryCell,
+                context.deliveryCellEffects,
+            );
+        }
 
         for (const parcel of context.parcels.values()) {
             if (parcel.carriedBy) {
@@ -239,8 +251,31 @@ export class DesireGenerator {
             }
 
             if (bestDeliveryCell !== undefined) {
-                this.addDeliveryCellCandidate(candidates, bestDeliveryCell);
+                this.addDeliveryCellCandidate(
+                    candidates,
+                    bestDeliveryCell,
+                    context.deliveryCellEffects,
+                );
             }
+        }
+
+        for (const effect of context.deliveryCellEffects) {
+            if (
+                excludedRootDesireIdentities?.has(
+                    `drop:${effect.cell.x},${effect.cell.y}`,
+                )
+                || !context.deliveringCells.some(
+                    (deliveryCell: Position): boolean =>
+                        deliveryCell.isEqual(effect.cell),
+                )
+            ) {
+                continue;
+            }
+            this.addDeliveryCellCandidate(
+                candidates,
+                effect.cell,
+                context.deliveryCellEffects,
+            );
         }
 
         return [...candidates.values()];
@@ -273,12 +308,13 @@ export class DesireGenerator {
     }
 
     private addDeliveryCellCandidate(
-        candidates: Map<string, Position>,
+        candidates: Map<string, DeliveryCandidate>,
         deliveryCell: Position,
+        effects: readonly DeliveryCellEffect[],
     ): void {
         candidates.set(
             `${deliveryCell.x},${deliveryCell.y}`,
-            deliveryCell,
+            DeliveryCandidateFactory.make(deliveryCell, effects),
         );
     }
 }

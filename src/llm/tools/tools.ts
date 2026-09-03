@@ -48,10 +48,12 @@ interface MoveToResponse {
 }
 
 function drop_at(context: PlanningContext, x: number, y: number, bonus: number): MoveToResponse {
-    const gameMap: GameMap = context.gameMap;
     const mapPos = new Position(x, y);
 
-    if (!gameMap.isValidCell(mapPos)){
+    const isDeliveryCell = context.deliveringCells.some(
+        (deliveryCell: Position): boolean => deliveryCell.isEqual(mapPos),
+    );
+    if (!isDeliveryCell){
         return {
             isValid: false,
             targetPos: mapPos,
@@ -111,4 +113,3 @@ export {
     math_eval,
     move_to, MoveToResponse, parcel_constraint, stack_constraint
 };
-

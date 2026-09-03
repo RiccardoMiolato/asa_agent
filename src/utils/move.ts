@@ -129,6 +129,8 @@ export class PickUp extends Action {
 }
 
 export class Drop extends Action {
+    private deliveredParcelCount: number = 0;
+
     constructor(
         private readonly client: GameClient,
         private readonly beliefs: Beliefs,
@@ -138,6 +140,7 @@ export class Drop extends Action {
     }
 
     async execute(): Promise<boolean> {
+        this.deliveredParcelCount = 0;
         const expectedParcelIds = this.beliefs.carriedParcelIds(this.agentId);
         if (expectedParcelIds.length === 0) {
             return true;
@@ -154,7 +157,13 @@ export class Drop extends Action {
             this.agentId,
             new Set<string>(expectedParcelIds),
         );
+        this.deliveredParcelCount = expectedParcelIds.length;
         return true;
+    }
+
+    /** Whether this action completed a non-empty delivery. */
+    deliveredParcels(): boolean {
+        return this.deliveredParcelCount > 0;
     }
 }
 

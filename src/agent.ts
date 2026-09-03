@@ -34,6 +34,7 @@ import { GameMap } from "./utils/map.js";
 import {
     Action,
     type ActionFactory,
+    Drop,
     MovementAction,
     PickUp,
 } from "./utils/move.js";
@@ -335,6 +336,14 @@ export class Agent {
                     planMoved = true;
                     this.missionHandler?.completeMoveToMissionsAt(
                         movementDestination,
+                    );
+                }
+                if (
+                    nextAction instanceof Drop
+                    && nextAction.deliveredParcels()
+                ) {
+                    this.missionHandler?.completeDropAtMissionsAt(
+                        this.position,
                     );
                 }
 
@@ -777,6 +786,8 @@ export class Agent {
             actionFactory: this.actionFactory,
             cellScoreEffects:
                 this.missionHandler?.getActiveMoveToEffects() ?? [],
+            deliveryCellEffects:
+                this.missionHandler?.getActiveDropAtEffects() ?? [],
         };
     }
 

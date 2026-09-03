@@ -344,7 +344,7 @@ export class BranchAndBoundSvgRenderer {
     }
 
     private edgeTooltip(edge: OptionEvaluationEdge): string {
-        return `${edge.optionIdentity}; traversability=${edge.traversability}; decision=${edge.decision}; distance=${edge.estimatedDistance ?? "n/a"}; arrival=${edge.estimatedArrivalMilliseconds ?? "n/a"}ms; realized-delivery-score=${edge.realizedDeliveryScore}; realized-cell-score=${edge.realizedCellScore}; estimated-action-score=${edge.estimatedActionScore ?? "n/a"}; remaining-parcel-score=${edge.remainingParcelScore ?? "n/a"}; upper-bound=${edge.branchUpperBound ?? "n/a"}; branch-score=${edge.branchScore ?? "n/a"}`;
+        return `${edge.optionIdentity}; traversability=${edge.traversability}; decision=${edge.decision}; distance=${edge.estimatedDistance ?? "n/a"}; arrival=${edge.estimatedArrivalMilliseconds ?? "n/a"}ms; realized-delivery-score=${edge.realizedDeliveryScore}; realized-drop-mission-score=${edge.realizedDeliveryMissionScore}; realized-cell-score=${edge.realizedCellScore}; estimated-action-score=${edge.estimatedActionScore ?? "n/a"}; remaining-parcel-score=${edge.remainingParcelScore ?? "n/a"}; upper-bound=${edge.branchUpperBound ?? "n/a"}; branch-score=${edge.branchScore ?? "n/a"}`;
     }
 
     private carriedLabel(node: OptionEvaluationNode): string {
