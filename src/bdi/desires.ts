@@ -1,8 +1,11 @@
 import { OptimisticPathLengthEstimator } from "../_path-estimation.js";
 import {
     DELIVERY_CANDIDATE_SELECTION_REASON,
+    DELIVERY_PARCEL_REWARD_ELIGIBILITY,
+    DELIVERY_SCORE_MODIFIER_IMPACT,
     DeliveryCandidate,
     DeliveryCandidateFactory,
+    DeliveryCellEffect,
     type BaseDeliveryScoreEffect,
 } from "../_delivery-scoring.js";
 import {
@@ -223,6 +226,31 @@ export class DesireGenerator {
             }
         }
 
+        // A one-shot drop mission can target an ordinary walkable (white)
+        // cell. Add positive mission targets to the candidate pool even when
+        // they are not regular map delivery cells.
+        for (const effect of context.deliveryScoreEffects) {
+            if (
+                !(effect instanceof DeliveryCellEffect)
+                || effect.modifier.impact()
+                    !== DELIVERY_SCORE_MODIFIER_IMPACT.BONUS
+                || !context.gameMap.isValidCell(effect.cell)
+                || excludedRootDesireIdentities?.has(
+                    `drop:${effect.cell.x},${effect.cell.y}`,
+                )
+            ) {
+                continue;
+            }
+            const distance = this.pathLengthAllowingCrateMoves(
+                context,
+                context.agentPosition,
+                effect.cell,
+            );
+            if (distance !== undefined) {
+                distancesFromPresent.set(effect.cell, distance);
+            }
+        }
+
         const selectedCells = new Map<string, Position>();
         const nearestDeliveryCell = this.minimumDistanceCell(
             distancesFromPresent,
@@ -264,9 +292,9 @@ export class DesireGenerator {
 
         const candidates = new Map<string, DeliveryCandidate>();
         for (const selectedCell of selectedCells.values()) {
-            const selectedCandidate = DeliveryCandidateFactory.make(
+            const selectedCandidate = this.makeDeliveryCandidate(
+                context,
                 selectedCell,
-                context.deliveryScoreEffects,
             );
             if (!selectedCandidate.hasUnopposedCellPenalty()) {
                 this.addDeliveryCandidate(candidates, selectedCandidate);
@@ -292,9 +320,9 @@ export class DesireGenerator {
         }
 
         for (const deliveryCell of distancesFromPresent.keys()) {
-            const candidate = DeliveryCandidateFactory.make(
+            const candidate = this.makeDeliveryCandidate(
+                context,
                 deliveryCell,
-                context.deliveryScoreEffects,
                 DELIVERY_CANDIDATE_SELECTION_REASON.BONUS,
             );
             if (candidate.hasCellBonus()) {
@@ -346,12 +374,13 @@ export class DesireGenerator {
                 continue;
             }
 
-            const candidate = DeliveryCandidateFactory.make(
+            const candidate = this.makeDeliveryCandidate(
+                context,
                 deliveryCell,
-                effects,
                 originallySelectedCells.has(this.deliveryCellKey(deliveryCell))
                     ? DELIVERY_CANDIDATE_SELECTION_REASON.ORIGINAL
                     : DELIVERY_CANDIDATE_SELECTION_REASON.PENALTY_REPLACEMENT,
+                effects,
             );
             if (candidate.hasUnopposedCellPenalty()) {
                 continue;
@@ -378,6 +407,27 @@ export class DesireGenerator {
         deliveryCell: Position,
     ): void {
         cells.set(this.deliveryCellKey(deliveryCell), deliveryCell);
+    }
+
+    private makeDeliveryCandidate(
+        context: PlanningContext,
+        cell: Position,
+        selectionReason: DELIVERY_CANDIDATE_SELECTION_REASON =
+            DELIVERY_CANDIDATE_SELECTION_REASON.ORIGINAL,
+        effects: readonly BaseDeliveryScoreEffect[] =
+            context.deliveryScoreEffects,
+    ): DeliveryCandidate {
+        const isRegularDeliveryCell = context.deliveringCells.some(
+            (deliveryCell: Position): boolean => deliveryCell.isEqual(cell),
+        );
+        return DeliveryCandidateFactory.make(
+            cell,
+            effects,
+            selectionReason,
+            isRegularDeliveryCell
+                ? DELIVERY_PARCEL_REWARD_ELIGIBILITY.ELIGIBLE
+                : DELIVERY_PARCEL_REWARD_ELIGIBILITY.MISSION_ONLY,
+        );
     }
 
     private addDeliveryCandidate(

@@ -3,7 +3,8 @@ const TOOLS: Map<string, string> = new Map([
     ["move_to", "Tells the agent to go to a specific location in the map."],
     ["drop_at", "Tells the agent to drop parcels in a specific location of the map."],
     ["answer_trivia", "Given a trivia question, return the answer."],
-    ["get_agent_position", "Returns the current position of the agent in the map."]
+    ["get_agent_position", "Returns the current position of the agent in the map."],
+    ["get_extreme_tile", "Translates leftmost, rightmost, downmost, or topmost into the coordinates of a walkable map tile."]
 ]);
 
 const TOOLS_FUNCTION_DEFINITION: Map<string, string> = new Map();
@@ -40,6 +41,13 @@ TOOLS_FUNCTION_DEFINITION.set("get_agent_position", `
 {
   "params": [],
   "returns": Position
+}
+`);
+
+TOOLS_FUNCTION_DEFINITION.set("get_extreme_tile", `
+{
+  "params": [extreme: "leftmost" | "rightmost" | "downmost" | "topmost"],
+  "returns": { "x": number, "y": number }
 }
 `);
 
@@ -91,17 +99,19 @@ RULES:
 3. A tool may depend on the result of an earlier tool.
 4. To reference the result of a previous tool, use:
    {"$ref": <zero_based_tool_index>}
-5. A tool result reference may only refer to an earlier tool.
-6. Never invent tool names, parameters, coordinates, or results.
-7. Do not execute calculations mentally when 'math_eval' is required.
-8. If no tool is required, return:
+5. To reference one property of a previous tool result, use:
+   {"$ref": <zero_based_tool_index>, "property": "<property_name>"}
+6. A tool result reference may only refer to an earlier tool.
+7. Never invent tool names, parameters, coordinates, or results.
+8. Do not execute calculations mentally when 'math_eval' is required.
+9. If no tool is required, return:
    {"tools":[]}
-9. If the mission cannot be completed with the available tools, return:
+10. If the mission cannot be completed with the available tools, return:
    {"tools":[]}
-10. Include all tool calls required by the mission, even when they are
+11. Include all tool calls required by the mission, even when they are
 independent of one another. Preserve the logical order implied by the mission.
-11. Do not include any additional text, explanations, or comments in the output.
-12. All mathematical function, not related to different variables, must be evaluated as a single formula
+12. Do not include any additional text, explanations, or comments in the output.
+13. All mathematical function, not related to different variables, must be evaluated as a single formula
 
 EXAMPLES:
 mission: "Calculate 5*5"
@@ -220,6 +230,86 @@ output: {
         -15
       ],
       "bonus": { "type": "points", "value": -15 }
+    }
+  ]
+}
+
+mission: "Drop a package in the leftmost tile to get 5pt"
+output: {
+  "tools": [
+    { "name": "get_extreme_tile", "params": ["leftmost"] },
+    {
+      "name": "drop_at",
+      "params": [
+        {"$ref": 0, "property": "x"},
+        {"$ref": 0, "property": "y"},
+        5
+      ],
+      "bonus": { "type": "points", "value": 5 }
+    }
+  ]
+}
+
+mission: "Drop a package in the leftmost tile to get -10pt"
+output: {
+  "tools": [
+    { "name": "get_extreme_tile", "params": ["leftmost"] },
+    {
+      "name": "drop_at",
+      "params": [
+        {"$ref": 0, "property": "x"},
+        {"$ref": 0, "property": "y"},
+        -10
+      ],
+      "bonus": { "type": "points", "value": -10 }
+    }
+  ]
+}
+
+mission: "Drop a package in the rightmost tile to get 8pt"
+output: {
+  "tools": [
+    { "name": "get_extreme_tile", "params": ["rightmost"] },
+    {
+      "name": "drop_at",
+      "params": [
+        {"$ref": 0, "property": "x"},
+        {"$ref": 0, "property": "y"},
+        8
+      ],
+      "bonus": { "type": "points", "value": 8 }
+    }
+  ]
+}
+
+mission: "Drop a package in the down most tile to get 3pt"
+output: {
+  "tools": [
+    { "name": "get_extreme_tile", "params": ["downmost"] },
+    {
+      "name": "drop_at",
+      "params": [
+        {"$ref": 0, "property": "x"},
+        {"$ref": 0, "property": "y"},
+        3
+      ],
+      "bonus": { "type": "points", "value": 3 }
+    }
+  ]
+}
+
+mission: "Drop a package in the top most tile to get 6pt"
+output: {
+  "tools": [
+    { "name": "get_extreme_tile", "params": ["topmost"] },
+    {
+      "name": "drop_at",
+      "params": [
+        {"$ref": 0, "property": "x"},
+        {"$ref": 0, "property": "y"},
+        6
+      ],
+      "bonus": { "type": "points", "value": 6 }
     }
   ]
 }

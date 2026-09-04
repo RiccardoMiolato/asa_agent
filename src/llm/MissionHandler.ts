@@ -40,6 +40,7 @@ import {
     delivery_constraint,
     drop_at,
     get_agent_position,
+    get_extreme_tile,
     math_eval,
     move_to,
     type MoveToResponse,
@@ -187,6 +188,7 @@ export class MissionHandler {
             ["move_to", move_to],
             ["drop_at", drop_at],
             ["get_agent_position", get_agent_position],
+            ["get_extreme_tile", get_extreme_tile],
             ["answer_trivia", answer_trivia],
         ]);
 
@@ -424,7 +426,17 @@ export class MissionHandler {
                 // Resolve $ref to previous results
                 const resolvedParams = tool.params.map((param: any) => {
                     if (param && param.$ref !== undefined) {
-                        return results[param.$ref];
+                        const referencedResult: unknown = results[param.$ref];
+                        if (param.property === undefined) {
+                            return referencedResult;
+                        }
+                        if (
+                            typeof param.property === "string"
+                            && MissionHandler.isRecord(referencedResult)
+                        ) {
+                            return referencedResult[param.property];
+                        }
+                        return undefined;
                     }
                     return param;
                 });

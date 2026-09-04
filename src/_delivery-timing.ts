@@ -46,10 +46,8 @@ export class DeliveryTimingOptimizer {
                         millisecondsUntilNextRewardDecay,
                     ),
             );
-            const baseDeliveryScore = parcelScores.reduce(
-                (score: number, parcelScore: number): number =>
-                    score + parcelScore,
-                0,
+            const baseDeliveryScore = deliveryCandidate.baseDeliveryScore(
+                parcelScores,
             );
             const adjustedDeliveryScore = deliveryCandidate.adjustedScore(
                 baseDeliveryScore,
@@ -123,4 +121,3 @@ export class DeliveryTimingOptimizer {
         );
     }
 }
-

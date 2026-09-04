@@ -140,14 +140,11 @@ abstract class BaseRewardBranchBoundEstimator
                 candidate.carriedParcelIdsAfterAction,
                 deliveryElapsedMilliseconds,
             );
-            const baseDeliveryScore = parcelScores.reduce(
-                (score: number, parcelScore: number): number =>
-                    score + parcelScore,
-                0,
+            const baseDeliveryScore = deliveryCandidate.baseDeliveryScore(
+                parcelScores,
             );
             bestScore = Math.max(
                 bestScore,
-                baseDeliveryScore,
                 deliveryCandidate.optimisticScore(
                     baseDeliveryScore,
                     parcelScores,
@@ -176,9 +173,11 @@ export class ConservativeRewardBranchBoundEstimator
                 [parcelId],
                 candidate.elapsedMillisecondsAfterAction,
             );
-            const baseDeliveryScore = parcelScores[0] ?? 0;
-            let bestScore = baseDeliveryScore;
+            let bestScore = 0;
             for (const deliveryCandidate of candidate.deliveryCellCandidates) {
+                const baseDeliveryScore = deliveryCandidate.baseDeliveryScore(
+                    parcelScores,
+                );
                 bestScore = Math.max(
                     bestScore,
                     deliveryCandidate.optimisticScore(
@@ -265,18 +264,20 @@ export class EarliestDeliveryRewardBranchBoundEstimator
                     context.movementDuration,
                     context.frameDuration,
                 );
-            const baseDeliveryScore = RewardDecayEstimator.remainingReward(
+            const parcelScore = RewardDecayEstimator.remainingReward(
                 parcelReward,
                 deliveryElapsedMilliseconds,
                 context.rewardDecayInterval,
                 context.millisecondsUntilNextRewardDecay,
             );
+            const baseDeliveryScore = deliveryCandidate.baseDeliveryScore(
+                [parcelScore],
+            );
             bestScore = Math.max(
                 bestScore,
-                baseDeliveryScore,
                 deliveryCandidate.optimisticScore(
                     baseDeliveryScore,
-                    [baseDeliveryScore],
+                    [parcelScore],
                     activeEffectIds,
                 ),
             );

@@ -41,6 +41,47 @@ function get_agent_position(context: PlanningContext): Position {
     return context.agentPosition;
 }
 
+type MapExtreme = "leftmost" | "rightmost" | "downmost" | "topmost";
+
+/** Resolves a relative map extreme to one concrete walkable coordinate. */
+function get_extreme_tile(
+    context: PlanningContext,
+    extreme: MapExtreme,
+): Position | undefined {
+    const gameMap = context.gameMap;
+    let selectedTile: Position | undefined;
+    for (let x = 0; x < gameMap.getRows(); x += 1) {
+        for (let y = 0; y < gameMap.getCols(); y += 1) {
+            const candidate = new Position(x, y);
+            if (!gameMap.isValidCell(candidate)) {
+                continue;
+            }
+            if (
+                selectedTile === undefined
+                || getExtremeCoordinate(candidate, extreme)
+                    > getExtremeCoordinate(selectedTile, extreme)
+            ) {
+                selectedTile = candidate;
+            }
+        }
+    }
+    return selectedTile;
+}
+
+/** Maps every named extreme onto a consistently maximized coordinate. */
+function getExtremeCoordinate(position: Position, extreme: MapExtreme): number {
+    switch (extreme) {
+        case "leftmost":
+            return -position.x;
+        case "rightmost":
+            return position.x;
+        case "downmost":
+            return -position.y;
+        case "topmost":
+            return position.y;
+    }
+}
+
 interface MoveToResponse {
     isValid: boolean,
     targetPos: Position,
@@ -48,12 +89,12 @@ interface MoveToResponse {
 }
 
 function drop_at(context: PlanningContext, x: number, y: number, bonus: number): MoveToResponse {
+    const gameMap: GameMap = context.gameMap;
     const mapPos = new Position(x, y);
 
-    const isDeliveryCell = context.deliveringCells.some(
-        (deliveryCell: Position): boolean => deliveryCell.isEqual(mapPos),
-    );
-    if (!isDeliveryCell){
+    // Mission parcels may be put down on any walkable tile, including white
+    // cells; they are not restricted to the map's regular delivery cells.
+    if (!gameMap.isValidCell(mapPos)){
         return {
             isValid: false,
             targetPos: mapPos,
@@ -195,7 +236,7 @@ function avoid_cell(
 export {
     answer_trivia, AvoidCellConstraint, avoid_cell,
     BaseLevelTwoConstraint, DeliveryConstraint, delivery_constraint, drop_at,
-    get_agent_position,
+    get_agent_position, get_extreme_tile,
     math_eval, move_to, MoveToResponse, ParcelConstraint, parcel_constraint,
-    StackConstraint, stack_constraint
+    StackConstraint, stack_constraint, type MapExtreme,
 };

@@ -31,6 +31,12 @@ export enum DELIVERY_CANDIDATE_SELECTION_REASON {
     BONUS = "bonus",
 }
 
+/** Whether putting parcels down at a candidate realizes their parcel scores. */
+export enum DELIVERY_PARCEL_REWARD_ELIGIBILITY {
+    ELIGIBLE = "eligible",
+    MISSION_ONLY = "mission-only",
+}
+
 /** Contract for score transformations attached to delivery missions. */
 export abstract class BaseDeliveryScoreModifier {
     abstract readonly priority: DELIVERY_SCORE_MODIFIER_PRIORITY;
@@ -241,19 +247,39 @@ export class DeliveryCandidate {
         readonly selectionReason:
             DELIVERY_CANDIDATE_SELECTION_REASON =
                 DELIVERY_CANDIDATE_SELECTION_REASON.ORIGINAL,
+        readonly parcelRewardEligibility:
+            DELIVERY_PARCEL_REWARD_ELIGIBILITY =
+                DELIVERY_PARCEL_REWARD_ELIGIBILITY.ELIGIBLE,
     ) { }
+
+    /** Parcel score realized by dropping at this candidate before modifiers. */
+    baseDeliveryScore(parcelScores: readonly number[]): number {
+        return this.rewardedParcelScores(parcelScores).reduce(
+            (score: number, parcelScore: number): number =>
+                score + parcelScore,
+            0,
+        );
+    }
 
     adjustedScore(
         baseDeliveryScore: number,
         parcelScores: readonly number[],
         activeEffectIds: ReadonlySet<DeliveryScoreEffectId>,
     ): number {
+        const rewardedParcelScores = this.rewardedParcelScores(parcelScores);
+        const eligibleBaseDeliveryScore = this.parcelRewardEligibility
+            === DELIVERY_PARCEL_REWARD_ELIGIBILITY.ELIGIBLE
+            ? baseDeliveryScore
+            : 0;
         return this.effects.reduce(
             (score: number, effect: BaseDeliveryScoreEffect): number =>
                 activeEffectIds.has(effect.id)
-                    ? effect.modifier.apply(score, { parcelScores })
+                    ? effect.modifier.apply(
+                        score,
+                        { parcelScores: rewardedParcelScores },
+                    )
                     : score,
-            baseDeliveryScore,
+            eligibleBaseDeliveryScore,
         );
     }
 
@@ -262,15 +288,20 @@ export class DeliveryCandidate {
         parcelScores: readonly number[],
         activeEffectIds: ReadonlySet<DeliveryScoreEffectId>,
     ): number {
+        const rewardedParcelScores = this.rewardedParcelScores(parcelScores);
+        const eligibleBaseDeliveryScore = this.parcelRewardEligibility
+            === DELIVERY_PARCEL_REWARD_ELIGIBILITY.ELIGIBLE
+            ? baseDeliveryScore
+            : 0;
         return this.effects.reduce(
             (score: number, effect: BaseDeliveryScoreEffect): number =>
                 activeEffectIds.has(effect.id)
                     ? effect.modifier.optimisticApply(
                         score,
-                        { parcelScores },
+                        { parcelScores: rewardedParcelScores },
                     )
                     : score,
-            baseDeliveryScore,
+            eligibleBaseDeliveryScore,
         );
     }
 
@@ -342,6 +373,15 @@ export class DeliveryCandidate {
                     === DELIVERY_SCORE_MODIFIER_IMPACT.BONUS,
         );
     }
+
+    private rewardedParcelScores(
+        parcelScores: readonly number[],
+    ): readonly number[] {
+        return this.parcelRewardEligibility
+            === DELIVERY_PARCEL_REWARD_ELIGIBILITY.ELIGIBLE
+            ? parcelScores
+            : [];
+    }
 }
 
 /** Builds deduplicated delivery options from map cells and mission effects. */
@@ -351,6 +391,8 @@ export class DeliveryCandidateFactory {
         effects: readonly BaseDeliveryScoreEffect[],
         selectionReason: DELIVERY_CANDIDATE_SELECTION_REASON =
             DELIVERY_CANDIDATE_SELECTION_REASON.ORIGINAL,
+        parcelRewardEligibility: DELIVERY_PARCEL_REWARD_ELIGIBILITY =
+            DELIVERY_PARCEL_REWARD_ELIGIBILITY.ELIGIBLE,
     ): DeliveryCandidate {
         return new DeliveryCandidate(
             cell,
@@ -364,6 +406,7 @@ export class DeliveryCandidateFactory {
                 ): number => first.modifier.priority - second.modifier.priority,
             ),
             selectionReason,
+            parcelRewardEligibility,
         );
     }
 }
