@@ -15,6 +15,7 @@ import { CommittedDesireIntention, Intention, PickupClusterSnapshot, SearchInten
 import { OPTION_TRAVERSABILITY, OptionEvaluationGraph, OptionEvaluator } from "./bdi/option_evaluator.js";
 import {
     GridFormationMission,
+    ParcelHandoffMission,
     RENDEZVOUS_PARTICIPANT,
     RendezvousMission,
     type Mission,
@@ -22,6 +23,10 @@ import {
 } from "./llm/mission.js";
 import { MissionHandler } from "./llm/MissionHandler.js";
 import type { BaseRendezvousCoordinator } from "./llm/tools/rendezvous/index.js";
+import {
+    type BaseParcelHandoffCoordinator,
+    ParcelHandoffIntention,
+} from "./llm/tools/handoff/index.js";
 import { PDDLPlanner } from "./pddl/pddlPlanner.js";
 import {
     type PlanningContext,
@@ -113,6 +118,7 @@ export class Agent {
     private hasAuthoritativePosition: boolean;
     private deliberationCycle: number;
     private isRendezvousStateChanged: boolean;
+    private isHandoffStateChanged: boolean;
 
     private readonly pddlPlanner: PDDLPlanner;
 
@@ -123,6 +129,8 @@ export class Agent {
         private readonly actionFactory: ActionFactory,
         private readonly logger: BaseAgentLogger,
         private readonly rendezvousCoordinator: BaseRendezvousCoordinator,
+        private readonly parcelHandoffCoordinator:
+            BaseParcelHandoffCoordinator,
         useLLM: boolean = false,
         llmMissionHandler: MissionHandler | undefined = undefined,
     ) {
@@ -143,10 +151,14 @@ export class Agent {
         this.hasAuthoritativePosition = false;
         this.deliberationCycle = 0;
         this.isRendezvousStateChanged = false;
+        this.isHandoffStateChanged = false;
         this.pddlPlanner = new PDDLPlanner(this.actionFactory);
         this.optionEvaluator = new OptionEvaluator(desireGenerator);
         this.rendezvousCoordinator.subscribeStateChanges((): void => {
             this.isRendezvousStateChanged = true;
+        });
+        this.parcelHandoffCoordinator.subscribeStateChanges((): void => {
+            this.isHandoffStateChanged = true;
         });
     }
 
@@ -159,6 +171,9 @@ export class Agent {
         }
 
         this.rendezvousCoordinator.observePosition(
+            new Position(this.position.x, this.position.y),
+        );
+        this.parcelHandoffCoordinator.observePosition(
             new Position(this.position.x, this.position.y),
         );
 
@@ -260,9 +275,12 @@ export class Agent {
             if (this.rendezvousCoordinator.isWaitingForPeer()) {
                 await this.rendezvousCoordinator.waitForPeer();
             }
-            if (this.completeCoordinatedMissions()) {
+            if (this.completeRendezvousMissions()) {
                 cycleReason =
                     DELIBERATION_CYCLE_REASON.RENDEZVOUS_COMPLETED;
+            }
+            if (this.completeHandoffMissions()) {
+                cycleReason = DELIBERATION_CYCLE_REASON.HANDOFF_COMPLETED;
             }
             this.isRendezvousStateChanged = false;
 
@@ -278,6 +296,11 @@ export class Agent {
                             this.proposeRendezvous(mission);
                         } else if (mission instanceof GridFormationMission) {
                             this.considerGridFormation(mission);
+                        } else if (mission instanceof ParcelHandoffMission) {
+                            this.parcelHandoffCoordinator.activate(
+                                mission.getId(),
+                                mission.reward,
+                            );
                         }
                     }
                 }
@@ -291,26 +314,31 @@ export class Agent {
             this.beliefs.updateParcelRewards();
             this.pathfinder.clearPathLengthCache();
             const context = this.getPlanningContext();
+            this.parcelHandoffCoordinator.refresh(context);
+            this.isHandoffStateChanged = false;
 
-            const initialOptionEvaluation =
-                this.optionEvaluator.evaluateWithGraph(context);
-            this.selectedDesireSequence = initialOptionEvaluation.bestSequence;
-            const optionSearchTrace: OptionSearchTrace = {
-                evaluationPasses: [initialOptionEvaluation.graph],
-                planningAttempts: [],
-            };
-
-            const planStatus = await this.buildPlanWithTrace(
-                context,
-                optionSearchTrace,
-            );
-            this.logOptionSearch(
-                context,
-                optionSearchTrace,
-                planStatus,
-                cycleReason,
-                cycleBeliefChanges,
-            );
+            let planStatus = await this.buildParcelHandoffPlan(context);
+            if (planStatus === undefined) {
+                const initialOptionEvaluation =
+                    this.optionEvaluator.evaluateWithGraph(context);
+                this.selectedDesireSequence =
+                    initialOptionEvaluation.bestSequence;
+                const optionSearchTrace: OptionSearchTrace = {
+                    evaluationPasses: [initialOptionEvaluation.graph],
+                    planningAttempts: [],
+                };
+                planStatus = await this.buildPlanWithTrace(
+                    context,
+                    optionSearchTrace,
+                );
+                this.logOptionSearch(
+                    context,
+                    optionSearchTrace,
+                    planStatus,
+                    cycleReason,
+                    cycleBeliefChanges,
+                );
+            }
 
             if (
                 planStatus === PLAN_BUILD_STATUS.COORDINATION_REQUESTED
@@ -338,6 +366,13 @@ export class Agent {
             let planInterrupted = false;
             let planMoved = false;
             while (!this.plan.isEmpty()) {
+                const handoffInterruption = this.handleHandoffStateChange();
+                if (handoffInterruption) {
+                    deliberateImmediately = true;
+                    planInterrupted = true;
+                    nextCycleReason = handoffInterruption;
+                    break;
+                }
                 const rendezvousInterruption =
                     await this.handleRendezvousStateChange();
                 if (rendezvousInterruption) {
@@ -376,6 +411,14 @@ export class Agent {
                     deliberateImmediately = true;
                     planInterrupted = true;
                     nextCycleReason = delayedRendezvousInterruption;
+                    break;
+                }
+                const delayedHandoffInterruption =
+                    this.handleHandoffStateChange();
+                if (delayedHandoffInterruption) {
+                    deliberateImmediately = true;
+                    planInterrupted = true;
+                    nextCycleReason = delayedHandoffInterruption;
                     break;
                 }
 
@@ -470,6 +513,11 @@ export class Agent {
         context: PlanningContext,
         optionSearchTrace?: OptionSearchTrace,
     ): Promise<PLAN_BUILD_STATUS> {
+        const handoffStatus = await this.buildParcelHandoffPlan(context);
+        if (handoffStatus !== undefined) {
+            this.selectedDesireSequence = [];
+            return handoffStatus;
+        }
         const rejectedRootOptionIdentities = new Set<string>();
 
         while (this.selectedDesireSequence.length > 0) {
@@ -536,6 +584,77 @@ export class Agent {
         return this.resolveTemporaryBlockageStatus(
             await this.buildSearchPlan(context),
         );
+    }
+
+    /** Builds one committed handoff segment before ordinary option search. */
+    private async buildParcelHandoffPlan(
+        context: PlanningContext,
+    ): Promise<PLAN_BUILD_STATUS | undefined> {
+        const instruction = this.parcelHandoffCoordinator.instruction(context);
+        if (!instruction) {
+            return undefined;
+        }
+        const intention = new ParcelHandoffIntention(instruction);
+        this.currentIntention = intention;
+
+        if (instruction.type === "wait") {
+            this.replacePlan([], intention);
+            return PLAN_BUILD_STATUS.SATISFIED;
+        }
+
+        const navigationContext = instruction.type === "pick-up"
+            || instruction.type === "stage"
+            ? {
+                ...context,
+                gameMap: this.gameMapWithAdditionalWall(
+                    context.gameMap,
+                    instruction.blockedCell,
+                ),
+            }
+            : context;
+        const navigation = await this.buildNavigationActions(
+            instruction.target,
+            navigationContext,
+        );
+        if (!navigation) {
+            this.replacePlan([], intention);
+            return PLAN_BUILD_STATUS.TRANSIENTLY_BLOCKED;
+        }
+
+        let actions: Action[];
+        switch (instruction.type) {
+            case "pick-up":
+            case "collect":
+                actions = [
+                    ...navigation.actions,
+                    context.actionFactory.pickUp(
+                        instruction.parcelId,
+                        context.agentId,
+                    ),
+                ];
+                break;
+            case "stage":
+                actions = navigation.actions;
+                break;
+            case "release":
+                actions = [
+                    context.actionFactory.putDownForHandoff(
+                        instruction.parcelId,
+                        context.agentId,
+                        instruction.handoffCell,
+                    ),
+                    ...navigation.actions,
+                ];
+                break;
+            case "deliver":
+                actions = [
+                    ...navigation.actions,
+                    context.actionFactory.drop(context.agentId),
+                ];
+                break;
+        }
+        this.replacePlan(actions, intention);
+        return PLAN_BUILD_STATUS.PLANNED;
     }
 
     /** Emits the evaluator graph together with real A-star/PDDL validation outcomes. */
@@ -834,6 +953,12 @@ export class Agent {
     private completePlan(): void {
         const completedPlanOwner = this.planOwner;
         this.planOwner = undefined;
+        if (completedPlanOwner instanceof ParcelHandoffIntention) {
+            this.parcelHandoffCoordinator.completeInstruction(
+                completedPlanOwner.instruction,
+                this.getPlanningContext(),
+            );
+        }
         completedPlanOwner?.onPlanCompleted();
     }
 
@@ -912,6 +1037,9 @@ export class Agent {
             pickupCellLastObservedAt: this.beliefs.pickupCellObservationTimes(),
             deliveringCells: this.beliefs.delivering_cells,
             parcels: this.beliefs.parcels,
+            pickupExcludedParcelIds:
+                this.parcelHandoffCoordinator.reservedParcelIds(),
+            sensedAgents: this.beliefs.agents,
             movementDuration: this.beliefs.movement_duration,
             frameDuration: this.beliefs.frame_duration,
             observationDistance: this.beliefs.observation_distance,
@@ -954,13 +1082,37 @@ export class Agent {
         });
     }
 
-    private completeCoordinatedMissions(): boolean {
-        const completedIds =
-            this.rendezvousCoordinator.consumeCompletedRendezvousIds();
+    private completeRendezvousMissions(): boolean {
+        return this.completeMissionIds(
+            this.rendezvousCoordinator.consumeCompletedRendezvousIds(),
+        );
+    }
+
+    private completeHandoffMissions(): boolean {
+        return this.completeMissionIds(
+            this.parcelHandoffCoordinator.consumeCompletedHandoffIds(),
+        );
+    }
+
+    private completeMissionIds(completedIds: readonly string[]): boolean {
         for (const missionId of completedIds) {
             this.missionHandler?.completeMission(missionId);
         }
         return completedIds.length > 0;
+    }
+
+    private handleHandoffStateChange():
+        DELIBERATION_CYCLE_REASON | undefined {
+        if (!this.isHandoffStateChanged) {
+            return undefined;
+        }
+        this.replacePlan([]);
+        this.selectedDesireSequence = [];
+        const completed = this.completeHandoffMissions();
+        this.isHandoffStateChanged = false;
+        return completed
+            ? DELIBERATION_CYCLE_REASON.HANDOFF_COMPLETED
+            : DELIBERATION_CYCLE_REASON.HANDOFF_STATE_CHANGED;
     }
 
     private async handleRendezvousStateChange(): Promise<
@@ -976,7 +1128,7 @@ export class Agent {
         if (wasWaiting) {
             await this.rendezvousCoordinator.waitForPeer();
         }
-        const completed = this.completeCoordinatedMissions();
+        const completed = this.completeRendezvousMissions();
         this.isRendezvousStateChanged = false;
         return completed || wasWaiting
             ? DELIBERATION_CYCLE_REASON.RENDEZVOUS_COMPLETED
@@ -1059,6 +1211,21 @@ export class Agent {
         }
 
         // Return a new GameMap with the modified data
+        return new GameMap(mapCopy);
+    }
+
+    /** Copies a planning map while reserving one coordination cell as a wall. */
+    private gameMapWithAdditionalWall(
+        gameMap: GameMap,
+        blockedPosition: Position,
+    ): GameMap {
+        const mapCopy = gameMap.getTiles().map(
+            (row: string[]): string[] => [...row],
+        );
+        if (!gameMap.isValidCoordinates(blockedPosition)) {
+            return gameMap;
+        }
+        mapCopy[blockedPosition.x]![blockedPosition.y] = "0";
         return new GameMap(mapCopy);
     }
 

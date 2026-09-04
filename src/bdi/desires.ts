@@ -152,6 +152,9 @@ export class DesireGenerator {
         }
 
         for (const parcel of context.parcels.values()) {
+            if (context.pickupExcludedParcelIds.has(parcel.id)) {
+                continue;
+            }
             if (parcel.carriedBy === context.agentId) {
                 carriedParcelIds.push(parcel.id);
                 continue;

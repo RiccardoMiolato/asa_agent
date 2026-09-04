@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="356" viewBox="0 0 1280 356">
+  <title>Branch-and-bound cycle 12, pass 1</title>
+  <defs>
+    <marker id="arrow-gray" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#64748b"/></marker>
+    <marker id="arrow-green" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#16a34a"/></marker>
+    <marker id="arrow-blue" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#2563eb"/></marker>
+    <marker id="arrow-purple" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#7c3aed"/></marker>
+    <marker id="arrow-amber" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#d97706"/></marker>
+    <marker id="arrow-red" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#dc2626"/></marker>
+    <style>
+      text { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; fill: #172033; }
+      .title { font: 700 22px system-ui, sans-serif; }
+      .summary { font: 14px system-ui, sans-serif; fill: #475569; }
+      .node-title { font-weight: 700; font-size: 13px; }
+      .node-detail { font-size: 11px; fill: #475569; }
+      .legend { font: 12px system-ui, sans-serif; fill: #334155; }
+      .mission-halo { fill: none; stroke: #f59e0b; stroke-width: 5; }
+      .mission-badge { fill: #f59e0b; stroke: #92400e; stroke-width: 1; }
+      .mission-badge-text { fill: #451a03; font: 700 11px system-ui, sans-serif; }
+      .replacement-halo { fill: none; stroke: #0891b2; stroke-width: 4; stroke-dasharray: 9 4; }
+      .replacement-badge { fill: #cffafe; stroke: #0891b2; stroke-width: 1; }
+      .replacement-badge-text { fill: #164e63; font: 700 11px system-ui, sans-serif; }
+    </style>
+  </defs>
+  <rect width="100%" height="100%" fill="#f8fafc"/>
+  <text x="48" y="38" class="title">Branch-and-bound cycle 12, pass 1</text>
+  <text x="48" y="64" class="summary">agent=c5c56c · nodes=1 · edges=0 · best score=0.000 · completion=0ms</text>
+  <text x="48" y="86" class="summary">excluded roots: none</text>
+  <line x1="48" y1="116" x2="78" y2="116" stroke="#16a34a" stroke-width="4"/><text x="86" y="120" class="legend">final selected path</text>
+  <line x1="240" y1="116" x2="270" y2="116" stroke="#2563eb" stroke-width="2"/><text x="278" y="120" class="legend">local best in alternative subtree</text>
+  <line x1="520" y1="116" x2="550" y2="116" stroke="#d97706" stroke-width="2" stroke-dasharray="7 5"/><text x="558" y="120" class="legend">crate-relaxed; requires PDDL</text>
+  <line x1="790" y1="116" x2="820" y2="116" stroke="#7c3aed" stroke-width="2" stroke-dasharray="4 4"/><text x="828" y="120" class="legend">pruned by bound</text>
+  <line x1="980" y1="116" x2="1010" y2="116" stroke="#dc2626" stroke-width="2" stroke-dasharray="7 5"/><text x="1018" y="120" class="legend">unreachable</text>
+  <rect x="48" y="136" width="24" height="16" rx="5" fill="none" stroke="#f59e0b" stroke-width="4"/><text x="82" y="149" class="legend">mission cell or realized mission effect</text>
+  <rect x="400" y="136" width="24" height="16" rx="5" fill="none" stroke="#0891b2" stroke-width="4" stroke-dasharray="9 4"/><text x="434" y="149" class="legend">penalty-replacement delivery cell</text>
+  <g>
+    <title>Evaluator root state</title>
+    <rect x="48" y="176" width="300" height="104" rx="10" fill="#ffffff" stroke="#334155" stroke-width="2"/>
+    <text x="62" y="200" class="node-title">ROOT · state (14, 14)</text>
+    <text x="62" y="220" class="node-detail">elapsed 0ms · carried none</text>
+    <text x="62" y="240" class="node-detail">best next: STOP</text>
+  </g>
+</svg>

@@ -386,6 +386,13 @@ function missionLabel(mission) {
     if (mission.type === "parcel-score") {
         return `${mission.deliverLower ? "≤" : "≥"}${formatMissionNumber(mission.threshold)}`;
     }
+    if (
+        mission.type === "rendezvous"
+        || mission.type === "grid-formation"
+        || mission.type === "parcel-handoff"
+    ) {
+        return `+${formatMissionNumber(mission.reward)}`;
+    }
     if (mission.bonusType === "multiplier") {
         return `${formatMissionNumber(mission.bonusValue)}×`;
     }
@@ -395,6 +402,13 @@ function missionLabel(mission) {
 function missionBadgeClass(mission) {
     if (mission.type === "stack-size" || mission.type === "parcel-score") {
         return "mission-rule";
+    }
+    if (
+        mission.type === "rendezvous"
+        || mission.type === "grid-formation"
+        || mission.type === "parcel-handoff"
+    ) {
+        return "mission-reward";
     }
     if (mission.bonusType === "multiplier") {
         return "mission-multiplier";
@@ -410,6 +424,9 @@ function missionTitle(mission) {
     }
     if (mission.type === "parcel-score") {
         return `Delivery mission: reward parcels worth ${mission.deliverLower ? "at most" : "at least"} ${formatMissionNumber(mission.threshold)}`;
+    }
+    if (mission.type === "parcel-handoff") {
+        return `Parcel handoff mission: +${formatMissionNumber(mission.reward)} joint points`;
     }
     const objective = {
         "move-to": "Visit mission",

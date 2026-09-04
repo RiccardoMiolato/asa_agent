@@ -477,6 +477,32 @@ export class Beliefs {
         return this.parcels.get(parcelId)?.carriedBy === agentId;
     }
 
+    /** Records a deliberate non-delivery putdown at a handoff cell. */
+    markParcelDropped(
+        parcelId: string,
+        agentId: string,
+        position: Position,
+    ): void {
+        const parcel = this.parcels.get(parcelId);
+        const ownership = this.localPickupOwnership.get(parcelId);
+        if (
+            parcel?.carriedBy !== agentId
+            && ownership?.agentId !== agentId
+        ) {
+            return;
+        }
+
+        if (parcel) {
+            parcel.x = position.x;
+            parcel.y = position.y;
+            parcel.carriedBy = undefined;
+            parcel.lastUpdate = new Date();
+        }
+        this.localPickupOwnership.delete(parcelId);
+        this.pendingPickupAttempts.delete(parcelId);
+        this.locallyDeliveredParcelIds.delete(parcelId);
+    }
+
     /** Returns this agent's local ownership confidence for one parcel. */
     parcelPickupConfidence(
         parcelId: string,

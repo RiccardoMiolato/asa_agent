@@ -61,6 +61,8 @@ export enum DELIBERATION_CYCLE_REASON {
     TRANSIENT_BLOCKAGE_RETRY = "transient-blockage-retry",
     RENDEZVOUS_STATE_CHANGED = "rendezvous-state-changed",
     RENDEZVOUS_COMPLETED = "rendezvous-completed",
+    HANDOFF_STATE_CHANGED = "handoff-state-changed",
+    HANDOFF_COMPLETED = "handoff-completed",
 }
 
 /** Complete explanation of evaluator passes and executable-plan validation. */
@@ -450,6 +452,10 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
                 return "A rendezvous commitment changed";
             case DELIBERATION_CYCLE_REASON.RENDEZVOUS_COMPLETED:
                 return "Both rendezvous participants arrived";
+            case DELIBERATION_CYCLE_REASON.HANDOFF_STATE_CHANGED:
+                return "A parcel handoff commitment changed";
+            case DELIBERATION_CYCLE_REASON.HANDOFF_COMPLETED:
+                return "The peer delivered the transferred parcel";
         }
     }
 
@@ -499,6 +505,14 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
                     ? `EXPLORE pickup cells toward `
                         + `(${objective.target.x}, ${objective.target.y})`
                     : "EXPLORE pickup cells";
+            case "parcel-handoff":
+                return `HANDOFF ${objective.phase.toUpperCase()}`
+                    + (objective.parcelId
+                        ? ` parcel ${objective.parcelId}`
+                        : "")
+                    + (objective.target
+                        ? ` at (${objective.target.x}, ${objective.target.y})`
+                        : "");
         }
     }
 
@@ -522,6 +536,8 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
                     + `${mission.center.y}) within ${mission.maximumDistance}`;
             case "grid-formation":
                 return "FORMATION at each agent's closest matching cell";
+            case "parcel-handoff":
+                return "TRANSFER one parcel between agents before delivery";
         }
     }
 
@@ -538,6 +554,7 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
         if (
             mission.type === "rendezvous"
             || mission.type === "grid-formation"
+            || mission.type === "parcel-handoff"
         ) {
             return this.theme.violet(`+${mission.reward} joint points`);
         }

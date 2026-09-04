@@ -23,7 +23,8 @@ export type MissionType =
     | "stack-size"
     | "parcel-score"
     | "rendezvous"
-    | "grid-formation";
+    | "grid-formation"
+    | "parcel-handoff";
 export type BonusType = "reward" | "penalty" | "multiplier";
 
 interface BaseMissionDescription {
@@ -88,13 +89,20 @@ export interface GridFormationMissionDescription extends BaseMissionDescription 
     readonly objectives: readonly GridFormationObjectiveDescription[];
 }
 
+/** One-shot reward for pickup and delivery by different team agents. */
+export interface ParcelHandoffMissionDescription extends BaseMissionDescription {
+    readonly type: "parcel-handoff";
+    readonly reward: number;
+}
+
 /** Immutable mission details exposed to logging and read-only observers. */
 export type MissionDescription =
     | CellMissionDescription
     | StackSizeMissionDescription
     | ParcelScoreMissionDescription
     | RendezvousMissionDescription
-    | GridFormationMissionDescription;
+    | GridFormationMissionDescription
+    | ParcelHandoffMissionDescription;
 
 /** Base contract for every mission retained by the mission handler. */
 export abstract class Mission {
@@ -424,6 +432,30 @@ export class GridFormationMission extends Mission {
                     objective: this.bdiAgentObjective.describe(),
                 },
             ],
+        };
+    }
+}
+
+/** Joint level-3 objective completed by transferring one parcel between peers. */
+export class ParcelHandoffMission extends Mission {
+    constructor(id: MissionId, readonly reward: number) {
+        super(id, 3, SCORE_EFFECT_LIFETIME.ONE_SHOT);
+        if (!Number.isFinite(reward) || reward <= 0) {
+            throw new RangeError("Parcel handoff reward must be positive");
+        }
+    }
+
+    getType(): "parcel-handoff" {
+        return "parcel-handoff";
+    }
+
+    describe(): ParcelHandoffMissionDescription {
+        return {
+            id: this.getId(),
+            level: this.getLevel(),
+            lifetime: this.getLifetime(),
+            type: this.getType(),
+            reward: this.reward,
         };
     }
 }

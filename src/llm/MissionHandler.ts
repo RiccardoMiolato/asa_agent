@@ -19,6 +19,7 @@ import {
     Mission,
     MoveToMission,
     ParcelScoreMission,
+    ParcelHandoffMission,
     RendezvousMission,
     StackSizeMission,
     type BonusType,
@@ -132,9 +133,15 @@ interface PlanGridFormationToolCall {
     ];
 }
 
+interface PlanParcelHandoffToolCall {
+    readonly name: "plan_parcel_handoff";
+    readonly params: readonly [reward: number];
+}
+
 type LevelThreeToolCall =
     | PlanRendezvousToolCall
-    | PlanGridFormationToolCall;
+    | PlanGridFormationToolCall
+    | PlanParcelHandoffToolCall;
 
 interface LevelThreeToolPlanningResult {
     readonly tools: readonly LevelThreeToolCall[];
@@ -407,7 +414,9 @@ export class MissionHandler {
 
         const mission = tool.name === "plan_rendezvous"
             ? this.planRendezvous(context, tool)
-            : this.planGridFormation(tool);
+            : tool.name === "plan_grid_formation"
+                ? this.planGridFormation(tool)
+                : this.planParcelHandoff(tool);
         if (!mission) {
             return [];
         }
@@ -600,6 +609,12 @@ export class MissionHandler {
                 }
                 : undefined;
         }
+        if (name === "plan_parcel_handoff") {
+            return params.length === 1
+                && MissionHandler.isNumber(params[0])
+                ? { name, params: [params[0]] }
+                : undefined;
+        }
         if (name !== "plan_grid_formation" || params.length !== 3) {
             return undefined;
         }
@@ -750,6 +765,21 @@ export class MissionHandler {
             reward,
             llmAgentObjective,
             bdiAgentObjective,
+        );
+        this.nextMissionId += 1;
+        return mission;
+    }
+
+    private planParcelHandoff(
+        tool: PlanParcelHandoffToolCall,
+    ): ParcelHandoffMission | undefined {
+        const [reward] = tool.params;
+        if (reward <= 0) {
+            return undefined;
+        }
+        const mission = new ParcelHandoffMission(
+            `mission-${this.nextMissionId}`,
+            reward,
         );
         this.nextMissionId += 1;
         return mission;

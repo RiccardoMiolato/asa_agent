@@ -190,6 +190,21 @@ mission-control message acts as the green light: the LLM peer sends a
 correlated `grid-formation-release`, waits for its acknowledgement, and only
 then wakes both planners.
 
+Level-3 parcel handoffs are handled by a separate coordination state machine,
+not by the single-agent branch-and-bound search. The LLM peer requests and
+freezes the BDI peer's position, then selects a free parcel whose estimated
+complete transfer-and-delivery route leaves a positive reward after two decay
+ticks of safety margin. The parcel cell is the handoff cell and must have two
+distinct usable neighbours: a BDI staging cell and an LLM escape cell. Both
+agents reserve routes that do not cross the other's occupied cell. The BDI
+peer sends `parcel-handoff-ready` from the staging cell; the LLM peer drops
+only after both receiving that commitment and directly sensing the BDI peer
+there. It then puts down the selected parcel, vacates through the escape cell,
+and announces availability. The BDI peer enters, collects the same parcel,
+and delivers it at the selected delivery cell. While this protocol is active,
+its committed segment takes precedence over ordinary deliberation and the
+picker excludes the transferred parcel from future pickup options.
+
 For guaranteed listener registration before any server event, disable auto-connect, install the listeners, and connect explicitly:
 
 ```ts

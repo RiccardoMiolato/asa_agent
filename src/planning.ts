@@ -1,4 +1,5 @@
 import type { Parcel } from "./bdi/beliefs.js";
+import type { IOSensedAgent } from "../types/IOSensing.js";
 import type { BaseDeliveryScoreEffect } from "./_delivery-scoring.js";
 import type { CellScoreEffect } from "./utils/_cell-score-effects.js";
 import type { BasePathfinder } from "./utils/astar.js";
@@ -15,6 +16,10 @@ export interface PlanningContext {
     readonly pickupCellLastObservedAt: ReadonlyMap<string, number>;
     readonly deliveringCells: readonly Position[];
     readonly parcels: ReadonlyMap<string, Parcel>;
+    /** Parcels reserved by coordination and unavailable to ordinary pickup. */
+    readonly pickupExcludedParcelIds: ReadonlySet<string>;
+    /** Other agents present in the latest authoritative sensing snapshot. */
+    readonly sensedAgents: ReadonlyMap<string, IOSensedAgent>;
     readonly movementDuration: number;
     readonly frameDuration: number;
     readonly observationDistance: number;
@@ -50,6 +55,18 @@ export type PlanningObjectiveDescription =
         readonly missionId: string;
         readonly score: number;
         readonly target: Position;
+    }
+    | {
+        readonly type: "parcel-handoff";
+        readonly phase:
+            | "wait"
+            | "pick-up"
+            | "stage"
+            | "release"
+            | "collect"
+            | "deliver";
+        readonly parcelId: string | undefined;
+        readonly target: Position | undefined;
     };
 
 /** Common observable contract for evaluator options and exploration intentions. */

@@ -26,6 +26,15 @@ export enum PEER_MESSAGE_TYPE {
     RENDEZVOUS_ARRIVED = "rendezvous-arrived",
     RENDEZVOUS_ARRIVAL_ACKNOWLEDGEMENT =
         "rendezvous-arrival-acknowledgement",
+    PARCEL_HANDOFF_REQUEST = "parcel-handoff-request",
+    PARCEL_HANDOFF_STATUS = "parcel-handoff-status",
+    PARCEL_HANDOFF_ASSIGNMENT = "parcel-handoff-assignment",
+    PARCEL_HANDOFF_READY = "parcel-handoff-ready",
+    PARCEL_HANDOFF_READY_ACKNOWLEDGEMENT =
+        "parcel-handoff-ready-acknowledgement",
+    PARCEL_HANDOFF_AVAILABLE = "parcel-handoff-available",
+    PARCEL_HANDOFF_COLLECTED = "parcel-handoff-collected",
+    PARCEL_HANDOFF_DELIVERED = "parcel-handoff-delivered",
 }
 
 declare const AGENT_COMMUNICATION_MESSAGE_ID: unique symbol;
@@ -146,6 +155,87 @@ export interface RendezvousArrivalAcknowledgementMessage
     readonly acknowledgedMessageId: AgentCommunicationMessageId;
 }
 
+/** Requests the BDI peer's position before selecting a handoff parcel. */
+export interface ParcelHandoffRequestMessage
+    extends BaseAgentCommunicationMessage {
+    readonly type: PEER_MESSAGE_TYPE.PARCEL_HANDOFF_REQUEST;
+    readonly role: AGENT_ROLE.LLM;
+    readonly handoffId: string;
+    readonly reward: number;
+}
+
+/** Freezes and reports the BDI peer's position for candidate selection. */
+export interface ParcelHandoffStatusMessage
+    extends BaseAgentCommunicationMessage {
+    readonly type: PEER_MESSAGE_TYPE.PARCEL_HANDOFF_STATUS;
+    readonly role: AGENT_ROLE.BDI;
+    readonly handoffId: string;
+    readonly acknowledgedMessageId: AgentCommunicationMessageId;
+    readonly position: AgentCommunicationPosition;
+}
+
+/** Assigns one parcel and the complete transfer geometry to both peers. */
+export interface ParcelHandoffAssignmentMessage
+    extends BaseAgentCommunicationMessage {
+    readonly type: PEER_MESSAGE_TYPE.PARCEL_HANDOFF_ASSIGNMENT;
+    readonly role: AGENT_ROLE.LLM;
+    readonly handoffId: string;
+    readonly reward: number;
+    readonly parcelId: string;
+    readonly handoffCell: AgentCommunicationPosition;
+    readonly stagingCell: AgentCommunicationPosition;
+    readonly escapeCell: AgentCommunicationPosition;
+    readonly deliveryCell: AgentCommunicationPosition;
+}
+
+/** Declares that the BDI peer is stationary on the assigned staging cell. */
+export interface ParcelHandoffReadyMessage
+    extends BaseAgentCommunicationMessage {
+    readonly type: PEER_MESSAGE_TYPE.PARCEL_HANDOFF_READY;
+    readonly role: AGENT_ROLE.BDI;
+    readonly handoffId: string;
+    readonly parcelId: string;
+    readonly position: AgentCommunicationPosition;
+}
+
+/** Confirms that the picker verified the waiting receiver. */
+export interface ParcelHandoffReadyAcknowledgementMessage
+    extends BaseAgentCommunicationMessage {
+    readonly type: PEER_MESSAGE_TYPE.PARCEL_HANDOFF_READY_ACKNOWLEDGEMENT;
+    readonly role: AGENT_ROLE.LLM;
+    readonly handoffId: string;
+    readonly parcelId: string;
+    readonly acknowledgedMessageId: AgentCommunicationMessageId;
+}
+
+/** Announces that the picker dropped the parcel and vacated its cell. */
+export interface ParcelHandoffAvailableMessage
+    extends BaseAgentCommunicationMessage {
+    readonly type: PEER_MESSAGE_TYPE.PARCEL_HANDOFF_AVAILABLE;
+    readonly role: AGENT_ROLE.LLM;
+    readonly handoffId: string;
+    readonly parcelId: string;
+    readonly handoffCell: AgentCommunicationPosition;
+}
+
+/** Confirms that the receiver collected the assigned parcel. */
+export interface ParcelHandoffCollectedMessage
+    extends BaseAgentCommunicationMessage {
+    readonly type: PEER_MESSAGE_TYPE.PARCEL_HANDOFF_COLLECTED;
+    readonly role: AGENT_ROLE.BDI;
+    readonly handoffId: string;
+    readonly parcelId: string;
+}
+
+/** Confirms delivery by the agent that did not initially collect the parcel. */
+export interface ParcelHandoffDeliveredMessage
+    extends BaseAgentCommunicationMessage {
+    readonly type: PEER_MESSAGE_TYPE.PARCEL_HANDOFF_DELIVERED;
+    readonly role: AGENT_ROLE.BDI;
+    readonly handoffId: string;
+    readonly parcelId: string;
+}
+
 /** Every validated message accepted by the peer communication layer. */
 export type AgentCommunicationMessage =
     | PeerHelloMessage
@@ -157,7 +247,15 @@ export type AgentCommunicationMessage =
     | GridFormationReleaseMessage
     | GridFormationReleaseAcknowledgementMessage
     | RendezvousArrivedMessage
-    | RendezvousArrivalAcknowledgementMessage;
+    | RendezvousArrivalAcknowledgementMessage
+    | ParcelHandoffRequestMessage
+    | ParcelHandoffStatusMessage
+    | ParcelHandoffAssignmentMessage
+    | ParcelHandoffReadyMessage
+    | ParcelHandoffReadyAcknowledgementMessage
+    | ParcelHandoffAvailableMessage
+    | ParcelHandoffCollectedMessage
+    | ParcelHandoffDeliveredMessage;
 
 /** Creates valid, correlated peer-protocol messages. */
 export class AgentCommunicationMessageFactory {
@@ -311,6 +409,128 @@ export class AgentCommunicationMessageFactory {
             role,
             rendezvousId,
             acknowledgedMessageId,
+        };
+    }
+
+    static parcelHandoffRequest(
+        handoffId: string,
+        reward: number,
+    ): ParcelHandoffRequestMessage {
+        return {
+            ...AgentCommunicationMessageFactory.base(),
+            type: PEER_MESSAGE_TYPE.PARCEL_HANDOFF_REQUEST,
+            role: AGENT_ROLE.LLM,
+            handoffId,
+            reward,
+        };
+    }
+
+    static parcelHandoffStatus(
+        handoffId: string,
+        acknowledgedMessageId: AgentCommunicationMessageId,
+        position: AgentCommunicationPosition,
+    ): ParcelHandoffStatusMessage {
+        return {
+            ...AgentCommunicationMessageFactory.base(),
+            type: PEER_MESSAGE_TYPE.PARCEL_HANDOFF_STATUS,
+            role: AGENT_ROLE.BDI,
+            handoffId,
+            acknowledgedMessageId,
+            position,
+        };
+    }
+
+    static parcelHandoffAssignment(
+        handoffId: string,
+        reward: number,
+        parcelId: string,
+        handoffCell: AgentCommunicationPosition,
+        stagingCell: AgentCommunicationPosition,
+        escapeCell: AgentCommunicationPosition,
+        deliveryCell: AgentCommunicationPosition,
+    ): ParcelHandoffAssignmentMessage {
+        return {
+            ...AgentCommunicationMessageFactory.base(),
+            type: PEER_MESSAGE_TYPE.PARCEL_HANDOFF_ASSIGNMENT,
+            role: AGENT_ROLE.LLM,
+            handoffId,
+            reward,
+            parcelId,
+            handoffCell,
+            stagingCell,
+            escapeCell,
+            deliveryCell,
+        };
+    }
+
+    static parcelHandoffReady(
+        handoffId: string,
+        parcelId: string,
+        position: AgentCommunicationPosition,
+    ): ParcelHandoffReadyMessage {
+        return {
+            ...AgentCommunicationMessageFactory.base(),
+            type: PEER_MESSAGE_TYPE.PARCEL_HANDOFF_READY,
+            role: AGENT_ROLE.BDI,
+            handoffId,
+            parcelId,
+            position,
+        };
+    }
+
+    static parcelHandoffReadyAcknowledgement(
+        handoffId: string,
+        parcelId: string,
+        acknowledgedMessageId: AgentCommunicationMessageId,
+    ): ParcelHandoffReadyAcknowledgementMessage {
+        return {
+            ...AgentCommunicationMessageFactory.base(),
+            type: PEER_MESSAGE_TYPE.PARCEL_HANDOFF_READY_ACKNOWLEDGEMENT,
+            role: AGENT_ROLE.LLM,
+            handoffId,
+            parcelId,
+            acknowledgedMessageId,
+        };
+    }
+
+    static parcelHandoffAvailable(
+        handoffId: string,
+        parcelId: string,
+        handoffCell: AgentCommunicationPosition,
+    ): ParcelHandoffAvailableMessage {
+        return {
+            ...AgentCommunicationMessageFactory.base(),
+            type: PEER_MESSAGE_TYPE.PARCEL_HANDOFF_AVAILABLE,
+            role: AGENT_ROLE.LLM,
+            handoffId,
+            parcelId,
+            handoffCell,
+        };
+    }
+
+    static parcelHandoffCollected(
+        handoffId: string,
+        parcelId: string,
+    ): ParcelHandoffCollectedMessage {
+        return {
+            ...AgentCommunicationMessageFactory.base(),
+            type: PEER_MESSAGE_TYPE.PARCEL_HANDOFF_COLLECTED,
+            role: AGENT_ROLE.BDI,
+            handoffId,
+            parcelId,
+        };
+    }
+
+    static parcelHandoffDelivered(
+        handoffId: string,
+        parcelId: string,
+    ): ParcelHandoffDeliveredMessage {
+        return {
+            ...AgentCommunicationMessageFactory.base(),
+            type: PEER_MESSAGE_TYPE.PARCEL_HANDOFF_DELIVERED,
+            role: AGENT_ROLE.BDI,
+            handoffId,
+            parcelId,
         };
     }
 
@@ -546,7 +766,164 @@ export class AgentCommunicationMessageParser {
                     AgentCommunicationMessageId,
             };
         }
+        if (
+            value["type"] === PEER_MESSAGE_TYPE.PARCEL_HANDOFF_REQUEST
+            && value["role"] === AGENT_ROLE.LLM
+            && AgentCommunicationMessageParser.isNonEmptyString(
+                value["handoffId"],
+            )
+            && AgentCommunicationMessageParser.isPositiveNumber(
+                value["reward"],
+            )
+        ) {
+            return {
+                ...common,
+                type: PEER_MESSAGE_TYPE.PARCEL_HANDOFF_REQUEST,
+                role: AGENT_ROLE.LLM,
+                handoffId: value["handoffId"],
+                reward: value["reward"],
+            };
+        }
+        if (
+            value["type"] === PEER_MESSAGE_TYPE.PARCEL_HANDOFF_STATUS
+            && value["role"] === AGENT_ROLE.BDI
+            && AgentCommunicationMessageParser.hasHandoffIdentity(value)
+            && AgentCommunicationMessageParser.isNonEmptyString(
+                value["acknowledgedMessageId"],
+            )
+            && AgentCommunicationMessageParser.isPosition(value["position"])
+        ) {
+            return {
+                ...common,
+                type: PEER_MESSAGE_TYPE.PARCEL_HANDOFF_STATUS,
+                role: AGENT_ROLE.BDI,
+                handoffId: value["handoffId"],
+                acknowledgedMessageId:
+                    value["acknowledgedMessageId"] as AgentCommunicationMessageId,
+                position: value["position"],
+            };
+        }
+        if (
+            value["type"] === PEER_MESSAGE_TYPE.PARCEL_HANDOFF_ASSIGNMENT
+            && value["role"] === AGENT_ROLE.LLM
+            && AgentCommunicationMessageParser.hasHandoffIdentity(value)
+            && AgentCommunicationMessageParser.isPositiveNumber(value["reward"])
+            && AgentCommunicationMessageParser.isNonEmptyString(value["parcelId"])
+            && AgentCommunicationMessageParser.isPosition(value["handoffCell"])
+            && AgentCommunicationMessageParser.isPosition(value["stagingCell"])
+            && AgentCommunicationMessageParser.isPosition(value["escapeCell"])
+            && AgentCommunicationMessageParser.isPosition(value["deliveryCell"])
+        ) {
+            return {
+                ...common,
+                type: PEER_MESSAGE_TYPE.PARCEL_HANDOFF_ASSIGNMENT,
+                role: AGENT_ROLE.LLM,
+                handoffId: value["handoffId"],
+                reward: value["reward"],
+                parcelId: value["parcelId"],
+                handoffCell: value["handoffCell"],
+                stagingCell: value["stagingCell"],
+                escapeCell: value["escapeCell"],
+                deliveryCell: value["deliveryCell"],
+            };
+        }
+        if (
+            value["type"] === PEER_MESSAGE_TYPE.PARCEL_HANDOFF_READY
+            && value["role"] === AGENT_ROLE.BDI
+            && AgentCommunicationMessageParser.hasHandoffParcelIdentity(value)
+            && AgentCommunicationMessageParser.isPosition(value["position"])
+        ) {
+            return {
+                ...common,
+                type: PEER_MESSAGE_TYPE.PARCEL_HANDOFF_READY,
+                role: AGENT_ROLE.BDI,
+                handoffId: value["handoffId"],
+                parcelId: value["parcelId"],
+                position: value["position"],
+            };
+        }
+        if (
+            value["type"]
+                === PEER_MESSAGE_TYPE.PARCEL_HANDOFF_READY_ACKNOWLEDGEMENT
+            && value["role"] === AGENT_ROLE.LLM
+            && AgentCommunicationMessageParser.hasHandoffParcelIdentity(value)
+            && AgentCommunicationMessageParser.isNonEmptyString(
+                value["acknowledgedMessageId"],
+            )
+        ) {
+            return {
+                ...common,
+                type:
+                    PEER_MESSAGE_TYPE.PARCEL_HANDOFF_READY_ACKNOWLEDGEMENT,
+                role: AGENT_ROLE.LLM,
+                handoffId: value["handoffId"],
+                parcelId: value["parcelId"],
+                acknowledgedMessageId:
+                    value["acknowledgedMessageId"] as AgentCommunicationMessageId,
+            };
+        }
+        if (
+            value["type"] === PEER_MESSAGE_TYPE.PARCEL_HANDOFF_AVAILABLE
+            && value["role"] === AGENT_ROLE.LLM
+            && AgentCommunicationMessageParser.hasHandoffParcelIdentity(value)
+            && AgentCommunicationMessageParser.isPosition(value["handoffCell"])
+        ) {
+            return {
+                ...common,
+                type: PEER_MESSAGE_TYPE.PARCEL_HANDOFF_AVAILABLE,
+                role: AGENT_ROLE.LLM,
+                handoffId: value["handoffId"],
+                parcelId: value["parcelId"],
+                handoffCell: value["handoffCell"],
+            };
+        }
+        if (
+            value["type"] === PEER_MESSAGE_TYPE.PARCEL_HANDOFF_COLLECTED
+            && value["role"] === AGENT_ROLE.BDI
+            && AgentCommunicationMessageParser.hasHandoffParcelIdentity(value)
+        ) {
+            return {
+                ...common,
+                type: PEER_MESSAGE_TYPE.PARCEL_HANDOFF_COLLECTED,
+                role: AGENT_ROLE.BDI,
+                handoffId: value["handoffId"],
+                parcelId: value["parcelId"],
+            };
+        }
+        if (
+            value["type"] === PEER_MESSAGE_TYPE.PARCEL_HANDOFF_DELIVERED
+            && value["role"] === AGENT_ROLE.BDI
+            && AgentCommunicationMessageParser.hasHandoffParcelIdentity(value)
+        ) {
+            return {
+                ...common,
+                type: PEER_MESSAGE_TYPE.PARCEL_HANDOFF_DELIVERED,
+                role: AGENT_ROLE.BDI,
+                handoffId: value["handoffId"],
+                parcelId: value["parcelId"],
+            };
+        }
         return undefined;
+    }
+
+    private static hasHandoffIdentity(
+        value: Record<string, unknown>,
+    ): value is Record<string, unknown> & { readonly handoffId: string } {
+        return AgentCommunicationMessageParser.isNonEmptyString(
+            value["handoffId"],
+        );
+    }
+
+    private static hasHandoffParcelIdentity(
+        value: Record<string, unknown>,
+    ): value is Record<string, unknown> & {
+        readonly handoffId: string;
+        readonly parcelId: string;
+    } {
+        return AgentCommunicationMessageParser.hasHandoffIdentity(value)
+            && AgentCommunicationMessageParser.isNonEmptyString(
+                value["parcelId"],
+            );
     }
 
     private static isRecord(value: unknown): value is Record<string, unknown> {

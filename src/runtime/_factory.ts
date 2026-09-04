@@ -15,6 +15,7 @@ import {
     PeerRendezvousCoordinator,
     ReachableGridPositionSelector,
 } from "../llm/tools/rendezvous/index.js";
+import { PeerParcelHandoffCoordinator } from "../llm/tools/handoff/index.js";
 import { ConsoleAgentLogger } from "../utils/_logging.js";
 import { AStarPathfinder } from "../utils/astar.js";
 import { ActionFactory } from "../utils/move.js";
@@ -60,6 +61,10 @@ export class AgentRuntimeFactory {
                     excludedPositions,
                 ),
         );
+        const parcelHandoffCoordinator = new PeerParcelHandoffCoordinator(
+            communicationChannel,
+            config.role,
+        );
         const agent = new Agent(
             beliefs,
             new DesireGenerator(),
@@ -69,6 +74,7 @@ export class AgentRuntimeFactory {
                 branchAndBoundSvgEnabled: config.branchAndBoundSvgEnabled,
             }),
             rendezvousCoordinator,
+            parcelHandoffCoordinator,
             usesLLM,
             usesLLM ? new MissionHandler(socket) : undefined,
         );
@@ -95,6 +101,7 @@ export class AgentRuntimeFactory {
             communicationChannel,
             handshakeService,
             rendezvousCoordinator,
+            parcelHandoffCoordinator,
             ghostMapServer,
             new ConsoleAgentRuntimeLogger(),
         );

@@ -189,6 +189,32 @@ export class Drop extends Action {
     }
 }
 
+/** Puts down one parcel without treating the transfer as a delivery. */
+export class PutDownParcelForHandoff extends Action {
+    constructor(
+        private readonly client: GameClient,
+        private readonly beliefs: Beliefs,
+        readonly parcelId: string,
+        private readonly agentId: string,
+        readonly handoffCell: Position,
+    ) {
+        super();
+    }
+
+    async execute(): Promise<boolean> {
+        if (!this.beliefs.isParcelCarriedBy(this.parcelId, this.agentId)) {
+            return true;
+        }
+        await this.client.emitPutdown([this.parcelId]);
+        this.beliefs.markParcelDropped(
+            this.parcelId,
+            this.agentId,
+            this.handoffCell,
+        );
+        return true;
+    }
+}
+
 /** Creates actions with their runtime dependencies already attached. */
 export class ActionFactory {
     constructor(
@@ -218,6 +244,20 @@ export class ActionFactory {
 
     drop(agentId: string): Action {
         return new Drop(this.client, this.beliefs, agentId);
+    }
+
+    putDownForHandoff(
+        parcelId: string,
+        agentId: string,
+        handoffCell: Position,
+    ): Action {
+        return new PutDownParcelForHandoff(
+            this.client,
+            this.beliefs,
+            parcelId,
+            agentId,
+            handoffCell,
+        );
     }
 
     wait(delayMilliseconds: number): Action {

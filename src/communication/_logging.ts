@@ -211,6 +211,18 @@ export class ConsoleAgentCommunicationLogger
                 return `✓ PEER ARRIVAL CONFIRMED`
                     + `  mission ${message.rendezvousId}`
                     + `  ·  acknowledgement ${delivery} to ${peer}`;
+            case PEER_MESSAGE_TYPE.PARCEL_HANDOFF_REQUEST:
+            case PEER_MESSAGE_TYPE.PARCEL_HANDOFF_STATUS:
+            case PEER_MESSAGE_TYPE.PARCEL_HANDOFF_ASSIGNMENT:
+            case PEER_MESSAGE_TYPE.PARCEL_HANDOFF_READY:
+            case PEER_MESSAGE_TYPE.PARCEL_HANDOFF_READY_ACKNOWLEDGEMENT:
+            case PEER_MESSAGE_TYPE.PARCEL_HANDOFF_AVAILABLE:
+            case PEER_MESSAGE_TYPE.PARCEL_HANDOFF_COLLECTED:
+            case PEER_MESSAGE_TYPE.PARCEL_HANDOFF_DELIVERED:
+                return `\n◆ PARCEL HANDOFF`
+                    + `  ${message.type.replace(/-/g, " ").toUpperCase()}`
+                    + `  ·  mission ${message.handoffId}`
+                    + `  ·  ${delivery} to ${peer}`;
             case PEER_MESSAGE_TYPE.HELLO:
             case PEER_MESSAGE_TYPE.HELLO_ACKNOWLEDGEMENT:
                 return "";
@@ -260,6 +272,18 @@ export class ConsoleAgentCommunicationLogger
                 return `✓ MY ARRIVAL CONFIRMED`
                     + `  mission ${message.rendezvousId}`
                     + `  ·  peer ${peerId} received my notification`;
+            case PEER_MESSAGE_TYPE.PARCEL_HANDOFF_REQUEST:
+            case PEER_MESSAGE_TYPE.PARCEL_HANDOFF_STATUS:
+            case PEER_MESSAGE_TYPE.PARCEL_HANDOFF_ASSIGNMENT:
+            case PEER_MESSAGE_TYPE.PARCEL_HANDOFF_READY:
+            case PEER_MESSAGE_TYPE.PARCEL_HANDOFF_READY_ACKNOWLEDGEMENT:
+            case PEER_MESSAGE_TYPE.PARCEL_HANDOFF_AVAILABLE:
+            case PEER_MESSAGE_TYPE.PARCEL_HANDOFF_COLLECTED:
+            case PEER_MESSAGE_TYPE.PARCEL_HANDOFF_DELIVERED:
+                return `\n◆ PARCEL HANDOFF`
+                    + `  ${message.type.replace(/-/g, " ").toUpperCase()}`
+                    + `  ·  mission ${message.handoffId}`
+                    + `  ·  peer ${peerId}`;
             case PEER_MESSAGE_TYPE.HELLO:
             case PEER_MESSAGE_TYPE.HELLO_ACKNOWLEDGEMENT:
                 return "";

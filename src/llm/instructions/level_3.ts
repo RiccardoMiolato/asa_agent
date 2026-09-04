@@ -7,6 +7,10 @@ const TOOLS: Map<string, string> = new Map([
         "plan_grid_formation",
         "Assigns each agent its closest reachable cell satisfying independent column and row constraints.",
     ],
+    [
+        "plan_parcel_handoff",
+        "Coordinates one parcel to be picked up by the LLM agent and delivered by the BDI agent.",
+    ],
 ]);
 
 const TOOLS_FUNCTION_DEFINITION: Map<string, string> = new Map();
@@ -26,6 +30,13 @@ TOOLS_FUNCTION_DEFINITION.set("plan_grid_formation", `
     reward: positive number
   ],
   "returns": GridFormationMission
+}
+`);
+
+TOOLS_FUNCTION_DEFINITION.set("plan_parcel_handoff", `
+{
+  "params": [reward: positive number],
+  "returns": ParcelHandoffMission
 }
 `);
 
@@ -58,6 +69,8 @@ RULES:
 7. Do not emit movement or communication tools.
 8. If the mission is neither supported form, return {"tools":[]}.
 9. Return exactly one tool call for a supported mission.
+10. Use plan_parcel_handoff when one agent must initially pick up a parcel
+    and the other agent must later deliver that same parcel.
 
 OUTPUT RULES:
 - Return ONLY a valid JSON object.
@@ -84,6 +97,9 @@ Output: {"tools":[{"name":"plan_grid_formation","params":[{"x":null,"y":"odd"},{
 
 Mission: "Both agents must move to an even-numbered column and wait. 400 points bonus."
 Output: {"tools":[{"name":"plan_grid_formation","params":[{"x":"even","y":null},{"x":"even","y":null},400]}]}
+
+Mission: "If a parcel is initially picked up by one agent and later delivered by the other agent, you will receive a 200 points bonus."
+Output: {"tools":[{"name":"plan_parcel_handoff","params":[200]}]}
 `;
 
 export { LEVEL_3_EVALUATION_INSTRUCTION };

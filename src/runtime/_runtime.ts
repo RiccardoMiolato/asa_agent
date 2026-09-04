@@ -13,6 +13,7 @@ import type { IOSensing } from "../../types/IOSensing.js";
 import type { AgentRuntimeConfig } from "./_config.js";
 import type { BaseAgentRuntimeLogger } from "./_logging.js";
 import type { BaseRendezvousCoordinator } from "../llm/tools/rendezvous/index.js";
+import type { BaseParcelHandoffCoordinator } from "../llm/tools/handoff/index.js";
 
 /** Owns the socket listeners and lifecycle of one physical agent. */
 export class AgentRuntime {
@@ -27,6 +28,8 @@ export class AgentRuntime {
             BaseAgentCommunicationChannel,
         private readonly handshakeService: PeerHandshakeService,
         private readonly rendezvousCoordinator: BaseRendezvousCoordinator,
+        private readonly parcelHandoffCoordinator:
+            BaseParcelHandoffCoordinator,
         private readonly ghostMapServer: GhostMapServer,
         private readonly logger: BaseAgentRuntimeLogger,
     ) { }
@@ -48,6 +51,7 @@ export class AgentRuntime {
         );
         this.handshakeService.start();
         this.rendezvousCoordinator.start();
+        this.parcelHandoffCoordinator.start();
         this.socket.connect();
         this.startGhostMap();
         this.startAgentLoop();
@@ -141,6 +145,7 @@ export class AgentRuntime {
     private async stop(): Promise<void> {
         this.handshakeService.stop();
         this.rendezvousCoordinator.stop();
+        this.parcelHandoffCoordinator.stop();
         this.socket.disconnect();
         await this.ghostMapServer.stop();
     }

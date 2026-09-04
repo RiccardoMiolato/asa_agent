@@ -1,0 +1,204 @@
+import { strict as assert } from "node:assert";
+import test from "node:test";
+import { Beliefs } from "./bdi/beliefs.js";
+import { GridFormationMission, RENDEZVOUS_PARTICIPANT, RendezvousMission, } from "./llm/mission.js";
+import { MissionHandler } from "./llm/MissionHandler.js";
+import { LLMClient } from "./llm/LLMClient.js";
+import { AStarPathfinder } from "./utils/astar.js";
+import { GameMap } from "./utils/map.js";
+import { ActionFactory } from "./utils/move.js";
+import { Position } from "./utils/position.js";
+import { GRID_COORDINATE_PARITY, GridPositionObjective, ReachableGridPositionSelector, } from "./llm/tools/rendezvous/index.js";
+/** Deterministic LLM adapter returning one prepared response per call. */
+class LevelThreeSequenceLLMClient extends LLMClient {
+    constructor(responses) {
+        super("test-model", "http://unused.test", "unused", 100);
+        this.responses = responses;
+    }
+    async callLLM(_messages, _systemPrompt) {
+        return this.responses.shift() ?? "";
+    }
+}
+/** Typed fixtures for level-3 rendezvous mission planning tests. */
+class LevelThreeMissionTestFixture {
+    static gameClient() {
+        return {
+            async emitMove() {
+                return { x: 0, y: 0 };
+            },
+            async emitPickup() {
+                return [];
+            },
+            async emitPutdown() {
+                return [];
+            },
+            async emitSay() {
+                return "successful";
+            },
+        };
+    }
+    static context(gameMap, agentPosition, crates = new Map()) {
+        const beliefs = new Beliefs();
+        const actionFactory = new ActionFactory(LevelThreeMissionTestFixture.gameClient(), beliefs);
+        return {
+            gameMap,
+            agentPosition,
+            crates,
+            pickupCells: [],
+            pickupCellLastObservedAt: new Map(),
+            deliveringCells: [],
+            parcels: new Map(),
+            pickupExcludedParcelIds: new Set(),
+            sensedAgents: new Map(),
+            movementDuration: 100,
+            frameDuration: 100,
+            observationDistance: 1,
+            rewardDecayInterval: undefined,
+            millisecondsUntilNextRewardDecay: undefined,
+            agentId: "llm-agent",
+            pathfinder: new AStarPathfinder(actionFactory),
+            actionFactory,
+            cellScoreEffects: [],
+            deliveryScoreEffects: [],
+        };
+    }
+    static handler(planningResponse) {
+        return new MissionHandler(LevelThreeMissionTestFixture.gameClient(), new LevelThreeSequenceLLMClient([
+            JSON.stringify({
+                level: 3,
+                worth: true,
+                requires_answer: false,
+            }),
+            JSON.stringify(planningResponse),
+        ]));
+    }
+    static openMap(size) {
+        return new GameMap(Array.from({ length: size }, () => Array.from({ length: size }, () => "1")));
+    }
+}
+test("a level-3 rendezvous selects two distinct safe assignments", async () => {
+    const center = new Position(2, 2);
+    const maximumDistance = 2;
+    const crate = new Position(1, 1);
+    const context = LevelThreeMissionTestFixture.context(LevelThreeMissionTestFixture.openMap(5), new Position(0, 0), new Map([["crate", crate]]));
+    const handler = LevelThreeMissionTestFixture.handler({
+        tools: [{
+                name: "plan_rendezvous",
+                params: [center.x, center.y, maximumDistance, 500],
+            }],
+    });
+    handler.addPendingMission("mission-control", "Mission Control", "Move both agents near (2,2), at most 2 cells away, and wait for each other. Receive 500pts.");
+    const missions = await handler.evaluateMission(context);
+    assert.equal(missions.length, 1);
+    assert.equal(missions[0] instanceof RendezvousMission, true);
+    const mission = missions[0];
+    const llmAssignment = mission.assignmentFor(RENDEZVOUS_PARTICIPANT.LLM_AGENT);
+    const bdiAssignment = mission.assignmentFor(RENDEZVOUS_PARTICIPANT.BDI_AGENT);
+    assert.equal(llmAssignment.target.isEqual(new Position(0, 2)), true);
+    assert.equal(bdiAssignment.target.isEqual(center), true);
+    assert.equal(llmAssignment.target.isEqual(bdiAssignment.target), false);
+    for (const assignment of [llmAssignment, bdiAssignment]) {
+        assert.equal(context.gameMap.isValidCell(assignment.target), true);
+        assert.equal(assignment.target.distanceTo(center) <= maximumDistance, true);
+        assert.equal(assignment.target.isEqual(crate), false);
+    }
+    assert.equal(mission.reward, 500);
+    assert.equal(mission.getLevel(), 3);
+    assert.equal(handler.getActiveMission().length, 1);
+});
+test("a planned rendezvous does not become an independent move reward", async () => {
+    const context = LevelThreeMissionTestFixture.context(LevelThreeMissionTestFixture.openMap(3), new Position(0, 0));
+    const handler = LevelThreeMissionTestFixture.handler({
+        tools: [{
+                name: "plan_rendezvous",
+                params: [1, 1, 1, 500],
+            }],
+    });
+    handler.addPendingMission("sender", "control", "rendezvous");
+    await handler.evaluateMission(context);
+    assert.deepEqual(handler.getActiveMoveToEffects(), []);
+});
+test("a rendezvous is rejected when fewer than two safe cells exist", async () => {
+    const context = LevelThreeMissionTestFixture.context(new GameMap([["1"]]), new Position(0, 0));
+    const handler = LevelThreeMissionTestFixture.handler({
+        tools: [{
+                name: "plan_rendezvous",
+                params: [0, 0, 3, 500],
+            }],
+    });
+    handler.addPendingMission("sender", "control", "rendezvous");
+    const missions = await handler.evaluateMission(context);
+    assert.deepEqual(missions, []);
+    assert.deepEqual(handler.getActiveMission(), []);
+});
+test("malformed level-3 tool output is rejected at the boundary", async () => {
+    const context = LevelThreeMissionTestFixture.context(LevelThreeMissionTestFixture.openMap(3), new Position(0, 0));
+    const handler = LevelThreeMissionTestFixture.handler({
+        tools: [{
+                name: "plan_rendezvous",
+                params: [1, 1, "three", 500],
+            }],
+    });
+    handler.addPendingMission("sender", "control", "rendezvous");
+    const missions = await handler.evaluateMission(context);
+    assert.deepEqual(missions, []);
+});
+test("an odd-row formation resolves the closest reachable row", async () => {
+    const context = LevelThreeMissionTestFixture.context(LevelThreeMissionTestFixture.openMap(5), new Position(4, 4));
+    const handler = LevelThreeMissionTestFixture.handler({
+        tools: [{
+                name: "plan_grid_formation",
+                params: [
+                    { x: null, y: "odd" },
+                    { x: null, y: "odd" },
+                    700,
+                ],
+            }],
+    });
+    handler.addPendingMission("sender", "control", "All agents must move to an odd-numbered row and wait. 700 points bonus.");
+    const missions = await handler.evaluateMission(context);
+    assert.equal(missions.length, 1);
+    assert.equal(missions[0] instanceof GridFormationMission, true);
+    const mission = missions[0];
+    assert.equal(mission.reward, 700);
+    assert.deepEqual(mission.llmAgentObjective.describe(), {
+        x: null,
+        y: "odd",
+    });
+});
+test("grid objectives support exact, parity, and wildcard axes", () => {
+    const context = LevelThreeMissionTestFixture.context(LevelThreeMissionTestFixture.openMap(6), new Position(3, 4));
+    const selector = new ReachableGridPositionSelector();
+    const evenColumn = selector.select(context, new GridPositionObjective(GRID_COORDINATE_PARITY.EVEN, undefined));
+    const exactColumnOddRow = selector.select(context, new GridPositionObjective(3, GRID_COORDINATE_PARITY.ODD));
+    const unrestricted = selector.select(context, new GridPositionObjective(undefined, undefined));
+    const unrestrictedWithReservedCurrentCell = selector.select(context, new GridPositionObjective(undefined, undefined), [context.agentPosition]);
+    assert.equal(evenColumn?.isEqual(new Position(2, 4)), true);
+    assert.equal(exactColumnOddRow?.isEqual(new Position(3, 3)), true);
+    assert.equal(unrestricted?.isEqual(context.agentPosition), true);
+    assert.equal(unrestrictedWithReservedCurrentCell?.isEqual(new Position(2, 4)), true);
+});
+test("grid objectives reject blocked and crate-occupied exact cells", () => {
+    const gameMap = LevelThreeMissionTestFixture.openMap(4);
+    gameMap.getTiles()[2][2] = "0";
+    const context = LevelThreeMissionTestFixture.context(gameMap, new Position(0, 0), new Map([["crate", new Position(3, 3)]]));
+    const selector = new ReachableGridPositionSelector();
+    assert.equal(selector.select(context, new GridPositionObjective(2, 2)), undefined);
+    assert.equal(selector.select(context, new GridPositionObjective(3, 3)), undefined);
+});
+test("grid formation parsing rejects unknown coordinate predicates", async () => {
+    const handler = LevelThreeMissionTestFixture.handler({
+        tools: [{
+                name: "plan_grid_formation",
+                params: [
+                    { x: null, y: "prime" },
+                    { x: null, y: "odd" },
+                    700,
+                ],
+            }],
+    });
+    handler.addPendingMission("sender", "control", "formation");
+    const missions = await handler.evaluateMission(LevelThreeMissionTestFixture.context(LevelThreeMissionTestFixture.openMap(3), new Position(0, 0)));
+    assert.deepEqual(missions, []);
+});
+//# sourceMappingURL=_level-three-mission.test.js.map
