@@ -1,5 +1,5 @@
 import { Intention } from "../../../bdi/intentions.js";
-import type { PlanningObjectiveDescription } from "../../../planning.js";
+import type { PlanningObjectiveDescription } from "../../../bdi/planning.js";
 import type { ParcelHandoffInstruction } from "./_coordinator.js";
 
 /** Commits one protocol instruction independently of ordinary parcel options. */

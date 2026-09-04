@@ -1,23 +1,23 @@
 import {
     AGENT_COMMUNICATION_PEER_STATUS,
     AGENT_ROLE,
+    AgentCommunicationMessageFactory,
     BaseAgentCommunicationChannel,
+    PEER_MESSAGE_TYPE,
     type AgentCommunicationMessage,
     type AgentCommunicationMessageHandler,
-    AgentCommunicationMessageFactory,
     type AgentCommunicationPeer,
     type AgentCommunicationPeerStatusHandler,
     type GridFormationAcceptanceMessage,
     type GridFormationProposalMessage,
     type GridFormationReleaseAcknowledgementMessage,
     type GridFormationReleaseMessage,
-    PEER_MESSAGE_TYPE,
-    type RendezvousArrivedMessage,
     type RendezvousArrivalAcknowledgementMessage,
+    type RendezvousArrivedMessage,
     type RendezvousAssignmentMessage,
 } from "../../../communication/index.js";
-import { SCORE_EFFECT_LIFETIME } from "../../../_score-effect-lifetime.js";
 import { CellScoreEffect } from "../../../utils/_cell-score-effects.js";
+import { SCORE_EFFECT_LIFETIME } from "../../../utils/_score-effect-lifetime.js";
 import { Position } from "../../../utils/position.js";
 import { GridPositionObjective } from "./_position-objective.js";
 

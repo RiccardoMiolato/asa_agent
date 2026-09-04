@@ -1,3 +1,4 @@
+import { CellScoreEffect } from "../utils/_cell-score-effects.js";
 import {
     AdditiveDeliveryScoreModifier,
     DeliveryCellEffect,
@@ -6,9 +7,8 @@ import {
     MultiplicativeDeliveryScoreModifier,
     ParcelScoreThresholdDeliveryScoreModifier,
     type BaseDeliveryScoreEffect,
-} from "../_delivery-scoring.js";
-import { SCORE_EFFECT_LIFETIME } from "../_score-effect-lifetime.js";
-import { CellScoreEffect } from "../utils/_cell-score-effects.js";
+} from "../utils/_delivery-scoring.js";
+import { SCORE_EFFECT_LIFETIME } from "../utils/_score-effect-lifetime.js";
 import { Position } from "../utils/position.js";
 import {
     GridPositionObjective,

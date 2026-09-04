@@ -1,9 +1,9 @@
-import type { Agent } from "./agent.js";
-import type { Beliefs } from "./bdi/beliefs.js";
-import type { PickupClusterSnapshot } from "./bdi/intentions.js";
-import type { MissionDescription } from "./llm/mission.js";
-import type { PlanningObjectiveDescription } from "./planning.js";
-import { Position } from "./utils/position.js";
+import type { Agent } from "../agent.js";
+import type { Beliefs } from "../bdi/beliefs.js";
+import type { PickupClusterSnapshot } from "../bdi/intentions.js";
+import type { PlanningObjectiveDescription } from "../bdi/planning.js";
+import type { MissionDescription } from "../llm/mission.js";
+import { Position } from "../utils/position.js";
 
 export interface GhostMapTarget {
     readonly position: Position;

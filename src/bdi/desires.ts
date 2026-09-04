@@ -1,4 +1,4 @@
-import { OptimisticPathLengthEstimator } from "../_path-estimation.js";
+import type { CellScoreEffectId } from "../utils/_cell-score-effects.js";
 import {
     DELIVERY_CANDIDATE_SELECTION_REASON,
     DELIVERY_PARCEL_REWARD_ELIGIBILITY,
@@ -7,14 +7,14 @@ import {
     DeliveryCandidateFactory,
     DeliveryCellEffect,
     type BaseDeliveryScoreEffect,
-} from "../_delivery-scoring.js";
+} from "../utils/_delivery-scoring.js";
+import { OptimisticPathLengthEstimator } from "../utils/_path-estimation.js";
+import { Position } from "../utils/position.js";
 import {
     PlanningObjective,
     type PlanningContext,
     type PlanningObjectiveDescription,
-} from "../planning.js";
-import { Position } from "../utils/position.js";
-import type { CellScoreEffectId } from "../utils/_cell-score-effects.js";
+} from "./planning.js";
 
 /** Goal categories that can be considered by branch-and-bound. */
 export enum DESIRE_TYPE {

@@ -1,12 +1,12 @@
-import { OptimisticPathLengthEstimator } from "./_path-estimation.js";
+import { DESIRE_TYPE } from "../bdi/desires.js";
+import type { PlanningContext } from "../bdi/planning.js";
 import type {
     DeliveryCandidate,
     DeliveryScoreEffectId,
 } from "./_delivery-scoring.js";
-import { DESIRE_TYPE } from "./bdi/desires.js";
-import type { PlanningContext } from "./planning.js";
-import { RewardDecayEstimator } from "./utils/_reward-decay.js";
-import { Position } from "./utils/position.js";
+import { OptimisticPathLengthEstimator } from "./_path-estimation.js";
+import { RewardDecayEstimator } from "./_reward-decay.js";
+import { Position } from "./position.js";
 
 /** Candidate state inspected before the evaluator expands a branch. */
 export interface OptionBranchCandidate {

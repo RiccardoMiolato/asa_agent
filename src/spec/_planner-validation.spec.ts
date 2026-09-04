@@ -1,41 +1,41 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
+import type { IOSensedAgent } from "../../types/IOSensing.js";
+import type { Parcel } from "../bdi/beliefs.js";
+import { Beliefs } from "../bdi/beliefs.js";
+import {
+    DeliverParcelsDesire,
+    Desire,
+    DesireGenerator,
+    type DesireGeneration,
+} from "../bdi/desires.js";
+import {
+    OPTION_BRANCH_DECISION,
+    OptionEvaluator,
+    type OptionEvaluation,
+} from "../bdi/option_evaluator.js";
+import type { PlanningContext } from "../bdi/planning.js";
 import {
     DELIVERY_CANDIDATE_SELECTION_REASON,
     DELIVERY_PARCEL_REWARD_ELIGIBILITY,
     DeliveryCandidateFactory,
-} from "./_delivery-scoring.js";
+} from "../utils/_delivery-scoring.js";
 import {
     BaseOptionBranchBoundEstimator,
     ConservativeRewardBranchBoundEstimator,
     EarliestDeliveryRewardBranchBoundEstimator,
     type OptionBranchBound,
     type OptionBranchCandidate,
-} from "./_option-pruning.js";
-import type { Parcel } from "./bdi/beliefs.js";
-import { Beliefs } from "./bdi/beliefs.js";
-import {
-    DeliverParcelsDesire,
-    Desire,
-    DesireGenerator,
-    type DesireGeneration,
-} from "./bdi/desires.js";
-import {
-    OPTION_BRANCH_DECISION,
-    OptionEvaluator,
-    type OptionEvaluation,
-} from "./bdi/option_evaluator.js";
-import type { PlanningContext } from "./planning.js";
-import type { IOSensedAgent } from "../types/IOSensing.js";
-import { AStarPathfinder } from "./utils/astar.js";
-import { GameMap } from "./utils/map.js";
+} from "../utils/_option-pruning.js";
+import { AStarPathfinder } from "../utils/astar.js";
+import { GameMap } from "../utils/map.js";
 import {
     ActionFactory,
     type GameClient,
     type MoveDirection,
     type ParcelActionAcknowledgement,
-} from "./utils/move.js";
-import { Position } from "./utils/position.js";
+} from "../utils/move.js";
+import { Position } from "../utils/position.js";
 
 /** Aggregate search measurements reported for one validation configuration. */
 interface PlannerValidationMeasurement {

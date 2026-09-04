@@ -1,5 +1,5 @@
 import type { Parcel } from "../../../bdi/beliefs.js";
-import type { PlanningContext } from "../../../planning.js";
+import type { PlanningContext } from "../../../bdi/planning.js";
 import { RewardDecayEstimator } from "../../../utils/_reward-decay.js";
 import { Position } from "../../../utils/position.js";
 

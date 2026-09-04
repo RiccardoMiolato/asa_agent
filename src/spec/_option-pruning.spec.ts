@@ -1,42 +1,42 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
-import { BranchAndBoundSvgRenderer } from "./_branch-and-bound-svg.js";
+import type { IOSensedAgent } from "../../types/IOSensing.js";
+import type { Parcel } from "../bdi/beliefs.js";
+import { Beliefs } from "../bdi/beliefs.js";
+import {
+    DESIRE_TYPE,
+    Desire,
+    DesireGenerator,
+} from "../bdi/desires.js";
+import {
+    OPTION_BRANCH_DECISION,
+    OptionEvaluator,
+} from "../bdi/option_evaluator.js";
+import type { PlanningContext } from "../bdi/planning.js";
+import { BranchAndBoundSvgRenderer } from "../utils/_branch-and-bound-svg.js";
 import {
     DELIVERY_CANDIDATE_SELECTION_REASON,
     DELIVERY_PARCEL_REWARD_ELIGIBILITY,
     DeliveryCandidateFactory,
     type DeliveryCandidate,
-} from "./_delivery-scoring.js";
+} from "../utils/_delivery-scoring.js";
 import {
     BaseOptionBranchBoundEstimator,
     ConservativeRewardBranchBoundEstimator,
     EarliestDeliveryRewardBranchBoundEstimator,
     type OptionBranchBound,
     type OptionBranchCandidate,
-} from "./_option-pruning.js";
-import type { Parcel } from "./bdi/beliefs.js";
-import { Beliefs } from "./bdi/beliefs.js";
-import {
-    DESIRE_TYPE,
-    Desire,
-    DesireGenerator,
-} from "./bdi/desires.js";
-import {
-    OPTION_BRANCH_DECISION,
-    OptionEvaluator,
-} from "./bdi/option_evaluator.js";
-import type { PlanningContext } from "./planning.js";
-import type { IOSensedAgent } from "../types/IOSensing.js";
-import { BasePathfinder } from "./utils/astar.js";
-import { GameMap } from "./utils/map.js";
+} from "../utils/_option-pruning.js";
+import { BasePathfinder } from "../utils/astar.js";
+import { GameMap } from "../utils/map.js";
 import {
     Action,
     ActionFactory,
     type GameClient,
     type MoveDirection,
     type ParcelActionAcknowledgement,
-} from "./utils/move.js";
-import { Position } from "./utils/position.js";
+} from "../utils/move.js";
+import { Position } from "../utils/position.js";
 
 /** Inert movement step used by deterministic path-length tests. */
 class NoOpAction extends Action {

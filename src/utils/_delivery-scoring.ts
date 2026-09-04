@@ -1,5 +1,5 @@
-import { Position } from "./utils/position.js";
 import { SCORE_EFFECT_LIFETIME } from "./_score-effect-lifetime.js";
+import { Position } from "./position.js";
 
 /** Stable identity of a delivery score effect. */
 export type DeliveryScoreEffectId = string;

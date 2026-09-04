@@ -1,8 +1,3 @@
-import {
-    PlanningObjective,
-    type PlanningContext,
-    type PlanningObjectiveDescription,
-} from "../planning.js";
 import type {
     CellScoreEffect,
     CellScoreEffectId,
@@ -10,6 +5,11 @@ import type {
 import type { Action } from "../utils/move.js";
 import { Position } from "../utils/position.js";
 import type { Desire } from "./desires.js";
+import {
+    PlanningObjective,
+    type PlanningContext,
+    type PlanningObjectiveDescription,
+} from "./planning.js";
 
 interface PickupCluster {
     readonly id: string;

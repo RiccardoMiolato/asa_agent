@@ -1,11 +1,11 @@
-import { BaseBranchAndBoundGraphWriter, BranchAndBoundSvgWriter } from "../_branch-and-bound-svg.js";
 import { BELIEF_CHANGE_TYPE, BeliefChange } from "../bdi/beliefs.js";
 import { DESIRE_TYPE } from "../bdi/desires.js";
 import { OPTION_TRAVERSABILITY, OptionEvaluationGraph, OptionEvaluationNode } from "../bdi/option_evaluator.js";
+import { PlanningObjectiveDescription } from "../bdi/planning.js";
 import type { MissionDescription } from "../llm/mission.js";
 import type { ParcelHandoffSnapshot } from "../llm/tools/handoff/index.js";
-import { PlanningObjectiveDescription } from "../planning.js";
 import { TerminalTheme } from "../presentation/index.js";
+import { BaseBranchAndBoundGraphWriter, BranchAndBoundSvgWriter } from "./_branch-and-bound-svg.js";
 import { Position } from "./position.js";
 
 /** Authoritative score increase reported by the server after a delivery. */

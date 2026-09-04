@@ -1,4 +1,4 @@
-import { PlanningContext } from "../../planning.js";
+import { PlanningContext } from "../../bdi/planning.js";
 import { GameMap } from "../../utils/map.js";
 import { Position } from "../../utils/position.js";
 import { TRIVIA_ANSWERING_RULES } from "../instructions/level_1.js";
@@ -230,9 +230,8 @@ function avoid_cell(
 }
 
 export {
-    answer_trivia, AvoidCellConstraint, avoid_cell,
-    BaseLevelTwoConstraint, DeliveryConstraint, delivery_constraint, drop_at,
+    answer_trivia, avoid_cell, AvoidCellConstraint, BaseLevelTwoConstraint, delivery_constraint, DeliveryConstraint, drop_at,
     get_agent_position, get_extreme_tile,
-    math_eval, move_to, MoveToResponse, ParcelConstraint, parcel_constraint,
-    StackConstraint, stack_constraint, type MapExtreme,
+    math_eval, move_to, MoveToResponse, parcel_constraint, ParcelConstraint, stack_constraint, StackConstraint, type MapExtreme
 };
+

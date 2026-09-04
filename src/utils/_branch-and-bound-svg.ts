@@ -6,7 +6,7 @@ import {
     type OptionEvaluationEdge,
     type OptionEvaluationGraph,
     type OptionEvaluationNode,
-} from "./bdi/option_evaluator.js";
+} from "../bdi/option_evaluator.js";
 
 export interface BranchAndBoundSvgContext {
     readonly agentId: string;

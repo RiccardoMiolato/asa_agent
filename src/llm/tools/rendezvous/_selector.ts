@@ -1,9 +1,9 @@
-import type { PlanningContext } from "../../../planning.js";
+import type { PlanningContext } from "../../../bdi/planning.js";
 import type { BasePathfinder } from "../../../utils/astar.js";
 import type { GameMap } from "../../../utils/map.js";
 import { Position } from "../../../utils/position.js";
-import type { GridPositionObjective } from "./_position-objective.js";
 import type { RendezvousObjective } from "./_objective.js";
+import type { GridPositionObjective } from "./_position-objective.js";
 
 /** Two distinct walkable cells selected for one rendezvous. */
 export interface RendezvousPositionSelection {

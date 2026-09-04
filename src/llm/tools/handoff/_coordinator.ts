@@ -1,18 +1,18 @@
+import type { PlanningContext } from "../../../bdi/planning.js";
 import {
     AGENT_ROLE,
+    AgentCommunicationMessageFactory,
     BaseAgentCommunicationChannel,
+    PEER_MESSAGE_TYPE,
     type AgentCommunicationMessage,
     type AgentCommunicationMessageHandler,
-    AgentCommunicationMessageFactory,
     type AgentCommunicationPeer,
     type ParcelHandoffAssignmentMessage,
     type ParcelHandoffAvailableMessage,
     type ParcelHandoffReadyMessage,
     type ParcelHandoffRequestMessage,
     type ParcelHandoffStatusMessage,
-    PEER_MESSAGE_TYPE,
 } from "../../../communication/index.js";
-import type { PlanningContext } from "../../../planning.js";
 import { Position } from "../../../utils/position.js";
 import {
     BalancedSurvivableParcelHandoffCandidateSelector,

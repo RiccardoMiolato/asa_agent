@@ -1,5 +1,5 @@
+import { SCORE_EFFECT_LIFETIME } from "./_score-effect-lifetime.js";
 import { Position } from "./position.js";
-import { SCORE_EFFECT_LIFETIME } from "../_score-effect-lifetime.js";
 
 /** Stable identity of a score effect attached to a map cell. */
 export type CellScoreEffectId = string;

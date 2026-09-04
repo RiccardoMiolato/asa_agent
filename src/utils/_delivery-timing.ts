@@ -2,7 +2,7 @@ import {
     type DeliveryCandidate,
     type DeliveryScoreEffectId,
 } from "./_delivery-scoring.js";
-import { RewardDecayEstimator } from "./utils/_reward-decay.js";
+import { RewardDecayEstimator } from "./_reward-decay.js";
 
 /** Result of optimizing one delivery candidate over relevant decay times. */
 export interface DeliveryTimingDecision {

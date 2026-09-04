@@ -1,11 +1,11 @@
-import type { Parcel } from "./bdi/beliefs.js";
-import type { IOSensedAgent } from "../types/IOSensing.js";
-import type { BaseDeliveryScoreEffect } from "./_delivery-scoring.js";
-import type { CellScoreEffect } from "./utils/_cell-score-effects.js";
-import type { BasePathfinder } from "./utils/astar.js";
-import { GameMap } from "./utils/map.js";
-import type { ActionFactory } from "./utils/move.js";
-import type { Position } from "./utils/position.js";
+import type { IOSensedAgent } from "../../types/IOSensing.js";
+import type { CellScoreEffect } from "../utils/_cell-score-effects.js";
+import type { BaseDeliveryScoreEffect } from "../utils/_delivery-scoring.js";
+import type { BasePathfinder } from "../utils/astar.js";
+import { GameMap } from "../utils/map.js";
+import type { ActionFactory } from "../utils/move.js";
+import type { Position } from "../utils/position.js";
+import type { Parcel } from "./beliefs.js";
 
 /** Immutable world state and services shared by all planning strategies. */
 export interface PlanningContext {

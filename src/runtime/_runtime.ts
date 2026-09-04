@@ -1,19 +1,19 @@
 import type { DjsClientSocket } from "@unitn-asa/deliveroo-js-sdk/client";
-import { Agent, AGENT_EXIT_REASON } from "../agent.js";
-import { GhostMapServer } from "../_ghost-map-server.js";
-import type { Beliefs } from "../bdi/beliefs.js";
-import {
-    BaseAgentCommunicationChannel,
-    type AgentCommunicationPeer,
-    PeerHandshakeService,
-} from "../communication/index.js";
 import type { IOAgent } from "../../types/IOAgent.js";
 import type { IOConfig } from "../../types/IOConfig.js";
 import type { IOSensing } from "../../types/IOSensing.js";
+import { Agent, AGENT_EXIT_REASON } from "../agent.js";
+import type { Beliefs } from "../bdi/beliefs.js";
+import {
+    BaseAgentCommunicationChannel,
+    PeerHandshakeService,
+    type AgentCommunicationPeer,
+} from "../communication/index.js";
+import { GhostMapServer } from "../ghost_map/_ghost-map-server.js";
+import type { BaseParcelHandoffCoordinator } from "../llm/tools/handoff/index.js";
+import type { BaseRendezvousCoordinator } from "../llm/tools/rendezvous/index.js";
 import type { AgentRuntimeConfig } from "./_config.js";
 import type { BaseAgentRuntimeLogger } from "./_logging.js";
-import type { BaseRendezvousCoordinator } from "../llm/tools/rendezvous/index.js";
-import type { BaseParcelHandoffCoordinator } from "../llm/tools/handoff/index.js";
 
 /** Owns the socket listeners and lifecycle of one physical agent. */
 export class AgentRuntime {

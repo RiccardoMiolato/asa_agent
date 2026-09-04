@@ -3,12 +3,12 @@ import { strict as assert } from "node:assert";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import test, { type TestContext } from "node:test";
-import { MISSION_CLASSIFICATION_INSTRUCTIONS } from "./llm/instructions/instruction.js";
-import { LEVEL_1_EVALUATION_INSTRUCTIONS } from "./llm/instructions/level_1.js";
-import { LEVEL_2_EVALUATION_INSTRUCTION } from "./llm/instructions/level_2.js";
-import { LEVEL_3_EVALUATION_INSTRUCTION } from "./llm/instructions/level_3.js";
-import { LLMClient, type LLMMessage } from "./llm/LLMClient.js";
-import type { MissionLevel } from "./llm/mission.js";
+import { MISSION_CLASSIFICATION_INSTRUCTIONS } from "../llm/instructions/instruction.js";
+import { LEVEL_1_EVALUATION_INSTRUCTIONS } from "../llm/instructions/level_1.js";
+import { LEVEL_2_EVALUATION_INSTRUCTION } from "../llm/instructions/level_2.js";
+import { LEVEL_3_EVALUATION_INSTRUCTION } from "../llm/instructions/level_3.js";
+import { LLMClient, type LLMMessage } from "../llm/LLMClient.js";
+import type { MissionLevel } from "../llm/mission.js";
 
 type MissionToolName =
     | "math_eval"
