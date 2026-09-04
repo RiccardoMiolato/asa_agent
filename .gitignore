@@ -47,6 +47,5 @@ report.tex
 
 # Reproducible experiments cited by the report.
 !src/spec/_llm-mission-evaluation.spec.ts
-!src/spec/_option-pruning.spec.ts
 !src/spec/_planner-validation.spec.ts
 report/

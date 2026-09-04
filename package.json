@@ -10,16 +10,8 @@
     "build": "tsc",
     "start": "node --env-file=.env dist/index.js",
     "dev": "npm run build && rm -rf -- logs/branch-and-bound/* && BRANCH_AND_BOUND_SVG_ENABLED=true npm run start",
-    "test": "npm run build && node --test dist/src/_action-ack.spec.js dist/src/_agent-communication.spec.js dist/src/_arithmetic-expression.spec.js dist/src/_communication-logging-tests.js dist/src/_rendezvous-coordination-tests.js dist/src/_grid-formation-coordination-tests.js dist/src/_parcel-handoff.spec.js dist/src/_parcel-handoff-recovery.spec.js dist/src/_parcel-handoff-logging.spec.js dist/src/_option-pruning.spec.js dist/src/_runtime-config.spec.js dist/src/_search-intention.spec.js",
-    "test:communication": "npm run build && node --test dist/src/_agent-communication.spec.js dist/src/_communication-logging-tests.js dist/src/_rendezvous-coordination-tests.js dist/src/_grid-formation-coordination-tests.js",
-    "test:runtime": "npm run build && node --test dist/src/_runtime-config.spec.js",
-    "test:missions": "npm run build && node --test dist/src/_arithmetic-expression.spec.js dist/src/_level-two-mission.test.js dist/src/_level-three-mission-tests.js dist/src/_level-three-json-tests.js dist/src/_grid-formation-coordination-tests.js",
-    "test:math": "npm run build && node --test dist/src/_arithmetic-expression.spec.js",
-    "test:actions": "npm run build && node --test dist/src/_action-ack.spec.js",
-    "test:handoff": "npm run build && node --test dist/src/_parcel-handoff.spec.js dist/src/_parcel-handoff-recovery.spec.js dist/src/_parcel-handoff-logging.spec.js",
-    "test:pruning": "npm run build && node --test dist/src/_option-pruning.spec.js",
-    "test:validation": "npm run build && node --test dist/src/_planner-validation.spec.js",
-    "test:llm-evaluation": "npm run build && node --test dist/src/_llm-mission-evaluation.spec.js",
+    "test:validation": "npm run build && node --test dist/src/spec/_planner-validation.spec.js",
+    "test:llm-evaluation": "npm run build && node --test dist/src/spec/_llm-mission-evaluation.spec.js",
     "ghost-map": "npm run build && npm run start"
   },
   "dependencies": {
