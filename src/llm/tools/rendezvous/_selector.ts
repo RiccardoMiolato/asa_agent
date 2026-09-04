@@ -1,5 +1,8 @@
 import type { PlanningContext } from "../../../planning.js";
+import type { BasePathfinder } from "../../../utils/astar.js";
+import type { GameMap } from "../../../utils/map.js";
 import { Position } from "../../../utils/position.js";
+import type { GridPositionObjective } from "./_position-objective.js";
 import type { RendezvousObjective } from "./_objective.js";
 
 /** Two distinct walkable cells selected for one rendezvous. */
@@ -12,6 +15,91 @@ interface ReachableCandidate {
     readonly position: Position;
     readonly distanceFromAgent: number;
     readonly distanceFromCenter: number;
+}
+
+/** Minimum world state needed to resolve a position predicate. */
+export interface GridPositionSelectionContext {
+    readonly gameMap: GameMap;
+    readonly agentPosition: Position;
+    readonly crates: ReadonlyMap<string, Position>;
+    readonly pathfinder: BasePathfinder;
+}
+
+/** Contract for resolving a position predicate to one reachable map cell. */
+export abstract class BaseGridPositionSelector {
+    abstract select(
+        context: GridPositionSelectionContext,
+        objective: GridPositionObjective,
+        excludedPositions?: readonly Position[],
+    ): Position | undefined;
+}
+
+/** Selects the physically closest safe cell satisfying both axis constraints. */
+export class ReachableGridPositionSelector extends BaseGridPositionSelector {
+    override select(
+        context: GridPositionSelectionContext,
+        objective: GridPositionObjective,
+        excludedPositions: readonly Position[] = [],
+    ): Position | undefined {
+        let selected: Position | undefined;
+        let selectedDistance = Infinity;
+
+        for (let x = 0; x < context.gameMap.getRows(); x += 1) {
+            for (let y = 0; y < context.gameMap.getCols(); y += 1) {
+                if (!objective.matches(x, y)) {
+                    continue;
+                }
+                const candidate = new Position(x, y);
+                if (
+                    !context.gameMap.isValidCell(candidate)
+                    || this.isOccupiedByCrate(context, candidate)
+                    || excludedPositions.some(
+                        (excluded: Position): boolean =>
+                            excluded.isEqual(candidate),
+                    )
+                ) {
+                    continue;
+                }
+                const distance = context.pathfinder.pathLength(
+                    context.gameMap,
+                    context.agentPosition,
+                    candidate,
+                    context.crates,
+                );
+                if (distance === undefined) {
+                    continue;
+                }
+                if (
+                    distance < selectedDistance
+                    || distance === selectedDistance
+                        && this.compareCoordinates(candidate, selected) < 0
+                ) {
+                    selected = candidate;
+                    selectedDistance = distance;
+                }
+            }
+        }
+        return selected;
+    }
+
+    private isOccupiedByCrate(
+        context: GridPositionSelectionContext,
+        position: Position,
+    ): boolean {
+        return [...context.crates.values()].some(
+            (crate: Position): boolean => crate.isEqual(position),
+        );
+    }
+
+    private compareCoordinates(
+        first: Position,
+        second: Position | undefined,
+    ): number {
+        if (!second) {
+            return -1;
+        }
+        return first.x - second.x || first.y - second.y;
+    }
 }
 
 /** Contract for assigning rendezvous cells to the two participating agents. */

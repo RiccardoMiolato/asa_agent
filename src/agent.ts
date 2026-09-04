@@ -14,6 +14,7 @@ import {
 import { CommittedDesireIntention, Intention, PickupClusterSnapshot, SearchIntention } from "./bdi/intentions.js";
 import { OPTION_TRAVERSABILITY, OptionEvaluationGraph, OptionEvaluator } from "./bdi/option_evaluator.js";
 import {
+    GridFormationMission,
     RENDEZVOUS_PARTICIPANT,
     RendezvousMission,
     type Mission,
@@ -35,6 +36,7 @@ import {
     type OptionSearchOutcome,
     PLAN_SEGMENT_EVENT,
 } from "./utils/_logging.js";
+import type { CellScoreEffect } from "./utils/_cell-score-effects.js";
 import type { BasePathfinder } from "./utils/astar.js";
 import { GameMap } from "./utils/map.js";
 import {
@@ -83,6 +85,7 @@ export enum AGENT_EXIT_REASON {
 export enum PLAN_BUILD_STATUS {
     PLANNED = "planned",
     SATISFIED = "satisfied",
+    COORDINATION_REQUESTED = "coordination-requested",
     TRANSIENTLY_BLOCKED = "transiently-blocked",
     INFEASIBLE = "infeasible",
 }
@@ -226,6 +229,7 @@ export class Agent {
         if(!this.useLLM)
             return;
 
+        this.rendezvousCoordinator.releaseWaitingGridFormations();
         this.logger.logMissionReceived({ senderName, message: msg });
         this.missionHandler?.addPendingMission(senderId, senderName, msg);
     }
@@ -272,6 +276,8 @@ export class Agent {
                         this.logger.logMissionActivated(mission.describe());
                         if (mission instanceof RendezvousMission) {
                             this.proposeRendezvous(mission);
+                        } else if (mission instanceof GridFormationMission) {
+                            this.considerGridFormation(mission);
                         }
                     }
                 }
@@ -306,6 +312,16 @@ export class Agent {
                 cycleBeliefChanges,
             );
 
+            if (
+                planStatus === PLAN_BUILD_STATUS.COORDINATION_REQUESTED
+            ) {
+                await this.rendezvousCoordinator
+                    .waitForGridFormationCommit();
+                deliberateImmediately = true;
+                nextCycleReason =
+                    DELIBERATION_CYCLE_REASON.RENDEZVOUS_STATE_CHANGED;
+                continue;
+            }
             if (planStatus === PLAN_BUILD_STATUS.TRANSIENTLY_BLOCKED) {
                 nextCycleReason =
                     DELIBERATION_CYCLE_REASON.TRANSIENT_BLOCKAGE_RETRY;
@@ -458,6 +474,20 @@ export class Agent {
 
         while (this.selectedDesireSequence.length > 0) {
             const bestDesire = this.selectedDesireSequence[0];
+            if (
+                bestDesire instanceof VisitCellDesire
+                && this.rendezvousCoordinator.commitSelectedGridFormation(
+                    bestDesire.missionId,
+                    bestDesire.targetCell,
+                )
+            ) {
+                this.selectedDesireSequence = [];
+                this.currentIntention = new CommittedDesireIntention(
+                    bestDesire,
+                );
+                this.replacePlan([]);
+                return PLAN_BUILD_STATUS.COORDINATION_REQUESTED;
+            }
             const actionBuild = await this.buildDesireActionResult(
                 bestDesire,
                 context,
@@ -577,6 +607,8 @@ export class Agent {
                 return "planned";
             case PLAN_BUILD_STATUS.SATISFIED:
                 return "satisfied";
+            case PLAN_BUILD_STATUS.COORDINATION_REQUESTED:
+                return "coordinating";
             case PLAN_BUILD_STATUS.TRANSIENTLY_BLOCKED:
                 return "transiently-blocked";
             case PLAN_BUILD_STATUS.INFEASIBLE:
@@ -643,6 +675,14 @@ export class Agent {
         if (nextDesire === undefined) {
             return false;
         }
+        if (
+            nextDesire instanceof VisitCellDesire
+            && this.rendezvousCoordinator.isGridFormationEffect(
+                nextDesire.missionId,
+            )
+        ) {
+            return false;
+        }
 
         this.pathfinder.clearPathLengthCache();
         const actionBuild = await this.buildDesireActionResult(
@@ -667,9 +707,18 @@ export class Agent {
         context: PlanningContext,
     ): Promise<DesireActionBuildResult> {
         const targetCell = desire.targetCell;
+        const navigationContext: PlanningContext = {
+            ...context,
+            cellScoreEffects: context.cellScoreEffects.filter(
+                (effect: CellScoreEffect): boolean =>
+                    !effect.requiresExplicitVisit
+                    || desire instanceof VisitCellDesire
+                        && desire.missionId === effect.id,
+            ),
+        };
         const navigation = await this.buildNavigationActions(
             targetCell,
-            context,
+            navigationContext,
         );
         if (navigation === undefined) {
             return {
@@ -739,8 +788,15 @@ export class Agent {
     private async buildSearchPlan(
         context: PlanningContext,
     ): Promise<PLAN_BUILD_STATUS> {
+        const searchContext: PlanningContext = {
+            ...context,
+            cellScoreEffects: context.cellScoreEffects.filter(
+                (effect: CellScoreEffect): boolean =>
+                    !effect.requiresExplicitVisit,
+            ),
+        };
         this.currentIntention = this.searchIntention;
-        const searchActions = this.searchIntention.buildActions(context);
+        const searchActions = this.searchIntention.buildActions(searchContext);
         if (searchActions.length > 0) {
             this.replacePlan(searchActions, this.searchIntention);
             return PLAN_BUILD_STATUS.PLANNED;
@@ -757,7 +813,7 @@ export class Agent {
         }
         const navigationActions = await this.buildPddlNavigationActions(
             searchTarget,
-            context,
+            searchContext,
         );
         if (navigationActions === undefined) {
             this.replacePlan([]);
@@ -886,6 +942,15 @@ export class Agent {
             bdiAgentTarget: mission.assignmentFor(
                 RENDEZVOUS_PARTICIPANT.BDI_AGENT,
             ).target,
+        });
+    }
+
+    private considerGridFormation(mission: GridFormationMission): void {
+        this.rendezvousCoordinator.considerGridFormation({
+            rendezvousId: mission.getId(),
+            reward: mission.reward,
+            llmAgentObjective: mission.llmAgentObjective,
+            bdiAgentObjective: mission.bdiAgentObjective,
         });
     }
 

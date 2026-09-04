@@ -12,6 +12,8 @@ export class CellScoreEffect {
         readonly score: number,
         readonly lifetime: SCORE_EFFECT_LIFETIME =
             SCORE_EFFECT_LIFETIME.ONE_SHOT,
+        /** Whether only its dedicated visit option may trigger this effect. */
+        readonly requiresExplicitVisit: boolean = false,
     ) { }
 
     isConsumable(): boolean {
@@ -48,7 +50,7 @@ export class CellScoreEffectEvaluator {
         return effects
             .map(
                 (effect: CellScoreEffect): string =>
-                    `${effect.id}@${effect.cell.x},${effect.cell.y}:${effect.score}:${effect.lifetime}`,
+                    `${effect.id}@${effect.cell.x},${effect.cell.y}:${effect.score}:${effect.lifetime}:${effect.requiresExplicitVisit}`,
             )
             .sort()
             .join("|");

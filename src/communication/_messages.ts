@@ -18,6 +18,11 @@ export enum PEER_MESSAGE_TYPE {
     HELLO_ACKNOWLEDGEMENT = "peer-hello-acknowledgement",
     RENDEZVOUS_ASSIGNMENT = "rendezvous-assignment",
     RENDEZVOUS_ACKNOWLEDGEMENT = "rendezvous-acknowledgement",
+    GRID_FORMATION_PROPOSAL = "grid-formation-proposal",
+    GRID_FORMATION_ACCEPTANCE = "grid-formation-acceptance",
+    GRID_FORMATION_RELEASE = "grid-formation-release",
+    GRID_FORMATION_RELEASE_ACKNOWLEDGEMENT =
+        "grid-formation-release-acknowledgement",
     RENDEZVOUS_ARRIVED = "rendezvous-arrived",
     RENDEZVOUS_ARRIVAL_ACKNOWLEDGEMENT =
         "rendezvous-arrival-acknowledgement",
@@ -41,6 +46,12 @@ interface BaseAgentCommunicationMessage {
 export interface AgentCommunicationPosition {
     readonly x: number;
     readonly y: number;
+}
+
+/** Serializable exact, parity, or wildcard position predicate. */
+export interface AgentCommunicationPositionObjective {
+    readonly x: number | "odd" | "even" | null;
+    readonly y: number | "odd" | "even" | null;
 }
 
 /** Announces one peer and requests proof that the other peer is reachable. */
@@ -77,6 +88,46 @@ export interface RendezvousAcknowledgementMessage
     readonly acknowledgedMessageId: AgentCommunicationMessageId;
 }
 
+/** Proposes two predicates while reserving the LLM agent's resolved target. */
+export interface GridFormationProposalMessage
+    extends BaseAgentCommunicationMessage {
+    readonly type: PEER_MESSAGE_TYPE.GRID_FORMATION_PROPOSAL;
+    readonly role: AGENT_ROLE.LLM;
+    readonly rendezvousId: string;
+    readonly reward: number;
+    readonly llmAgentTarget: AgentCommunicationPosition;
+    readonly llmAgentObjective: AgentCommunicationPositionObjective;
+    readonly bdiAgentObjective: AgentCommunicationPositionObjective;
+}
+
+/** Accepts a formation proposal with the BDI agent's locally closest cell. */
+export interface GridFormationAcceptanceMessage
+    extends BaseAgentCommunicationMessage {
+    readonly type: PEER_MESSAGE_TYPE.GRID_FORMATION_ACCEPTANCE;
+    readonly role: AGENT_ROLE.BDI;
+    readonly rendezvousId: string;
+    readonly acknowledgedMessageId: AgentCommunicationMessageId;
+    readonly bdiAgentTarget: AgentCommunicationPosition;
+}
+
+/** Releases both agents after mission control sends the green-light message. */
+export interface GridFormationReleaseMessage
+    extends BaseAgentCommunicationMessage {
+    readonly type: PEER_MESSAGE_TYPE.GRID_FORMATION_RELEASE;
+    readonly role: AGENT_ROLE.LLM;
+    readonly rendezvousId: string;
+}
+
+/** Confirms that the BDI peer consumed one formation release. */
+export interface GridFormationReleaseAcknowledgementMessage
+    extends BaseAgentCommunicationMessage {
+    readonly type:
+        PEER_MESSAGE_TYPE.GRID_FORMATION_RELEASE_ACKNOWLEDGEMENT;
+    readonly role: AGENT_ROLE.BDI;
+    readonly rendezvousId: string;
+    readonly acknowledgedMessageId: AgentCommunicationMessageId;
+}
+
 /** Reports that one participant is physically at its assigned cell. */
 export interface RendezvousArrivedMessage
     extends BaseAgentCommunicationMessage {
@@ -101,6 +152,10 @@ export type AgentCommunicationMessage =
     | PeerHelloAcknowledgementMessage
     | RendezvousAssignmentMessage
     | RendezvousAcknowledgementMessage
+    | GridFormationProposalMessage
+    | GridFormationAcceptanceMessage
+    | GridFormationReleaseMessage
+    | GridFormationReleaseAcknowledgementMessage
     | RendezvousArrivedMessage
     | RendezvousArrivalAcknowledgementMessage;
 
@@ -160,6 +215,69 @@ export class AgentCommunicationMessageFactory {
         return {
             ...AgentCommunicationMessageFactory.base(),
             type: PEER_MESSAGE_TYPE.RENDEZVOUS_ACKNOWLEDGEMENT,
+            role: AGENT_ROLE.BDI,
+            rendezvousId,
+            acknowledgedMessageId,
+        };
+    }
+
+    /** Proposes coordinate predicates while reserving the LLM target cell. */
+    static gridFormationProposal(
+        rendezvousId: string,
+        reward: number,
+        llmAgentTarget: AgentCommunicationPosition,
+        llmAgentObjective: AgentCommunicationPositionObjective,
+        bdiAgentObjective: AgentCommunicationPositionObjective,
+    ): GridFormationProposalMessage {
+        return {
+            ...AgentCommunicationMessageFactory.base(),
+            type: PEER_MESSAGE_TYPE.GRID_FORMATION_PROPOSAL,
+            role: AGENT_ROLE.LLM,
+            rendezvousId,
+            reward,
+            llmAgentTarget,
+            llmAgentObjective,
+            bdiAgentObjective,
+        };
+    }
+
+    /** Accepts one exact proposal with a locally selected BDI target. */
+    static gridFormationAcceptance(
+        rendezvousId: string,
+        acknowledgedMessageId: AgentCommunicationMessageId,
+        bdiAgentTarget: AgentCommunicationPosition,
+    ): GridFormationAcceptanceMessage {
+        return {
+            ...AgentCommunicationMessageFactory.base(),
+            type: PEER_MESSAGE_TYPE.GRID_FORMATION_ACCEPTANCE,
+            role: AGENT_ROLE.BDI,
+            rendezvousId,
+            acknowledgedMessageId,
+            bdiAgentTarget,
+        };
+    }
+
+    /** Sends the green light for one completed grid formation. */
+    static gridFormationRelease(
+        rendezvousId: string,
+    ): GridFormationReleaseMessage {
+        return {
+            ...AgentCommunicationMessageFactory.base(),
+            type: PEER_MESSAGE_TYPE.GRID_FORMATION_RELEASE,
+            role: AGENT_ROLE.LLM,
+            rendezvousId,
+        };
+    }
+
+    /** Confirms one exact green-light message. */
+    static gridFormationReleaseAcknowledgement(
+        rendezvousId: string,
+        acknowledgedMessageId: AgentCommunicationMessageId,
+    ): GridFormationReleaseAcknowledgementMessage {
+        return {
+            ...AgentCommunicationMessageFactory.base(),
+            type:
+                PEER_MESSAGE_TYPE.GRID_FORMATION_RELEASE_ACKNOWLEDGEMENT,
             role: AGENT_ROLE.BDI,
             rendezvousId,
             acknowledgedMessageId,
@@ -307,6 +425,94 @@ export class AgentCommunicationMessageParser {
             };
         }
         if (
+            value["type"] === PEER_MESSAGE_TYPE.GRID_FORMATION_PROPOSAL
+            && value["role"] === AGENT_ROLE.LLM
+            && AgentCommunicationMessageParser.isNonEmptyString(
+                value["rendezvousId"],
+            )
+            && AgentCommunicationMessageParser.isPositiveNumber(
+                value["reward"],
+            )
+            && AgentCommunicationMessageParser.isPosition(
+                value["llmAgentTarget"],
+            )
+            && AgentCommunicationMessageParser.isPositionObjective(
+                value["llmAgentObjective"],
+            )
+            && AgentCommunicationMessageParser.isPositionObjective(
+                value["bdiAgentObjective"],
+            )
+        ) {
+            return {
+                ...common,
+                type: PEER_MESSAGE_TYPE.GRID_FORMATION_PROPOSAL,
+                role: AGENT_ROLE.LLM,
+                rendezvousId: value["rendezvousId"],
+                reward: value["reward"],
+                llmAgentTarget: value["llmAgentTarget"],
+                llmAgentObjective: value["llmAgentObjective"],
+                bdiAgentObjective: value["bdiAgentObjective"],
+            };
+        }
+        if (
+            value["type"] === PEER_MESSAGE_TYPE.GRID_FORMATION_ACCEPTANCE
+            && value["role"] === AGENT_ROLE.BDI
+            && AgentCommunicationMessageParser.isNonEmptyString(
+                value["rendezvousId"],
+            )
+            && AgentCommunicationMessageParser.isNonEmptyString(
+                value["acknowledgedMessageId"],
+            )
+            && AgentCommunicationMessageParser.isPosition(
+                value["bdiAgentTarget"],
+            )
+        ) {
+            return {
+                ...common,
+                type: PEER_MESSAGE_TYPE.GRID_FORMATION_ACCEPTANCE,
+                role: AGENT_ROLE.BDI,
+                rendezvousId: value["rendezvousId"],
+                acknowledgedMessageId:
+                    value["acknowledgedMessageId"] as AgentCommunicationMessageId,
+                bdiAgentTarget: value["bdiAgentTarget"],
+            };
+        }
+        if (
+            value["type"] === PEER_MESSAGE_TYPE.GRID_FORMATION_RELEASE
+            && value["role"] === AGENT_ROLE.LLM
+            && AgentCommunicationMessageParser.isNonEmptyString(
+                value["rendezvousId"],
+            )
+        ) {
+            return {
+                ...common,
+                type: PEER_MESSAGE_TYPE.GRID_FORMATION_RELEASE,
+                role: AGENT_ROLE.LLM,
+                rendezvousId: value["rendezvousId"],
+            };
+        }
+        if (
+            value["type"]
+                === PEER_MESSAGE_TYPE.GRID_FORMATION_RELEASE_ACKNOWLEDGEMENT
+            && value["role"] === AGENT_ROLE.BDI
+            && AgentCommunicationMessageParser.isNonEmptyString(
+                value["rendezvousId"],
+            )
+            && AgentCommunicationMessageParser.isNonEmptyString(
+                value["acknowledgedMessageId"],
+            )
+        ) {
+            return {
+                ...common,
+                type:
+                    PEER_MESSAGE_TYPE.GRID_FORMATION_RELEASE_ACKNOWLEDGEMENT,
+                role: AGENT_ROLE.BDI,
+                rendezvousId: value["rendezvousId"],
+                acknowledgedMessageId:
+                    value["acknowledgedMessageId"] as AgentCommunicationMessageId,
+            };
+        }
+        if (
             value["type"] === PEER_MESSAGE_TYPE.RENDEZVOUS_ARRIVED
             && AgentCommunicationMessageParser.isNonEmptyString(
                 value["rendezvousId"],
@@ -369,6 +575,27 @@ export class AgentCommunicationMessageParser {
         return AgentCommunicationMessageParser.isRecord(value)
             && Number.isInteger(value["x"])
             && Number.isInteger(value["y"]);
+    }
+
+    private static isPositionObjective(
+        value: unknown,
+    ): value is AgentCommunicationPositionObjective {
+        return AgentCommunicationMessageParser.isRecord(value)
+            && AgentCommunicationMessageParser.isCoordinateObjective(
+                value["x"],
+            )
+            && AgentCommunicationMessageParser.isCoordinateObjective(
+                value["y"],
+            );
+    }
+
+    private static isCoordinateObjective(
+        value: unknown,
+    ): value is number | "odd" | "even" | null {
+        return value === null
+            || value === "odd"
+            || value === "even"
+            || typeof value === "number" && Number.isInteger(value);
     }
 
     private static isAgentRole(value: unknown): value is AGENT_ROLE {

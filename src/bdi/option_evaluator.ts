@@ -7,7 +7,8 @@ import {
 import { DeliveryTimingOptimizer } from "../_delivery-timing.js";
 import { PlanningContext } from "../planning.js";
 import { RewardDecayEstimator } from "../utils/_reward-decay.js";
-import type {
+import {
+    CellScoreEffectEvaluator,
     CellScoreEffect,
     CellScoreEffectId,
 } from "../utils/_cell-score-effects.js";
@@ -225,7 +226,7 @@ export class OptionEvaluator {
             const assessment = this.assessTraversability(
                 context,
                 agentPosition,
-                desire.targetCell,
+                desire,
                 remainingCellScoreEffects,
             );
 
@@ -508,23 +509,50 @@ export class OptionEvaluator {
     private assessTraversability(
         context: PlanningContext,
         startingPosition: Position,
-        targetPosition: Position,
+        desire: Desire,
         cellScoreEffects: readonly CellScoreEffect[],
     ): TraversabilityAssessment {
+        const targetPosition = desire.targetCell;
+        const applicableEffects = cellScoreEffects.filter(
+            (effect: CellScoreEffect): boolean =>
+                !effect.requiresExplicitVisit
+                || desire instanceof VisitCellDesire
+                    && desire.missionId === effect.id,
+        );
         const directPath = context.pathfinder.findMovementPath(
             context.gameMap,
             startingPosition,
             targetPosition,
             context.crates,
-            cellScoreEffects,
+            applicableEffects,
         );
         if (directPath.positions.length > 0) {
+            const alreadyAtTargetEffects = startingPosition.isEqual(
+                targetPosition,
+            )
+                ? CellScoreEffectEvaluator.triggeredAt(
+                    startingPosition,
+                    applicableEffects.filter(
+                        (effect: CellScoreEffect): boolean =>
+                            effect.requiresExplicitVisit,
+                    ),
+                    new Set<CellScoreEffectId>(),
+                )
+                : [];
             return {
                 traversability: OPTION_TRAVERSABILITY.DIRECT,
                 distance: directPath.movementSteps,
-                cellScore: directPath.cellScore,
-                triggeredCellEffectIds:
-                    directPath.triggeredCellEffectIds,
+                cellScore: directPath.cellScore
+                    + CellScoreEffectEvaluator.totalScore(
+                        alreadyAtTargetEffects,
+                    ),
+                triggeredCellEffectIds: [
+                    ...directPath.triggeredCellEffectIds,
+                    ...alreadyAtTargetEffects.map(
+                        (effect: CellScoreEffect): CellScoreEffectId =>
+                            effect.id,
+                    ),
+                ],
             };
         }
         if (context.crates.size === 0) {
@@ -541,7 +569,7 @@ export class OptionEvaluator {
             startingPosition,
             targetPosition,
             new Map<string, Position>(),
-            cellScoreEffects,
+            applicableEffects,
         );
         return crateRelaxedPath.positions.length === 0
             ? {

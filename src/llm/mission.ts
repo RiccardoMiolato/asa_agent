@@ -10,6 +10,10 @@ import {
 import { SCORE_EFFECT_LIFETIME } from "../_score-effect-lifetime.js";
 import { CellScoreEffect } from "../utils/_cell-score-effects.js";
 import { Position } from "../utils/position.js";
+import {
+    GridPositionObjective,
+    type GridPositionObjectiveDescription,
+} from "./tools/rendezvous/index.js";
 
 export type MissionId = string;
 export type MissionLevel = 1 | 2 | 3;
@@ -18,7 +22,8 @@ export type MissionType =
     | CellMissionType
     | "stack-size"
     | "parcel-score"
-    | "rendezvous";
+    | "rendezvous"
+    | "grid-formation";
 export type BonusType = "reward" | "penalty" | "multiplier";
 
 interface BaseMissionDescription {
@@ -70,12 +75,26 @@ export interface RendezvousMissionDescription extends BaseMissionDescription {
     readonly assignments: readonly RendezvousAssignment[];
 }
 
+/** One participant's coordinate predicate in a grid formation. */
+export interface GridFormationObjectiveDescription {
+    readonly participant: RENDEZVOUS_PARTICIPANT;
+    readonly objective: GridPositionObjectiveDescription;
+}
+
+/** Structured grid formation resolved independently by each participant. */
+export interface GridFormationMissionDescription extends BaseMissionDescription {
+    readonly type: "grid-formation";
+    readonly reward: number;
+    readonly objectives: readonly GridFormationObjectiveDescription[];
+}
+
 /** Immutable mission details exposed to logging and read-only observers. */
 export type MissionDescription =
     | CellMissionDescription
     | StackSizeMissionDescription
     | ParcelScoreMissionDescription
-    | RendezvousMissionDescription;
+    | RendezvousMissionDescription
+    | GridFormationMissionDescription;
 
 /** Base contract for every mission retained by the mission handler. */
 export abstract class Mission {
@@ -369,6 +388,42 @@ export class RendezvousMission extends Mission {
             maximumDistance: this.maximumDistance,
             reward: this.reward,
             assignments: this.assignments,
+        };
+    }
+}
+
+/** Joint level-3 formation whose peer resolves its own closest valid cell. */
+export class GridFormationMission extends Mission {
+    constructor(
+        id: MissionId,
+        readonly reward: number,
+        readonly llmAgentObjective: GridPositionObjective,
+        readonly bdiAgentObjective: GridPositionObjective,
+    ) {
+        super(id, 3, SCORE_EFFECT_LIFETIME.ONE_SHOT);
+    }
+
+    getType(): "grid-formation" {
+        return "grid-formation";
+    }
+
+    describe(): GridFormationMissionDescription {
+        return {
+            id: this.getId(),
+            level: this.getLevel(),
+            lifetime: this.getLifetime(),
+            type: this.getType(),
+            reward: this.reward,
+            objectives: [
+                {
+                    participant: RENDEZVOUS_PARTICIPANT.LLM_AGENT,
+                    objective: this.llmAgentObjective.describe(),
+                },
+                {
+                    participant: RENDEZVOUS_PARTICIPANT.BDI_AGENT,
+                    objective: this.bdiAgentObjective.describe(),
+                },
+            ],
         };
     }
 }

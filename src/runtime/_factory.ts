@@ -11,7 +11,10 @@ import {
     PeerHandshakeService,
 } from "../communication/index.js";
 import { MissionHandler } from "../llm/MissionHandler.js";
-import { PeerRendezvousCoordinator } from "../llm/tools/rendezvous/index.js";
+import {
+    PeerRendezvousCoordinator,
+    ReachableGridPositionSelector,
+} from "../llm/tools/rendezvous/index.js";
 import { ConsoleAgentLogger } from "../utils/_logging.js";
 import { AStarPathfinder } from "../utils/astar.js";
 import { ActionFactory } from "../utils/move.js";
@@ -40,10 +43,22 @@ export class AgentRuntimeFactory {
                 config.peerName,
                 communicationLogger,
             );
+        const gridPositionSelector = new ReachableGridPositionSelector();
         const rendezvousCoordinator = new PeerRendezvousCoordinator(
             communicationChannel,
             config.role,
             1_000,
+            (objective, currentPosition, excludedPositions) =>
+                gridPositionSelector.select(
+                    {
+                        gameMap: beliefs.map,
+                        agentPosition: currentPosition,
+                        crates: beliefs.crates,
+                        pathfinder,
+                    },
+                    objective,
+                    excludedPositions,
+                ),
         );
         const agent = new Agent(
             beliefs,

@@ -183,6 +183,25 @@ export class ConsoleAgentCommunicationLogger
                 return `✓ RENDEZVOUS ACCEPTED`
                     + `  mission ${message.rendezvousId}`
                     + `  ·  confirmation ${delivery} to ${peer}`;
+            case PEER_MESSAGE_TYPE.GRID_FORMATION_PROPOSAL:
+                return `\n◆ GRID FORMATION PROPOSED`
+                    + `  mission ${message.rendezvousId}`
+                    + `  ·  reward +${message.reward}`
+                    + `  ·  my cell (${message.llmAgentTarget.x}, ${message.llmAgentTarget.y})`
+                    + `  ·  ${delivery} to ${peer}`;
+            case PEER_MESSAGE_TYPE.GRID_FORMATION_ACCEPTANCE:
+                return `✓ GRID FORMATION ACCEPTED`
+                    + `  mission ${message.rendezvousId}`
+                    + `  ·  peer cell (${message.bdiAgentTarget.x}, ${message.bdiAgentTarget.y})`
+                    + `  ·  confirmation ${delivery} to ${peer}`;
+            case PEER_MESSAGE_TYPE.GRID_FORMATION_RELEASE:
+                return `\n◆ GRID FORMATION RELEASED`
+                    + `  mission ${message.rendezvousId}`
+                    + `  ·  ${delivery} to ${peer}`;
+            case PEER_MESSAGE_TYPE.GRID_FORMATION_RELEASE_ACKNOWLEDGEMENT:
+                return `✓ GRID FORMATION RELEASE CONFIRMED`
+                    + `  mission ${message.rendezvousId}`
+                    + `  ·  confirmation ${delivery} to ${peer}`;
             case PEER_MESSAGE_TYPE.RENDEZVOUS_ARRIVED:
                 return `\n◆ I ARRIVED`
                     + `  mission ${message.rendezvousId}`
@@ -213,6 +232,23 @@ export class ConsoleAgentCommunicationLogger
                     + `  ·  from ${peerId}`;
             case PEER_MESSAGE_TYPE.RENDEZVOUS_ACKNOWLEDGEMENT:
                 return `✓ PEER ACCEPTED RENDEZVOUS`
+                    + `  mission ${message.rendezvousId}`
+                    + `  ·  peer ${peerId}`;
+            case PEER_MESSAGE_TYPE.GRID_FORMATION_PROPOSAL:
+                return `\n◆ GRID FORMATION RECEIVED`
+                    + `  mission ${message.rendezvousId}`
+                    + `  ·  reward +${message.reward}`
+                    + `  ·  from ${peerId}`;
+            case PEER_MESSAGE_TYPE.GRID_FORMATION_ACCEPTANCE:
+                return `✓ PEER ACCEPTED GRID FORMATION`
+                    + `  mission ${message.rendezvousId}`
+                    + `  ·  peer cell (${message.bdiAgentTarget.x}, ${message.bdiAgentTarget.y})`;
+            case PEER_MESSAGE_TYPE.GRID_FORMATION_RELEASE:
+                return `\n◆ GRID FORMATION RELEASE RECEIVED`
+                    + `  mission ${message.rendezvousId}`
+                    + `  ·  from ${peerId}`;
+            case PEER_MESSAGE_TYPE.GRID_FORMATION_RELEASE_ACKNOWLEDGEMENT:
+                return `✓ PEER RELEASED FROM GRID FORMATION`
                     + `  mission ${message.rendezvousId}`
                     + `  ·  peer ${peerId}`;
             case PEER_MESSAGE_TYPE.RENDEZVOUS_ARRIVED:

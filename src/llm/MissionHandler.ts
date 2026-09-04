@@ -15,6 +15,7 @@ import {
     AvoidCellMission,
     BaseCellMission,
     DeliveryCellMission,
+    GridFormationMission,
     Mission,
     MoveToMission,
     ParcelScoreMission,
@@ -25,6 +26,7 @@ import {
 } from "./mission.js";
 import {
     BaseRendezvousPositionSelector,
+    GridPositionObjective,
     ReachableRendezvousPositionSelector,
     RendezvousObjective,
     type RendezvousPositionSelection,
@@ -120,8 +122,21 @@ interface PlanRendezvousToolCall {
     ];
 }
 
+interface PlanGridFormationToolCall {
+    readonly name: "plan_grid_formation";
+    readonly params: readonly [
+        llmAgentObjective: GridPositionObjective,
+        bdiAgentObjective: GridPositionObjective,
+        reward: number,
+    ];
+}
+
+type LevelThreeToolCall =
+    | PlanRendezvousToolCall
+    | PlanGridFormationToolCall;
+
 interface LevelThreeToolPlanningResult {
-    readonly tools: readonly PlanRendezvousToolCall[];
+    readonly tools: readonly LevelThreeToolCall[];
 }
 
 interface ChatMessage {
@@ -388,22 +403,12 @@ export class MissionHandler {
             return [];
         }
 
-        let objective: RendezvousObjective;
-        try {
-            objective = new RendezvousObjective(...tool.params);
-        } catch (error: unknown) {
-            console.error("Invalid level-3 rendezvous objective", error);
+        const mission = tool.name === "plan_rendezvous"
+            ? this.planRendezvous(context, tool)
+            : this.planGridFormation(tool);
+        if (!mission) {
             return [];
         }
-        const selection = this.rendezvousPositionSelector.select(
-            context,
-            objective,
-        );
-        if (!selection) {
-            return [];
-        }
-
-        const mission = this.createRendezvousMission(objective, selection);
         this.activeMissions.push(mission);
         return [mission];
     }
@@ -548,7 +553,7 @@ export class MissionHandler {
                 return undefined;
             }
 
-            const parsedTools: PlanRendezvousToolCall[] = [];
+            const parsedTools: LevelThreeToolCall[] = [];
             for (const tool of tools) {
                 const parsedTool = this.parseLevelThreeToolCall(tool);
                 if (!parsedTool) {
@@ -565,23 +570,37 @@ export class MissionHandler {
 
     private parseLevelThreeToolCall(
         value: unknown,
-    ): PlanRendezvousToolCall | undefined {
+    ): LevelThreeToolCall | undefined {
         if (!MissionHandler.isRecord(value)) {
             return undefined;
         }
+        const name = value["name"];
         const params = value["params"];
-        if (
-            value["name"] !== "plan_rendezvous"
-            || !Array.isArray(params)
-            || params.length !== 4
-            || !params.every(MissionHandler.isNumber)
-        ) {
+        if (!Array.isArray(params)) {
             return undefined;
         }
-        return {
-            name: "plan_rendezvous",
-            params: [params[0], params[1], params[2], params[3]],
-        };
+        if (name === "plan_rendezvous") {
+            return params.length === 4
+                && params.every(MissionHandler.isNumber)
+                ? {
+                    name,
+                    params: [params[0], params[1], params[2], params[3]],
+                }
+                : undefined;
+        }
+        if (name !== "plan_grid_formation" || params.length !== 3) {
+            return undefined;
+        }
+        const llmAgentObjective = GridPositionObjective.parse(params[0]);
+        const bdiAgentObjective = GridPositionObjective.parse(params[1]);
+        return llmAgentObjective
+            && bdiAgentObjective
+            && MissionHandler.isNumber(params[2])
+            ? {
+                name,
+                params: [llmAgentObjective, bdiAgentObjective, params[2]],
+            }
+            : undefined;
     }
 
     private executeLevelTwoTool(
@@ -682,6 +701,43 @@ export class MissionHandler {
             objective.reward,
             selection.llmAgentTarget,
             selection.bdiAgentTarget,
+        );
+        this.nextMissionId += 1;
+        return mission;
+    }
+
+    private planRendezvous(
+        context: PlanningContext,
+        tool: PlanRendezvousToolCall,
+    ): RendezvousMission | undefined {
+        let objective: RendezvousObjective;
+        try {
+            objective = new RendezvousObjective(...tool.params);
+        } catch (error: unknown) {
+            console.error("Invalid level-3 rendezvous objective", error);
+            return undefined;
+        }
+        const selection = this.rendezvousPositionSelector.select(
+            context,
+            objective,
+        );
+        return selection
+            ? this.createRendezvousMission(objective, selection)
+            : undefined;
+    }
+
+    private planGridFormation(
+        tool: PlanGridFormationToolCall,
+    ): GridFormationMission | undefined {
+        const [llmAgentObjective, bdiAgentObjective, reward] = tool.params;
+        if (!Number.isFinite(reward) || reward <= 0) {
+            return undefined;
+        }
+        const mission = new GridFormationMission(
+            `mission-${this.nextMissionId}`,
+            reward,
+            llmAgentObjective,
+            bdiAgentObjective,
         );
         this.nextMissionId += 1;
         return mission;

@@ -172,6 +172,24 @@ facts are order-independent: an agent that arrives first waits, while the
 second arrival completes the mission and wakes both planners for a fresh
 deliberation cycle. Assignment and pending-arrival messages are retried.
 
+Level-3 grid formations use coordinate predicates instead of preselecting every
+cell. Each axis can be an exact integer, `odd`, `even`, or unrestricted. The
+mission planner represents an unrestricted JSON coordinate as `null`; for
+example, an odd row is `{ "x": null, "y": "odd" }`, while an even column is
+`{ "x": "even", "y": null }`. The predicate remains abstract while the
+mission is merely an option. Immediately before every branch-and-bound
+deliberation, each peer resolves its own predicate against its latest position,
+map, and crate beliefs, choosing the safe reachable cell with the shortest
+actual path. A target is frozen only when that explicit formation option wins.
+The LLM peer then reserves its selected cell in a correlated
+`grid-formation-proposal`; the BDI peer deliberates independently, freezes a
+distinct local target only if its own formation option wins, and returns it in
+`grid-formation-acceptance`. Once accepted, the existing arrival barrier is
+reused, but both planners remain blocked after arrival. The next ordinary
+mission-control message acts as the green light: the LLM peer sends a
+correlated `grid-formation-release`, waits for its acknowledgement, and only
+then wakes both planners.
+
 For guaranteed listener registration before any server event, disable auto-connect, install the listeners, and connect explicitly:
 
 ```ts

@@ -47,6 +47,7 @@ export interface OptionPlanAttemptLog {
 export type OptionSearchOutcome =
     | "planned"
     | "satisfied"
+    | "coordinating"
     | "transiently-blocked"
     | "infeasible";
 
@@ -422,6 +423,8 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
             case "planned":
             case "satisfied":
                 return this.theme.success(status);
+            case "coordinating":
+                return this.theme.violet(status);
             case "transiently-blocked":
                 return this.theme.warning(status);
             case "infeasible":
@@ -456,6 +459,8 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
                 return "EXECUTABLE";
             case "satisfied":
                 return "ALREADY SATISFIED";
+            case "coordinating":
+                return "NEGOTIATING COORDINATION";
             case "transiently-blocked":
                 return "WAITING FOR TEMPORARY BLOCKAGE";
             case "infeasible":
@@ -515,6 +520,8 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
             case "rendezvous":
                 return `RENDEZVOUS near (${mission.center.x}, `
                     + `${mission.center.y}) within ${mission.maximumDistance}`;
+            case "grid-formation":
+                return "FORMATION at each agent's closest matching cell";
         }
     }
 
@@ -528,7 +535,10 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
             return `zero reward for parcels worth `
                 + `${mission.deliverLower ? ">" : "<"} ${mission.threshold}`;
         }
-        if (mission.type === "rendezvous") {
+        if (
+            mission.type === "rendezvous"
+            || mission.type === "grid-formation"
+        ) {
             return this.theme.violet(`+${mission.reward} joint points`);
         }
 
