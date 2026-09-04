@@ -19,6 +19,7 @@
     "test:handoff": "npm run build && node --test dist/src/_parcel-handoff.spec.js dist/src/_parcel-handoff-recovery.spec.js dist/src/_parcel-handoff-logging.spec.js",
     "test:pruning": "npm run build && node --test dist/src/_option-pruning.spec.js",
     "test:validation": "npm run build && node --test dist/src/_planner-validation.spec.js",
+    "test:llm-evaluation": "npm run build && node --test dist/src/_llm-mission-evaluation.spec.js",
     "ghost-map": "npm run build && npm run start"
   },
   "dependencies": {
