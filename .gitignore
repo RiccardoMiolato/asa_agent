@@ -45,3 +45,5 @@ report.tex
 *.spec.ts
 *-tests.ts
 
+# Reproducible experiments cited by the report.
+report/

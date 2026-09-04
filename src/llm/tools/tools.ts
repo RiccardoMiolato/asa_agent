@@ -3,6 +3,7 @@ import { GameMap } from "../../utils/map.js";
 import { Position } from "../../utils/position.js";
 import { TRIVIA_ANSWERING_RULES } from "../instructions/level_1.js";
 import { LLMClient, LLMMessage } from "../LLMClient.js";
+import { ArithmeticExpressionEvaluator } from "./_arithmetic-expression.js";
 
 async function answer_trivia(llmClient: LLMClient, question: string): Promise<string> {
     const message: LLMMessage = {
@@ -25,15 +26,10 @@ async function answer_trivia(llmClient: LLMClient, question: string): Promise<st
 }
 
 function math_eval(expression: string): number {
-    console.log(expression);
     try {
-        const result = Function(`"use strict"; return (${expression})`)();
-        if (typeof result !== 'number' || isNaN(result)) {
-            throw new Error('Invalid expression');
-        }
-        return result;
-    } catch (error) {
-        throw new Error('Error evaluating expression');
+        return ArithmeticExpressionEvaluator.evaluate(expression);
+    } catch {
+        throw new Error("Error evaluating arithmetic expression");
     }
 }
 

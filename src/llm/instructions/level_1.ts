@@ -1,5 +1,5 @@
 const TOOLS: Map<string, string> = new Map([
-    ["math_eval", "Evaluate arithmetic expressions and return the result."],
+    ["math_eval", "Evaluate expressions containing numbers, parentheses, and the +, -, *, /, %, and ** arithmetic operators."],
     ["move_to", "Tells the agent to go to a specific location in the map."],
     ["drop_at", "Tells the agent to drop parcels in a specific location of the map."],
     ["answer_trivia", "Given a trivia question, return the answer."],
@@ -11,7 +11,7 @@ const TOOLS_FUNCTION_DEFINITION: Map<string, string> = new Map();
 
 TOOLS_FUNCTION_DEFINITION.set("math_eval", `
 {
-  "params": [espression: string],
+  "params": [expression: string],
   "returns": number
 }
 `);
