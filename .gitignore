@@ -23,6 +23,8 @@ planning-as-a-service/
 .env
 .env.local
 .env.*.local
+.env.bdi
+.env.llm
 
 # IDE files
 .vscode/
