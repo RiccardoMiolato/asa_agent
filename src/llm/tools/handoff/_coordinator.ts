@@ -93,6 +93,7 @@ interface ParcelHandoffRecord {
     peerId: string | undefined;
     candidate: ParcelHandoffCandidate | undefined;
     requestMessage: ParcelHandoffRequestMessage | undefined;
+    statusMessage: ParcelHandoffStatusMessage | undefined;
     assignmentMessage: ParcelHandoffAssignmentMessage | undefined;
     readyMessage: ParcelHandoffReadyMessage | undefined;
     readyAcknowledged: boolean;
@@ -229,6 +230,21 @@ export class PeerParcelHandoffCoordinator
                 === context.agentId
         ) {
             this.setState(record, PARCEL_HANDOFF_STATE.WAITING_FOR_READY);
+        }
+        if (
+            this.localRole === AGENT_ROLE.LLM
+            && record.state === PARCEL_HANDOFF_STATE.PICKING
+        ) {
+            const assignedParcel = context.parcels.get(
+                record.candidate.parcelId,
+            );
+            if (
+                assignedParcel === undefined
+                || assignedParcel.carriedBy !== undefined
+            ) {
+                this.restartSelection(record);
+                return;
+            }
         }
         if (
             record.state === PARCEL_HANDOFF_STATE.WAITING_FOR_READY
@@ -464,15 +480,16 @@ export class PeerParcelHandoffCoordinator
         if (this.localRole !== AGENT_ROLE.BDI || !this.latestPosition) {
             return;
         }
-        if (this.record?.handoffId === message.handoffId) {
-            if (this.record.state === PARCEL_HANDOFF_STATE.WAITING_FOR_ASSIGNMENT) {
-                void this.channel.send(
-                    AgentCommunicationMessageFactory.parcelHandoffStatus(
-                        message.handoffId,
-                        message.messageId,
-                        this.latestPosition,
-                    ),
-                );
+        if (
+            this.record?.handoffId === message.handoffId
+            && this.record.requestMessage?.messageId === message.messageId
+        ) {
+            if (
+                this.record.state
+                    === PARCEL_HANDOFF_STATE.WAITING_FOR_ASSIGNMENT
+                && this.record.statusMessage
+            ) {
+                void this.channel.send(this.record.statusMessage);
             }
             return;
         }
@@ -482,14 +499,33 @@ export class PeerParcelHandoffCoordinator
             PARCEL_HANDOFF_STATE.WAITING_FOR_ASSIGNMENT,
         );
         this.record.peerId = peer.id;
-        void this.channel.send(
-            AgentCommunicationMessageFactory.parcelHandoffStatus(
+        this.record.requestMessage = message;
+        this.record.statusMessage = AgentCommunicationMessageFactory
+            .parcelHandoffStatus(
                 message.handoffId,
                 message.messageId,
                 this.latestPosition,
-            ),
+            );
+        void this.channel.send(
+            this.record.statusMessage,
         );
         this.publishStateChange();
+    }
+
+    /** Restarts negotiation when the assigned parcel disappears before pickup. */
+    private restartSelection(record: ParcelHandoffRecord): void {
+        record.candidate = undefined;
+        record.peerPosition = undefined;
+        record.statusMessage = undefined;
+        record.assignmentMessage = undefined;
+        record.readyMessage = undefined;
+        record.readyAcknowledged = false;
+        record.availableMessage = undefined;
+        record.peerCollected = false;
+        record.requestMessage = AgentCommunicationMessageFactory
+            .parcelHandoffRequest(record.handoffId, record.reward);
+        void this.channel.send(record.requestMessage);
+        this.setState(record, PARCEL_HANDOFF_STATE.WAITING_FOR_STATUS);
     }
 
     private handleStatus(
@@ -525,12 +561,16 @@ export class PeerParcelHandoffCoordinator
         ) {
             return;
         }
+        const requestMessage = this.record?.handoffId === message.handoffId
+            ? this.record.requestMessage
+            : undefined;
         const record = this.makeRecord(
             message.handoffId,
             message.reward,
             PARCEL_HANDOFF_STATE.MOVING_TO_STAGING,
         );
         record.peerId = peer.id;
+        record.requestMessage = requestMessage;
         record.candidate = this.candidateFromAssignment(message);
         record.assignmentMessage = message;
         this.record = record;
@@ -779,6 +819,7 @@ export class PeerParcelHandoffCoordinator
             peerId: undefined,
             candidate: undefined,
             requestMessage: undefined,
+            statusMessage: undefined,
             assignmentMessage: undefined,
             readyMessage: undefined,
             readyAcknowledged: false,

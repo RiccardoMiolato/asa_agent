@@ -1,0 +1,44 @@
+# Node.js dependencies
+node_modules/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# TypeScript build outputs
+dist/
+build/
+out/
+
+outputs/
+sas_plan
+planning-as-a-service/
+
+*pddl_server.sh
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDE files
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Agent modules
+AGENTS.md
+report.tex
+*.test.ts
+*.spec.ts
+*-tests.ts

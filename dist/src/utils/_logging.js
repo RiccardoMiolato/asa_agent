@@ -103,15 +103,28 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
                     + ` ${this.formatBeliefChange(change, search.agentId)}`);
             }
         }
-        lines.push(this.formatSection("CANDIDATE EVALUATION"));
+        if (search.activeParcelHandoff
+            && search.activeParcelHandoff.state !== "completed") {
+            const handoff = search.activeParcelHandoff;
+            lines.push(this.formatSection("ACTIVE PARCEL HANDOFF"), this.formatDetail("MISSION", handoff.handoffId), this.formatDetail("PHASE", this.formatParcelHandoffPhase(handoff.state)), this.formatDetail("PARCEL", handoff.parcelId ?? "awaiting selection"));
+        }
+        lines.push(this.formatSection("PARCEL ROUTE EVALUATION"));
         search.evaluationPasses.forEach((graph, index) => {
             const excluded = graph.excludedRootOptionIdentities.length > 0
                 ? graph.excludedRootOptionIdentities.join(", ")
                 : "none";
+            const selectedSequence = this.formatSelectedSequence(graph);
             lines.push("│", `│  ${this.theme.label(`PASS ${index + 1}`)}`
                 + `  ${this.formatCount(graph.nodes.length, "state")}`
                 + ` ${this.theme.muted("·")}`
-                + ` ${this.formatCount(graph.edges.length, "transition")}`, this.formatDetail("CHOSEN SEQUENCE", this.formatSelectedSequence(graph), 4), this.formatDetail("EXPECTED REWARD", graph.bestScore.toFixed(3), 4), this.formatDetail("COMPLETION TIME", `${graph.estimatedCompletionMilliseconds}ms`, 4), this.formatDetail("PREVIOUSLY REJECTED", excluded, 4));
+                + ` ${this.formatCount(graph.edges.length, "transition")}`, this.formatDetail("BEST PARCEL SEQUENCE", selectedSequence, 4));
+            if (selectedSequence !== "NONE") {
+                lines.push(this.formatDetail("EXPECTED REWARD", graph.bestScore.toFixed(3), 4), this.formatDetail("COMPLETION TIME", `${graph.estimatedCompletionMilliseconds}ms`, 4));
+            }
+            else {
+                lines.push(this.formatDetail("RESULT", "No profitable parcel route available", 4));
+            }
+            lines.push(this.formatDetail("PREVIOUSLY REJECTED", excluded, 4));
         });
         const rejectedAttempts = search.planningAttempts.filter((attempt) => attempt.result === "rejected");
         if (rejectedAttempts.length > 0) {
@@ -129,15 +142,20 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
                     + ` ${attempt.reason}`);
             });
         }
-        lines.push(this.formatSection("NEXT EXECUTABLE OBJECTIVE"));
-        lines.push(this.formatDetail("OBJECTIVE", this.theme.success(this.formatObjective(search.nextExecutableObjective))), this.formatDetail("ROLE", successfulAttempt
-            ? "first objective in the chosen sequence"
+        const executionSection = successfulAttempt
+            ? "SELECTED PARCEL PLAN"
             : search.planSource === "search"
-                ? "exploration fallback"
-                : "no executable objective"), this.formatDetail("PATHFINDER", successfulAttempt
+                ? "SELECTED FALLBACK"
+                : "EXECUTION DECISION";
+        lines.push(this.formatSection(executionSection));
+        lines.push(this.formatDetail("OBJECTIVE", this.theme.success(this.formatObjective(search.nextExecutableObjective))), this.formatDetail("PURPOSE", successfulAttempt
+            ? "Execute first step of best parcel sequence"
+            : search.planSource === "search"
+                ? "Search for new parcels"
+                : "No executable action available"), this.formatDetail("PLANNER", successfulAttempt
             ? this.formatPlanMethod(successfulAttempt.planner)
             : search.planSource === "search"
-                ? "EXPLORATION FALLBACK"
+                ? "EXPLORATION"
                 : "NONE"), this.formatDetail("STATUS", this.formatColoredPlanStatus(search.outcome)), this.formatDetail("QUEUED ACTIONS", `${search.plannedActions}`));
         if (successfulAttempt) {
             const { x, y } = successfulAttempt.targetPosition;
@@ -251,6 +269,15 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
                 return "NO EXECUTABLE PLAN";
         }
     }
+    formatParcelHandoffPhase(state) {
+        if (state === "waiting-for-status") {
+            return "NEGOTIATING · searching may continue";
+        }
+        if (state === "waiting-for-collection") {
+            return "TRANSFER IN PROGRESS · BDI collecting or delivering";
+        }
+        return state.replace(/-/g, " ").toUpperCase();
+    }
     formatPlanMethod(method) {
         switch (method) {
             case "already-at-target":
@@ -356,7 +383,7 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
                 ? nodesById.get(selectedEdge.targetNodeId)
                 : undefined;
         }
-        return actions.length > 0 ? actions.join(" -> ") : "STOP";
+        return actions.length > 0 ? actions.join(" -> ") : "NONE";
     }
     formatBeliefChange(change, ownAgentId) {
         switch (change.type) {

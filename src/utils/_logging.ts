@@ -3,6 +3,7 @@ import { BELIEF_CHANGE_TYPE, BeliefChange } from "../bdi/beliefs.js";
 import { DESIRE_TYPE } from "../bdi/desires.js";
 import { OPTION_TRAVERSABILITY, OptionEvaluationGraph, OptionEvaluationNode } from "../bdi/option_evaluator.js";
 import type { MissionDescription } from "../llm/mission.js";
+import type { ParcelHandoffSnapshot } from "../llm/tools/handoff/index.js";
 import { PlanningObjectiveDescription } from "../planning.js";
 import { TerminalTheme } from "../presentation/index.js";
 import { Position } from "./position.js";
@@ -77,6 +78,7 @@ export interface BranchAndBoundLog {
     readonly outcome: OptionSearchOutcome;
     readonly planSource: "option" | "search" | "none";
     readonly plannedActions: number;
+    readonly activeParcelHandoff: ParcelHandoffSnapshot | undefined;
     /** First route-validated objective whose actions are queued for execution. */
     readonly nextExecutableObjective: PlanningObjectiveDescription;
 }
@@ -242,13 +244,32 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
                 );
             }
         }
-        lines.push(this.formatSection("CANDIDATE EVALUATION"));
+        if (
+            search.activeParcelHandoff
+            && search.activeParcelHandoff.state !== "completed"
+        ) {
+            const handoff = search.activeParcelHandoff;
+            lines.push(
+                this.formatSection("ACTIVE PARCEL HANDOFF"),
+                this.formatDetail("MISSION", handoff.handoffId),
+                this.formatDetail(
+                    "PHASE",
+                    this.formatParcelHandoffPhase(handoff.state),
+                ),
+                this.formatDetail(
+                    "PARCEL",
+                    handoff.parcelId ?? "awaiting selection",
+                ),
+            );
+        }
+        lines.push(this.formatSection("PARCEL ROUTE EVALUATION"));
 
         search.evaluationPasses.forEach(
             (graph: OptionEvaluationGraph, index: number): void => {
                 const excluded = graph.excludedRootOptionIdentities.length > 0
                     ? graph.excludedRootOptionIdentities.join(", ")
                     : "none";
+                const selectedSequence = this.formatSelectedSequence(graph);
                 lines.push(
                     "│",
                     `│  ${this.theme.label(`PASS ${index + 1}`)}`
@@ -256,20 +277,32 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
                     + ` ${this.theme.muted("·")}`
                     + ` ${this.formatCount(graph.edges.length, "transition")}`,
                     this.formatDetail(
-                        "CHOSEN SEQUENCE",
-                        this.formatSelectedSequence(graph),
+                        "BEST PARCEL SEQUENCE",
+                        selectedSequence,
                         4,
                     ),
-                    this.formatDetail(
-                        "EXPECTED REWARD",
-                        graph.bestScore.toFixed(3),
+                );
+                if (selectedSequence !== "NONE") {
+                    lines.push(
+                        this.formatDetail(
+                            "EXPECTED REWARD",
+                            graph.bestScore.toFixed(3),
+                            4,
+                        ),
+                        this.formatDetail(
+                            "COMPLETION TIME",
+                            `${graph.estimatedCompletionMilliseconds}ms`,
+                            4,
+                        ),
+                    );
+                } else {
+                    lines.push(this.formatDetail(
+                        "RESULT",
+                        "No profitable parcel route available",
                         4,
-                    ),
-                    this.formatDetail(
-                        "COMPLETION TIME",
-                        `${graph.estimatedCompletionMilliseconds}ms`,
-                        4,
-                    ),
+                    ));
+                }
+                lines.push(
                     this.formatDetail("PREVIOUSLY REJECTED", excluded, 4),
                 );
             },
@@ -301,7 +334,12 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
             );
         }
 
-        lines.push(this.formatSection("NEXT EXECUTABLE OBJECTIVE"));
+        const executionSection = successfulAttempt
+            ? "SELECTED PARCEL PLAN"
+            : search.planSource === "search"
+                ? "SELECTED FALLBACK"
+                : "EXECUTION DECISION";
+        lines.push(this.formatSection(executionSection));
         lines.push(
             this.formatDetail(
                 "OBJECTIVE",
@@ -310,17 +348,17 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
                 ),
             ),
             this.formatDetail(
-                "ROLE",
+                "PURPOSE",
                 successfulAttempt
-                    ? "first objective in the chosen sequence"
+                    ? "Execute first step of best parcel sequence"
                     : search.planSource === "search"
-                        ? "exploration fallback"
-                        : "no executable objective",
+                        ? "Search for new parcels"
+                        : "No executable action available",
             ),
-            this.formatDetail("PATHFINDER", successfulAttempt
+            this.formatDetail("PLANNER", successfulAttempt
                 ? this.formatPlanMethod(successfulAttempt.planner)
                 : search.planSource === "search"
-                    ? "EXPLORATION FALLBACK"
+                    ? "EXPLORATION"
                     : "NONE"),
             this.formatDetail(
                 "STATUS",
@@ -474,6 +512,16 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
         }
     }
 
+    private formatParcelHandoffPhase(state: string): string {
+        if (state === "waiting-for-status") {
+            return "NEGOTIATING · searching may continue";
+        }
+        if (state === "waiting-for-collection") {
+            return "TRANSFER IN PROGRESS · BDI collecting or delivering";
+        }
+        return state.replace(/-/g, " ").toUpperCase();
+    }
+
     private formatPlanMethod(method: OptionPlanMethod): string {
         switch (method) {
             case "already-at-target":
@@ -597,7 +645,7 @@ export class ConsoleAgentLogger extends BaseAgentLogger {
                 ? nodesById.get(selectedEdge.targetNodeId)
                 : undefined;
         }
-        return actions.length > 0 ? actions.join(" -> ") : "STOP";
+        return actions.length > 0 ? actions.join(" -> ") : "NONE";
     }
 
     private formatBeliefChange(

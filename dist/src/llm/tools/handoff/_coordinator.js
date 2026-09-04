@@ -97,6 +97,15 @@ export class PeerParcelHandoffCoordinator extends BaseParcelHandoffCoordinator {
                 === context.agentId) {
             this.setState(record, PARCEL_HANDOFF_STATE.WAITING_FOR_READY);
         }
+        if (this.localRole === AGENT_ROLE.LLM
+            && record.state === PARCEL_HANDOFF_STATE.PICKING) {
+            const assignedParcel = context.parcels.get(record.candidate.parcelId);
+            if (assignedParcel === undefined
+                || assignedParcel.carriedBy !== undefined) {
+                this.restartSelection(record);
+                return;
+            }
+        }
         if (record.state === PARCEL_HANDOFF_STATE.WAITING_FOR_READY
             && record.readyMessage
             && this.receiverIsVerified(context, record)) {
@@ -284,16 +293,37 @@ export class PeerParcelHandoffCoordinator extends BaseParcelHandoffCoordinator {
         if (this.localRole !== AGENT_ROLE.BDI || !this.latestPosition) {
             return;
         }
-        if (this.record?.handoffId === message.handoffId) {
-            if (this.record.state === PARCEL_HANDOFF_STATE.WAITING_FOR_ASSIGNMENT) {
-                void this.channel.send(AgentCommunicationMessageFactory.parcelHandoffStatus(message.handoffId, message.messageId, this.latestPosition));
+        if (this.record?.handoffId === message.handoffId
+            && this.record.requestMessage?.messageId === message.messageId) {
+            if (this.record.state
+                === PARCEL_HANDOFF_STATE.WAITING_FOR_ASSIGNMENT
+                && this.record.statusMessage) {
+                void this.channel.send(this.record.statusMessage);
             }
             return;
         }
         this.record = this.makeRecord(message.handoffId, message.reward, PARCEL_HANDOFF_STATE.WAITING_FOR_ASSIGNMENT);
         this.record.peerId = peer.id;
-        void this.channel.send(AgentCommunicationMessageFactory.parcelHandoffStatus(message.handoffId, message.messageId, this.latestPosition));
+        this.record.requestMessage = message;
+        this.record.statusMessage = AgentCommunicationMessageFactory
+            .parcelHandoffStatus(message.handoffId, message.messageId, this.latestPosition);
+        void this.channel.send(this.record.statusMessage);
         this.publishStateChange();
+    }
+    /** Restarts negotiation when the assigned parcel disappears before pickup. */
+    restartSelection(record) {
+        record.candidate = undefined;
+        record.peerPosition = undefined;
+        record.statusMessage = undefined;
+        record.assignmentMessage = undefined;
+        record.readyMessage = undefined;
+        record.readyAcknowledged = false;
+        record.availableMessage = undefined;
+        record.peerCollected = false;
+        record.requestMessage = AgentCommunicationMessageFactory
+            .parcelHandoffRequest(record.handoffId, record.reward);
+        void this.channel.send(record.requestMessage);
+        this.setState(record, PARCEL_HANDOFF_STATE.WAITING_FOR_STATUS);
     }
     handleStatus(peer, message) {
         const record = this.record;
@@ -317,8 +347,12 @@ export class PeerParcelHandoffCoordinator extends BaseParcelHandoffCoordinator {
             && this.record.candidate?.parcelId === message.parcelId) {
             return;
         }
+        const requestMessage = this.record?.handoffId === message.handoffId
+            ? this.record.requestMessage
+            : undefined;
         const record = this.makeRecord(message.handoffId, message.reward, PARCEL_HANDOFF_STATE.MOVING_TO_STAGING);
         record.peerId = peer.id;
+        record.requestMessage = requestMessage;
         record.candidate = this.candidateFromAssignment(message);
         record.assignmentMessage = message;
         this.record = record;
@@ -490,6 +524,7 @@ export class PeerParcelHandoffCoordinator extends BaseParcelHandoffCoordinator {
             peerId: undefined,
             candidate: undefined,
             requestMessage: undefined,
+            statusMessage: undefined,
             assignmentMessage: undefined,
             readyMessage: undefined,
             readyAcknowledged: false,

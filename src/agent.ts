@@ -470,6 +470,7 @@ export class Agent {
 
                 if (
                     this.plan.isEmpty()
+                    && this.planOwner instanceof CommittedDesireIntention
                     && this.selectedDesireSequence.length > 0
                 ) {
                     if (
@@ -594,6 +595,11 @@ export class Agent {
         if (!instruction) {
             return undefined;
         }
+
+        // A committed handoff supersedes every ordinary option sequence. In
+        // particular, do not let a DROP left over from an interrupted
+        // PICK -> DROP sequence run after the handoff pickup completes.
+        this.selectedDesireSequence = [];
         const intention = new ParcelHandoffIntention(instruction);
         this.currentIntention = intention;
 
@@ -676,6 +682,7 @@ export class Agent {
             outcome: this.optionSearchOutcome(planStatus),
             planSource: this.optionPlanSource(trace, planStatus),
             plannedActions: this.plan.size(),
+            activeParcelHandoff: this.parcelHandoffCoordinator.snapshot(),
             nextExecutableObjective: this.currentIntention.describe(),
         };
         this.logger.logBranchAndBound(log);
